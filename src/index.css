@@ -1,0 +1,736 @@
+/* ============================================================================
+   RightPath UI — Advanced Fluid Enterprise Styles
+   Borderless · Depth-driven · Continuous surfaces · Future-ready
+   ============================================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================================
+   Base Layer — Reset, Typography, Global Defaults
+   ============================================================================ */
+@layer base {
+  * {
+    @apply border-[var(--border)];
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-[var(--background)] text-[var(--text)] transition-colors duration-normal;
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    font-size: 14px;
+    line-height: 1.6;
+    letter-spacing: -0.006em;
+  }
+
+  /* Typography Hierarchy */
+  h1, h2, h3, h4 {
+    font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+    @apply font-semibold;
+    text-wrap: balance;
+  }
+
+  h1 { @apply text-heading-1; }
+  h2 { @apply text-heading-2; }
+  h3 { @apply text-heading-3; }
+  h4 { @apply text-heading-4; }
+  h5, h6 { @apply font-semibold text-body-lg; }
+
+  p {
+    @apply leading-relaxed;
+    text-wrap: pretty;
+  }
+
+  /* Selection — green tinted */
+  ::selection {
+    background: rgba(16, 185, 129, 0.2);
+    color: inherit;
+  }
+
+  html:not(.dark) ::selection {
+    background: rgba(22, 163, 74, 0.18);
+  }
+
+  /* Focus Visible */
+  :focus-visible {
+    outline: 2px solid var(--borderFocus, var(--accentPrimary, #10b981));
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Reduced Motion */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+/* ============================================================================
+   Component Layer — Reusable Patterns
+   ============================================================================ */
+@layer components {
+  /* ------------------------------------------------------------------
+     Glassmorphism
+     ------------------------------------------------------------------ */
+  .glass {
+    background: rgba(255, 255, 255, 0.03);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .glass-light {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+  }
+
+  .glass-subtle {
+    background: rgba(255, 255, 255, 0.02);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+  }
+
+  /* ------------------------------------------------------------------
+     Gradient Utilities
+     ------------------------------------------------------------------ */
+  .gradient-text {
+    background: var(--gradientBrand);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .gradient-brand {
+    background: var(--gradientBrand);
+  }
+
+  .gradient-button {
+    background: var(--gradientButton);
+  }
+
+  .gradient-premium {
+    background: var(--gradientPremium, linear-gradient(135deg, #059669 0%, #10b981 40%, #14b8a6 70%, #06b6d4 100%));
+  }
+
+  .gradient-subtle {
+    background: var(--gradientSubtle);
+  }
+
+  .gradient-mesh {
+    background:
+      radial-gradient(at 20% 80%, rgba(16, 185, 129, 0.12) 0%, transparent 50%),
+      radial-gradient(at 80% 20%, rgba(20, 184, 166, 0.08) 0%, transparent 50%),
+      radial-gradient(at 50% 50%, rgba(6, 182, 212, 0.04) 0%, transparent 50%);
+  }
+
+  html:not(.dark) .gradient-mesh {
+    background:
+      radial-gradient(at 20% 80%, rgba(22, 163, 74, 0.08) 0%, transparent 50%),
+      radial-gradient(at 80% 20%, rgba(13, 148, 136, 0.06) 0%, transparent 50%),
+      radial-gradient(at 50% 50%, rgba(8, 145, 178, 0.03) 0%, transparent 50%);
+  }
+
+  /* ------------------------------------------------------------------
+     Card Variants
+     ------------------------------------------------------------------ */
+  .card-interactive {
+    @apply transition-all duration-normal;
+    &:hover {
+      transform: translateY(-2px);
+      box-shadow: var(--shadowElevated);
+    }
+  }
+
+  .card-selected {
+    border-color: var(--accentPrimary, var(--primary));
+    box-shadow: var(--glowPrimary);
+  }
+
+  /* ------------------------------------------------------------------
+     Backdrop for Modals
+     ------------------------------------------------------------------ */
+  .backdrop-blur-overlay {
+    background: var(--backdropBg, rgba(0, 0, 0, 0.6));
+    backdrop-filter: blur(var(--backdropBlur, 4px));
+    -webkit-backdrop-filter: blur(var(--backdropBlur, 4px));
+  }
+
+  /* ------------------------------------------------------------------
+     Focus Ring Utility
+     ------------------------------------------------------------------ */
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2;
+    --tw-ring-color: var(--borderFocus, var(--accentPrimary, #10b981));
+    --tw-ring-offset-color: var(--background, #0c0e0d);
+  }
+
+  /* ------------------------------------------------------------------
+     Status Dot
+     ------------------------------------------------------------------ */
+  .status-dot {
+    @apply inline-block w-2 h-2 rounded-full flex-shrink-0;
+  }
+  .status-dot-active { @apply bg-[var(--success)]; }
+  .status-dot-pending { @apply bg-[var(--warning)]; }
+  .status-dot-error { @apply bg-[var(--error)]; }
+  .status-dot-inactive { @apply bg-[var(--textQuaternary, var(--textTertiary))]; }
+
+  /* ------------------------------------------------------------------
+     Overline Label
+     ------------------------------------------------------------------ */
+  .overline {
+    @apply text-overline uppercase tracking-widest;
+    color: var(--textQuaternary, var(--textTertiary));
+  }
+
+  /* ====================================================================
+     FLUID LAYOUT SYSTEM
+     Canvas → Sidebar → Navbar → Content as one cohesive surface.
+     NO hard boxes. NO visible borders. Depth through layering and glow.
+     ==================================================================== */
+
+  /* ------------------------------------------------------------------
+     Layout Canvas — the continuous background
+     ------------------------------------------------------------------ */
+  .layout-canvas {
+    background-color: var(--bgCanvas, var(--background));
+    position: relative;
+    overflow-x: hidden;
+  }
+
+  /* Ambient glow — soft radial gradients that give the canvas life */
+  .layout-ambient {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.5;
+    background:
+      radial-gradient(ellipse 60% 50% at 0% 0%, rgba(16, 185, 129, 0.06) 0%, transparent 70%),
+      radial-gradient(ellipse 40% 60% at 100% 100%, rgba(20, 184, 166, 0.03) 0%, transparent 70%);
+    transition: opacity 0.6s ease;
+  }
+
+  html:not(.dark) .layout-ambient {
+    opacity: 0.3;
+    background:
+      radial-gradient(ellipse 60% 50% at 0% 0%, rgba(22, 163, 74, 0.04) 0%, transparent 70%),
+      radial-gradient(ellipse 40% 60% at 100% 100%, rgba(13, 148, 136, 0.02) 0%, transparent 70%);
+  }
+
+  /* ------------------------------------------------------------------
+     Layout Content — main content area
+     ------------------------------------------------------------------ */
+  .layout-content {
+    position: relative;
+    z-index: 1;
+    min-height: 100vh;
+    padding: 80px 28px 32px 28px;
+    transition: margin-left 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @media (max-width: 1024px) {
+    .layout-content {
+      padding: 80px 16px 24px 16px;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .layout-content {
+      padding: 72px 12px 20px 12px;
+    }
+  }
+
+  /* ------------------------------------------------------------------
+     Sidebar Surface — Navigation Surface (NOT a card)
+     Borderless. Depth through tonal background and soft glow.
+     Feels like a seamless part of the screen, not a boxed container.
+     ------------------------------------------------------------------ */
+  .sidebar-surface {
+    background: var(--sidebarBg);
+    border-right: none;
+    position: relative;
+    z-index: 50;
+  }
+
+  /* Hover-preview state — sidebar is temporarily expanded, not pinned */
+  .sidebar-surface.sidebar-preview {
+    box-shadow:
+      6px 0 24px -4px rgba(0, 0, 0, 0.08),
+      1px 0 0 rgba(16, 185, 129, 0.06);
+  }
+
+  .dark .sidebar-surface.sidebar-preview {
+    box-shadow:
+      6px 0 32px -4px rgba(0, 0, 0, 0.3),
+      1px 0 0 rgba(16, 185, 129, 0.08);
+  }
+
+  /* Subtle depth separation — soft shadow instead of border */
+  .sidebar-surface::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: -6px;
+    bottom: 0;
+    width: 6px;
+    background: linear-gradient(
+      to right,
+      rgba(0, 0, 0, 0.04) 0%,
+      transparent 100%
+    );
+    pointer-events: none;
+  }
+
+  .dark .sidebar-surface::after {
+    background: linear-gradient(
+      to right,
+      rgba(0, 0, 0, 0.15) 0%,
+      transparent 100%
+    );
+  }
+
+  /* Top ambient glow inside sidebar — gives it life */
+  .sidebar-surface::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 180px;
+    background: radial-gradient(
+      ellipse 100% 100% at 50% 0%,
+      var(--sidebarGlow, rgba(16, 185, 129, 0.06)) 0%,
+      transparent 70%
+    );
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  html:not(.dark) .sidebar-surface::before {
+    background: radial-gradient(
+      ellipse 100% 100% at 50% 0%,
+      rgba(22, 163, 74, 0.04) 0%,
+      transparent 70%
+    );
+  }
+
+  /* Logo mark glow */
+  .sidebar-logo-mark {
+    box-shadow: 0 2px 12px rgba(16, 185, 129, 0.25);
+    transition: box-shadow 0.3s ease;
+  }
+
+  .sidebar-logo-mark:hover {
+    box-shadow: 0 4px 20px rgba(16, 185, 129, 0.35);
+  }
+
+  html:not(.dark) .sidebar-logo-mark {
+    box-shadow: 0 2px 12px rgba(22, 163, 74, 0.2);
+  }
+
+  /* ------------------------------------------------------------------
+     Sidebar Nav Items — NO borders, NO separators
+     Active state = color + glow + depth (background fill)
+     Hover state = gentle background shift + subtle motion
+     ------------------------------------------------------------------ */
+  .sidebar-nav-item {
+    position: relative;
+    border: none;
+    outline: none;
+    transition:
+      background-color 200ms cubic-bezier(0.22, 1, 0.36, 1),
+      color 150ms ease,
+      transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .sidebar-nav-item:hover:not(.sidebar-nav-active) {
+    background-color: var(--sidebarItemHover);
+  }
+
+  /* Slide nudge only when expanded (full-width items) */
+  .sidebar-nav-item.w-full:hover:not(.sidebar-nav-active) {
+    transform: translateX(2px);
+  }
+
+  /* Subtle scale for collapsed circular items */
+  .sidebar-nav-item.rounded-full:hover:not(.sidebar-nav-active) {
+    transform: scale(1.08);
+  }
+
+  /* Active state — filled background with glow. No border. */
+  .sidebar-nav-active {
+    background: var(--sidebarItemActive);
+    box-shadow:
+      inset 0 0 0 1px rgba(16, 185, 129, 0.08),
+      0 0 16px var(--sidebarGlow, rgba(16, 185, 129, 0.06));
+  }
+
+  html:not(.dark) .sidebar-nav-active {
+    background: var(--sidebarItemActive);
+    box-shadow:
+      inset 0 0 0 1px rgba(22, 163, 74, 0.06),
+      0 0 12px rgba(22, 163, 74, 0.04);
+  }
+
+  /* ------------------------------------------------------------------
+     Sidebar User Card — barely there, fluid surface
+     ------------------------------------------------------------------ */
+  .sidebar-user-card {
+    background: var(--sidebarBgSubtle, var(--bgSubtle, var(--surface1)));
+    border: none;
+    transition: background-color 200ms ease;
+  }
+
+  .sidebar-user-card:hover {
+    background: var(--sidebarItemHover, var(--bgOverlay));
+  }
+
+  /* Collapse button — blends into sidebar */
+  .sidebar-collapse-btn {
+    background: transparent;
+    border: none;
+  }
+
+  .sidebar-collapse-btn:hover {
+    background: var(--sidebarItemHover, var(--bgOverlay));
+  }
+
+  /* ------------------------------------------------------------------
+     Navbar Surface — Floating header
+     Transparent by default. On scroll: soft blur, NO hard border.
+     Feels like part of the same system as the sidebar.
+     ------------------------------------------------------------------ */
+  .navbar-surface {
+    background: transparent;
+    border-bottom: none;
+  }
+
+  /* On scroll: frosted glass appearance with soft shadow, NO border */
+  .navbar-scrolled {
+    background: color-mix(in srgb, var(--navbarBg) 75%, transparent);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    box-shadow: 0 1px 12px rgba(0, 0, 0, 0.04);
+    border-bottom: none;
+  }
+
+  .dark .navbar-scrolled {
+    background: color-mix(in srgb, var(--navbarBg) 70%, transparent);
+    box-shadow: 0 1px 16px rgba(0, 0, 0, 0.12);
+  }
+
+  @supports not (background: color-mix(in srgb, red 50%, blue)) {
+    .navbar-scrolled {
+      background: var(--navbarBg);
+      opacity: 0.95;
+    }
+  }
+
+  /* ------------------------------------------------------------------
+     Navbar Action Buttons — ghost buttons with soft hover
+     ------------------------------------------------------------------ */
+  .navbar-action-btn {
+    @apply flex items-center gap-1 px-2.5 py-2 rounded-xl transition-all duration-200;
+    color: var(--textSecondary);
+    border: none;
+  }
+
+  .navbar-action-btn:hover {
+    background: var(--bgOverlay, var(--surface1));
+    color: var(--text);
+    transform: translateY(-1px);
+  }
+
+  .navbar-action-btn:active {
+    transform: translateY(0);
+  }
+
+  /* ------------------------------------------------------------------
+     Dropdown Menus — floating panels, soft shadows
+     ------------------------------------------------------------------ */
+  .dropdown-menu {
+    position: absolute;
+    background: var(--bgElevated, var(--cardBg));
+    border: 1px solid var(--borderMuted, transparent);
+    border-radius: 16px;
+    box-shadow: var(--shadowFloating, var(--shadowLg));
+    z-index: 60;
+    overflow: hidden;
+    animation: scale-in 150ms cubic-bezier(0.22, 1, 0.36, 1);
+    transform-origin: top right;
+  }
+
+  .dark .dropdown-menu {
+    backdrop-filter: blur(16px) saturate(150%);
+    -webkit-backdrop-filter: blur(16px) saturate(150%);
+    background: color-mix(in srgb, var(--bgElevated, var(--cardBg)) 90%, transparent);
+    border-color: rgba(255, 255, 255, 0.04);
+  }
+
+  @supports not (background: color-mix(in srgb, red 50%, blue)) {
+    .dark .dropdown-menu {
+      background: var(--bgElevated, var(--cardBg));
+    }
+  }
+
+  .dropdown-item {
+    @apply w-full px-4 py-2.5 text-left text-[0.8125rem] flex items-center gap-2.5 transition-all duration-150;
+    color: var(--text);
+    border: none;
+  }
+
+  .dropdown-item:hover {
+    background: var(--bgOverlay, var(--surface1));
+  }
+
+  .dropdown-item-active {
+    background: var(--bgSubtle, var(--surface1));
+    color: var(--accentPrimary, var(--primary));
+  }
+}
+
+/* ============================================================================
+   Utility Layer — Atomic Utilities
+   ============================================================================ */
+@layer utilities {
+  /* ------------------------------------------------------------------
+     Surface Backgrounds
+     ------------------------------------------------------------------ */
+  .surface-canvas { background-color: var(--bgCanvas, var(--background)); }
+  .surface-default { background-color: var(--bgDefault, var(--background)); }
+  .surface-subtle { background-color: var(--bgSubtle, var(--surface1)); }
+  .surface-muted { background-color: var(--bgMuted, var(--surface1)); }
+  .surface-elevated { background-color: var(--bgElevated, var(--surface2)); }
+  .surface-overlay { background-color: var(--bgOverlay, var(--surface2)); }
+  .surface-wash { background-color: var(--bgWash, var(--surface3)); }
+
+  /* Backward compat */
+  .surface-1 { background-color: var(--surface1); }
+  .surface-2 { background-color: var(--surface2); }
+  .surface-3 { background-color: var(--surface3); }
+  .card-bg { background-color: var(--cardBg); }
+
+  /* ------------------------------------------------------------------
+     Text Colors
+     ------------------------------------------------------------------ */
+  .text-primary { color: var(--textPrimary, var(--text)); }
+  .text-secondary { color: var(--textSecondary); }
+  .text-tertiary { color: var(--textTertiary); }
+  .text-quaternary { color: var(--textQuaternary, var(--textTertiary)); }
+  .text-inverse { color: var(--textInverse, #ffffff); }
+
+  /* ------------------------------------------------------------------
+     Tabular Numbers
+     ------------------------------------------------------------------ */
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ------------------------------------------------------------------
+     Shimmer Skeleton
+     ------------------------------------------------------------------ */
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      var(--bgSubtle, var(--surface2)) 25%,
+      var(--bgOverlay, var(--surface3)) 50%,
+      var(--bgSubtle, var(--surface2)) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 2s linear infinite;
+  }
+
+  /* ------------------------------------------------------------------
+     Scrollbar Styling
+     ------------------------------------------------------------------ */
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: var(--scrollbarThumb, var(--border));
+    border-radius: 4px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbarThumbHover, var(--borderHover));
+  }
+
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* ------------------------------------------------------------------
+     Truncation
+     ------------------------------------------------------------------ */
+  .truncate-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .truncate-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* ------------------------------------------------------------------
+     Interactive States
+     ------------------------------------------------------------------ */
+  .hover-lift {
+    @apply transition-transform duration-normal;
+    &:hover {
+      transform: translateY(-2px);
+    }
+  }
+
+  .press-scale {
+    @apply transition-transform duration-instant;
+    &:active {
+      transform: scale(0.97);
+    }
+  }
+
+  /* ------------------------------------------------------------------
+     Stagger Animation Delays
+     ------------------------------------------------------------------ */
+  .stagger-1 { animation-delay: 30ms; }
+  .stagger-2 { animation-delay: 60ms; }
+  .stagger-3 { animation-delay: 90ms; }
+  .stagger-4 { animation-delay: 120ms; }
+  .stagger-5 { animation-delay: 150ms; }
+  .stagger-6 { animation-delay: 180ms; }
+  .stagger-7 { animation-delay: 210ms; }
+  .stagger-8 { animation-delay: 240ms; }
+
+  /* ------------------------------------------------------------------
+     Content Width Constraint
+     ------------------------------------------------------------------ */
+  .content-container {
+    @apply max-w-content mx-auto px-6;
+  }
+
+  @media (max-width: 768px) {
+    .content-container {
+      @apply px-4;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .content-container {
+      @apply px-3;
+    }
+  }
+}
+
+/* ============================================================================
+   Exam Lockdown — disable text selection except inside code editor
+   ============================================================================ */
+.exam-lockdown {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.exam-lockdown .monaco-editor,
+.exam-lockdown .monaco-editor * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* ============================================================================
+   Interview Lockdown — disable text selection
+   ============================================================================ */
+.interview-lockdown {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ============================================================================
+   AI Avatar Animations
+   ============================================================================ */
+@keyframes avatar-blink {
+  0%, 90%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0.1); }
+}
+
+@keyframes avatar-breathe {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes avatar-pulse-ring {
+  0% { transform: scale(0.9); opacity: 0.6; }
+  50% { transform: scale(1.05); opacity: 0.3; }
+  100% { transform: scale(0.9); opacity: 0.6; }
+}
+
+.avatar-pulse-ring {
+  animation: avatar-pulse-ring 1.5s ease-in-out infinite;
+}
+
+/* Mouth states */
+.avatar-mouth-idle {
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.avatar-mouth-open {
+  width: 14px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.avatar-mouth-wide {
+  width: 16px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.avatar-mouth-thinking {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.avatar-mouth-listening {
+  width: 16px;
+  height: 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.7);
+  transform: scaleX(1.1);
+}

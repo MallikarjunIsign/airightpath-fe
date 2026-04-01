@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(npm run build:*)",
+      "Bash(curl:*)",
+      "mcp__ide__getDiagnostics",
+      "Bash(./mvnw clean:*)",
+      "Bash(chmod:*)",
+      "Bash(xxd:*)",
+      "Bash(npx vite build:*)",
+      "WebSearch",
+      "WebFetch(domain:support.hackerrank.com)",
+      "WebFetch(domain:support.testgorilla.com)",
+      "WebFetch(domain:help.imocha.io)",
+      "WebFetch(domain:customersupport.hackerrank.com)",
+      "Bash(python3:*)",
+      "Bash(npm install:*)",
+      "Bash(mvn compile:*)",
+      "Bash(java -version:*)",
+      "Bash(mvn clean compile:*)",
+      "Bash(lsof:*)",
+      "Bash(kill:*)",
+      "Bash(mvn spring-boot:run:*)",
+      "Bash(xargs cat:*)",
+      "Bash(wc -l:*)",
+      "Bash(./mvnw compile:*)",
+      "Bash(\"/Users/isigntech/Pavan - Isigntech/New/rightpath-be/mvnw\" -f \"/Users/isigntech/Pavan - Isigntech/New/rightpath-be/pom.xml\" compile)",
+      "Bash(ls:*)",
+      "Bash(node -e:*)"
+    ]
+  }
+}
