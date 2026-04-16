@@ -33,7 +33,7 @@ import { useQuestionTimer } from '@/hooks/useQuestionTimer';
 import { useMediaRecorder } from '@/hooks/useMediaRecorder';
 import { useScreenRecorder } from '@/hooks/useScreenRecorder';
 import { useFullscreen } from '@/hooks/useFullscreen';
-import { usePageVisibility } from '@/hooks/usePageVisibility';
+// import { usePageVisibility } from '@/hooks/usePageVisibility';
 import { useFaceDetection } from '@/hooks/useFaceDetection';
 import { useDevToolsDetection } from '@/hooks/useDevToolsDetection';
 import { useSpeechSynthesis } from '@/hooks/useSpeechSynthesis';
@@ -50,6 +50,8 @@ import { ROUTES } from '@/config/routes';
 import { formatTimer } from '@/utils/format.utils';
 import { interviewService } from '@/services/interview.service';
 import type { InterviewSchedule } from '@/types/interview.types';
+import { Play } from 'lucide-react';
+
 
 type PostCompletionStep = 'ending' | 'uploading-screen' | 'done' | null;
 
@@ -66,6 +68,9 @@ export function InterviewPage() {
 
   // Voice interview hook (main orchestrator)
   const voiceInterview = useVoiceInterview();
+
+  const [compileOutput, setCompileOutput] = useState<string>('');
+  const [compiling, setCompiling] = useState(false);
 
   // Question answer timeout timer
   const questionTimer = useQuestionTimer({
@@ -84,7 +89,7 @@ export function InterviewPage() {
   });
 
   // Proctoring warnings (local tracking for display)
-  const [tabWarnings, setTabWarnings] = useState(0);
+  // const [tabWarnings, setTabWarnings] = useState(0);
 
   // Confirmation dialog state
   const [showEndConfirm, setShowEndConfirm] = useState(false);
@@ -153,16 +158,16 @@ export function InterviewPage() {
   });
 
   // Page visibility / tab switch detection
-  usePageVisibility({
-    onHidden: () => {
-      setTabWarnings((prev) => prev + 1);
-      showToast('Tab switch detected. Please stay on this tab.', 'warning');
-      voiceInterview.sendProctoringEvent('tab_switch', 'Tab switched');
-      if (!voiceInterview.isWsConnected) {
-        showToast('Connection lost, tab-switch event will be sent when reconnected.', 'info');
-      }
-    },
-  });
+  // usePageVisibility({
+  //   onHidden: () => {
+  //     setTabWarnings((prev) => prev + 1);
+  //     showToast('Tab switch detected. Please stay on this tab.', 'warning');
+  //     voiceInterview.sendProctoringEvent('tab_switch', 'Tab switched');
+  //     if (!voiceInterview.isWsConnected) {
+  //       showToast('Connection lost, tab-switch event will be sent when reconnected.', 'info');
+  //     }
+  //   },
+  // });
 
   // Face detection (proctoring)
   const {
@@ -320,8 +325,10 @@ export function InterviewPage() {
   }, []);
 
   // Total warnings calculation – now safe to compute
-  const totalWarnings =
-    tabWarnings + faceWarnings + fullscreenExitCount + devToolsCount;
+  // const totalWarnings =
+  //   tabWarnings + faceWarnings + fullscreenExitCount + devToolsCount;
+
+  const totalWarnings = faceWarnings + fullscreenExitCount + devToolsCount;
 
   // Post-completion flow — sequential steps after interview ends
   const runPostCompletionFlow = useCallback(
@@ -460,6 +467,31 @@ export function InterviewPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [totalWarnings]);
 
+  const handleCompile = async () => {
+    if (!voiceInterview.codeContent.trim()) {
+      showToast('Please write some code first', 'warning');
+      return;
+    }
+    setCompiling(true);
+    try {
+      const res = await aiService.compileCode({
+        code: voiceInterview.codeContent,
+        language: voiceInterview.codeLanguage,
+      });
+      const output = res.data.output || res.data.error;
+      setCompileOutput(output);
+    } catch (err: any) {
+      setCompileOutput('Compilation failed: ' + (err.response?.data?.message || err.message));
+    } finally {
+      setCompiling(false);
+    }
+  };
+
+  useEffect(() => {
+    // When a new interviewer message appears (especially a coding question), clear output
+    setCompileOutput('');
+  }, [voiceInterview.conversation.length, voiceInterview.isCodingQuestion]);
+
   // Use the recorder's stream for video preview
   useEffect(() => {
     if (videoRef.current && recorderStream) {
@@ -588,6 +620,8 @@ export function InterviewPage() {
       </div>
     );
   }
+
+
 
   // Pre-start screen
   const isCountdownActive = instructionCountdown > 0;
@@ -881,10 +915,10 @@ export function InterviewPage() {
               <div className="absolute right-0 top-full mt-2 w-56 bg-[var(--cardBg)] rounded-lg shadow-lg border border-[var(--border)] p-3 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-20">
                 <p className="text-xs font-semibold text-[var(--text)] mb-2">Warning Breakdown</p>
                 <div className="space-y-1.5 text-xs text-[var(--textSecondary)]">
-                  <div className="flex justify-between">
+                  {/* <div className="flex justify-between">
                     <span>Tab Switches</span>
                     <span className="font-mono">{tabWarnings}</span>
-                  </div>
+                  </div> */}
                   <div className="flex justify-between">
                     <span>Face Warnings</span>
                     <span className="font-mono">{faceWarnings}</span>
@@ -943,8 +977,8 @@ export function InterviewPage() {
                 {entry.role !== 'filler' && entry.role !== 'system' && (
                   <div
                     className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${entry.role === 'interviewer'
-                        ? 'bg-blue-100 dark:bg-blue-900/30'
-                        : 'bg-green-100 dark:bg-green-900/30'
+                      ? 'bg-blue-100 dark:bg-blue-900/30'
+                      : 'bg-green-100 dark:bg-green-900/30'
                       }`}
                   >
                     {entry.role === 'interviewer' ? (
@@ -956,20 +990,20 @@ export function InterviewPage() {
                 )}
                 <div
                   className={`max-w-[70%] p-4 rounded-lg ${entry.role === 'interviewer'
-                      ? 'bg-[var(--surface1)] text-[var(--text)]'
-                      : entry.role === 'candidate'
-                        ? 'bg-[var(--primary)] text-white'
-                        : entry.role === 'system'
-                          ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 text-sm border border-amber-200 dark:border-amber-800'
-                          : 'bg-transparent text-[var(--textTertiary)] italic text-sm p-2'
+                    ? 'bg-[var(--surface1)] text-[var(--text)]'
+                    : entry.role === 'candidate'
+                      ? 'bg-[var(--primary)] text-white'
+                      : entry.role === 'system'
+                        ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 text-sm border border-amber-200 dark:border-amber-800'
+                        : 'bg-transparent text-[var(--textTertiary)] italic text-sm p-2'
                     } ${entry.isStreaming ? 'border border-blue-300 dark:border-blue-700' : ''}`}
                 >
                   <p className="text-sm whitespace-pre-wrap">{entry.content}</p>
                   {entry.role !== 'filler' && entry.role !== 'system' && (
                     <p
                       className={`text-xs mt-2 ${entry.role === 'interviewer'
-                          ? 'text-[var(--textTertiary)]'
-                          : 'text-white/70'
+                        ? 'text-[var(--textTertiary)]'
+                        : 'text-white/70'
                         }`}
                     >
                       {new Date(entry.timestamp).toLocaleTimeString()}
@@ -998,8 +1032,8 @@ export function InterviewPage() {
             )}
           </div>
 
-          {/* Coding Editor — appears only for [CODING] questions */}
-          {voiceInterview.isCodingQuestion && voiceInterview.state !== 'completed' && !postCompletionStep && (
+          {/* Coding Editor — appears only for [CODING] questions 
+     /*     {voiceInterview.isCodingQuestion && voiceInterview.state !== 'completed' && !postCompletionStep && (
             <div className="border-t border-[var(--border)] px-4 py-3">
               <CodingEditor
                 code={voiceInterview.codeContent}
@@ -1008,6 +1042,38 @@ export function InterviewPage() {
                 onLanguageChange={voiceInterview.setCodeLanguage}
                 disabled={voiceInterview.state === 'processing'}
               />
+            </div>
+          )} */}
+
+          {voiceInterview.isCodingQuestion && voiceInterview.state !== 'completed' && !postCompletionStep && (
+            <div className="border-t border-[var(--border)] px-4 py-3 space-y-2">
+              <CodingEditor
+                code={voiceInterview.codeContent}
+                language={voiceInterview.codeLanguage}
+                onCodeChange={voiceInterview.setCodeContent}
+                onLanguageChange={voiceInterview.setCodeLanguage}
+                disabled={voiceInterview.state === 'processing'}
+              />
+              <div className="flex justify-end">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleCompile}
+                  disabled={compiling || !voiceInterview.codeContent.trim()}
+                >
+                  {compiling ? (
+                    <Loader2 size={14} className="animate-spin mr-2" />
+                  ) : (
+                    <Play size={14} className="mr-2" />
+                  )}
+                  Compile & Run
+                </Button>
+              </div>
+              {compileOutput && (
+                <div className="mt-2 p-3 rounded-lg bg-[#1e1e1e] text-gray-200 font-mono text-sm overflow-auto max-h-48">
+                  <pre className="whitespace-pre-wrap">{compileOutput}</pre>
+                </div>
+              )}
             </div>
           )}
 
@@ -1207,12 +1273,12 @@ export function InterviewPage() {
             </h3>
 
             <div className="space-y-2 text-xs">
-              <div className="flex items-center justify-between">
+              {/* <div className="flex items-center justify-between">
                 <span className="text-[var(--textSecondary)]">Tab Switches</span>
                 <span className={`font-mono font-semibold ${tabWarnings > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>
                   {tabWarnings}
                 </span>
-              </div>
+              </div> */}
               <div className="flex items-center justify-between">
                 <span className="text-[var(--textSecondary)]">Face Warnings</span>
                 <span className={`font-mono font-semibold ${faceWarnings > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>

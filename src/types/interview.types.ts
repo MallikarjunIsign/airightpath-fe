@@ -35,11 +35,20 @@ export interface InterviewEvaluation {
   recommendation: Recommendation;
 }
 
+// export interface BulkInterviewAssignRequest {
+//   emails: string[];
+//   jobPrefix: string;
+//   deadlineTime: string;
+//   sendEmail: boolean;
+// }
+
 export interface BulkInterviewAssignRequest {
-  emails: string[];
   jobPrefix: string;
-  deadlineTime: string;
-  sendEmail: boolean;
+  emails: string[];
+  deadlineTime: string; // ISO datetime string
+  sendEmail?: boolean;
+  questionsFromDate?: string; // ISO datetime string or Unix timestamp
+  questionsToDate?: string; // ISO datetime string or Unix timestamp
 }
 
 export interface AudioChunkResponse {

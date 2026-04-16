@@ -51,11 +51,15 @@ export const aiService = {
 
   uploadScreenRecording(scheduleId: number, screenBlob: Blob) {
     const formData = new FormData();
-    formData.append('file', screenBlob, `screen-${scheduleId}.webm`);
-    return api.post<string>(ENDPOINTS.AI.UPLOAD_SCREEN_RECORDING(scheduleId), formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 300000, // 5 min for large uploads
-    });
+    formData.append("file", screenBlob, `screen-${scheduleId}.webm`);
+    return api.post<string>(
+      ENDPOINTS.AI.UPLOAD_SCREEN_RECORDING(scheduleId),
+      formData,
+      {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 300000, // 5 min for large uploads
+      },
+    );
   },
 
   // Voice interview endpoints
@@ -83,5 +87,12 @@ export const aiService = {
   // Item 4: Resume endpoint
   resumeVoiceInterview(scheduleId: number) {
     return api.get<ResumeResponse>(ENDPOINTS.AI.VOICE_RESUME(scheduleId));
+  },
+
+  compileCode(data: { code: string; language: string; stdin?: string }) {
+    return api.post<{ output: string; error: string; executionTimeMs: number }>(
+      ENDPOINTS.COMPILE,
+      data,
+    );
   },
 };

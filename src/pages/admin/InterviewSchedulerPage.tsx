@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Loader2, Video, Send, Mail } from 'lucide-react';
+import { Loader2, Video, Send, Mail, Calendar } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -20,6 +20,8 @@ export function InterviewSchedulerPage() {
   const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set());
   const [deadlineTime, setDeadlineTime] = useState('');
   const [sendEmail, setSendEmail] = useState(true);
+  const [questionsFromDate, setQuestionsFromDate] = useState('');
+  const [questionsToDate, setQuestionsToDate] = useState('');
 
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
@@ -106,6 +108,8 @@ export function InterviewSchedulerPage() {
         jobPrefix: selectedPrefix,
         deadlineTime,
         sendEmail,
+        questionsFromDate: questionsFromDate || undefined,
+        questionsToDate: questionsToDate || undefined,
       });
       showToast(
         `Interview${selectedEmails.size > 1 ? 's' : ''} scheduled for ${selectedEmails.size} candidate${selectedEmails.size > 1 ? 's' : ''}!`,
@@ -113,6 +117,8 @@ export function InterviewSchedulerPage() {
       );
       setSelectedEmails(new Set());
       setDeadlineTime('');
+      setQuestionsFromDate('');
+      setQuestionsToDate('');
 
       // Refresh candidate list so scheduled candidates disappear
       if (selectedPrefix) fetchCandidates();
@@ -224,6 +230,27 @@ export function InterviewSchedulerPage() {
               value={deadlineTime}
               onChange={(e) => setDeadlineTime(e.target.value)}
             />
+
+            {/* Question Date Range */}
+            <div className="grid grid-cols-2 gap-4">
+              <Input
+                label="Questions From Date (optional)"
+                type="date"
+                value={questionsFromDate}
+                onChange={(e) => setQuestionsFromDate(e.target.value)}
+                leftIcon={<Calendar size={16} />}
+              />
+              <Input
+                label="Questions To Date (optional)"
+                type="date"
+                value={questionsToDate}
+                onChange={(e) => setQuestionsToDate(e.target.value)}
+                leftIcon={<Calendar size={16} />}
+              />
+            </div>
+            <p className="text-xs text-[var(--textTertiary)] -mt-4">
+              If provided, only questions created within this date range will be asked.
+            </p>
 
             {/* Email Notification Toggle */}
             <label className="flex items-center gap-3 cursor-pointer">
