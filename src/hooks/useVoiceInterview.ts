@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { interviewWsService } from "@/services/interview-ws.service";
 import { aiService } from "@/services/ai.service";
+import { getAccessToken } from "@/services/api.service";
 import { APP_CONFIG } from "@/config/app.config";
 import { useAudioStreaming } from "./useAudioStreaming";
 import { useAudioPlayback } from "./useAudioPlayback";
@@ -22,6 +23,7 @@ export function useVoiceInterview() {
   // State
   const [state, setState] = useState<VoiceInterviewState>("pre-start");
   const [scheduleId, setScheduleId] = useState<number | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [interviewerName, setInterviewerName] = useState("Sarah");
   const [conversation, setConversation] = useState<ConversationEntry[]>([]);
   const [questionsAsked, setQuestionsAsked] = useState(0);
@@ -48,7 +50,7 @@ export function useVoiceInterview() {
   const [codeLanguage, setCodeLanguage] = useState("java");
 
   // Audio hooks
-  const audioStreaming = useAudioStreaming();
+  const audioStreaming = useAudioStreaming(scheduleId, userEmail);
   const audioPlayback = useAudioPlayback();
 
   // Stable refs for audio playback functions (avoid recreating callbacks on every render)
@@ -78,233 +80,249 @@ export function useVoiceInterview() {
   );
 
   // Subscribe to WebSocket topics
-  const setupSubscriptions = useCallback(() => {
-    // Real-time transcription from Whisper
-    interviewWsService.subscribe(
-      "transcription",
-      (msg: TranscriptionMessage) => {
-        transcriptRef.current += (transcriptRef.current ? " " : "") + msg.text;
-        setCurrentTranscript(transcriptRef.current);
-        if (msg.words) {
-          wordTimestampsRef.current.push(...msg.words);
-        }
-      },
-    );
-
-    // AI response tokens (streaming)
-    interviewWsService.subscribe("ai-token", (msg: AITokenMessage) => {
-      if (msg.done) {
-        const rawText = msg.fullText || streamingTextRef.current;
-        streamingTextRef.current = "";
-        setStreamingText("");
-
-        // Detect and strip question type tags
-        const { cleanText: fullText, isCoding } =
-          detectAndCleanCodingTag(rawText);
-
-        setIsCodingQuestion(isCoding);
-
-        // Always reset editor when question changes
-        setCodeContent("");
-
-        if (!isCoding) {
-          setCodeLanguage("java"); // optional reset
-        }
-
-        // Item 14: Store last question for repeat
-        setLastQuestionText(fullText);
-
-        setConversation((prev) => {
-          const filtered = prev.filter((e) => !e.isStreaming);
-          return [
-            ...filtered,
-            {
-              role: "interviewer" as const,
-              content: fullText,
-              timestamp: new Date().toISOString(),
-              isCodingQuestion: isCoding,
-            },
-          ];
-        });
-      } else {
-        streamingTextRef.current += msg.token;
-        setStreamingText(streamingTextRef.current);
-
-        setConversation((prev) => {
-          const filtered = prev.filter((e) => !e.isStreaming);
-          return [
-            ...filtered,
-            {
-              role: "interviewer" as const,
-              content: streamingTextRef.current,
-              timestamp: new Date().toISOString(),
-              isStreaming: true,
-            },
-          ];
-        });
-      }
-    });
-
-    // TTS audio chunks - Item 14: Store for repeat
-    interviewWsService.subscribe("tts-audio", (msg: TTSAudioMessage) => {
-      if (msg.isLast || msg.chunkIndex === 0) {
-        setLastQuestionAudio(msg.audio);
-      }
-      enqueueAudioRef.current(msg.audio, msg.text, msg.isLast);
-    });
-
-    // TTS fallback (browser TTS)
-    interviewWsService.subscribe("tts-fallback", (msg: TTSFallbackMessage) => {
-      playBrowserTTSRef.current(msg.text);
-    });
-
-    // Filler messages
-    interviewWsService.subscribe("filler", (msg: FillerMessage) => {
-      setConversation((prev) => [
-        ...prev,
-        {
-          role: "filler" as const,
-          content: msg.text,
-          timestamp: new Date().toISOString(),
+  const setupSubscriptions = useCallback(
+    (id: number) => {
+      // Real-time transcription from Whisper
+      interviewWsService.subscribe(
+        `/topic/interview/${id}/transcription`,
+        (msg: TranscriptionMessage) => {
+          transcriptRef.current +=
+            (transcriptRef.current ? " " : "") + msg.text;
+          setCurrentTranscript(transcriptRef.current);
+          if (msg.words) {
+            wordTimestampsRef.current.push(...msg.words);
+          }
         },
-      ]);
-    });
+      );
 
-    // // Response complete
-    // interviewWsService.subscribe(
-    //   "response-complete",
-    //   (msg: ResponseCompleteMessage) => {
-    //     // Clear processing timeout — response arrived
-    //     if (processingTimeoutRef.current) {
-    //       clearTimeout(processingTimeoutRef.current);
-    //       processingTimeoutRef.current = null;
-    //     }
+      // AI response tokens (streaming)
+      interviewWsService.subscribe(
+        `/topic/interview/${id}/ai-token`,
+        (msg: AITokenMessage) => {
+          if (msg.done) {
+            const rawText = msg.fullText || streamingTextRef.current;
+            streamingTextRef.current = "";
+            setStreamingText("");
 
-    //     if (msg.error) {
-    //       setState("active");
-    //       setError(
-    //         "Something went wrong processing your answer. Please try again.",
-    //       );
-    //       return;
-    //     }
+            // Detect and strip question type tags
+            const { cleanText: fullText, isCoding } =
+              detectAndCleanCodingTag(rawText);
 
-    //     setQuestionsAsked(msg.questionsAsked);
-
-    //     if (msg.isComplete || msg.terminated) {
-    //       setState("completed");
-    //     } else {
-    //       setState("active");
-    //     }
-    //   },
-    // );
-
-    // In useVoiceInterview.ts - response-complete subscription
-    interviewWsService.subscribe(
-      "response-complete",
-      (msg: ResponseCompleteMessage) => {
-        if (processingTimeoutRef.current) {
-          clearTimeout(processingTimeoutRef.current);
-          processingTimeoutRef.current = null;
-        }
-
-        if (msg.error) {
-          setState((prev) => (prev === "completed" ? prev : "active"));
-          setError(
-            "Something went wrong processing your answer. Please try again.",
-          );
-          return;
-        }
-
-        if (msg.response) {
-          const responseText = msg.response;
-          // 1. Handle retry message (language warning)
-          if (responseText.startsWith("RETRY:")) {
-            const retryMessage = responseText.replace("RETRY:", "").trim();
-            setConversation((prev) => [
-              ...prev,
-              {
-                role: "system",
-                content: retryMessage,
-                timestamp: new Date().toISOString(),
-              },
-            ]);
-            // Stay in active state – same question remains
-            setState("active");
-            return;
-          }
-
-          // 2. Check if this is the final summary (no "FEEDBACK:" prefix)
-          if (!responseText.startsWith("FEEDBACK:")) {
-            // Final summary
-            setConversation((prev) => [
-              ...prev,
-              {
-                role: "interviewer",
-                content: responseText,
-                timestamp: new Date().toISOString(),
-              },
-            ]);
-            setState("completed");
-            return;
-          }
-
-          // 3. Normal feedback + next question
-          const feedbackMatch = responseText.match(
-            /FEEDBACK:\s*(.*?)\s*NEXT QUESTION:\s*(.*)/s,
-          );
-          if (feedbackMatch) {
-            const feedback = feedbackMatch[1].trim();
-            const nextQuestion = feedbackMatch[2].trim();
-
-            // Add feedback as a system message
-            setConversation((prev) => [
-              ...prev,
-              {
-                role: "system",
-                content: feedback,
-                timestamp: new Date().toISOString(),
-              },
-            ]);
-
-            // Add the next question as interviewer message
-            const { cleanText: nextQuestionClean, isCoding } =
-              detectAndCleanCodingTag(nextQuestion);
             setIsCodingQuestion(isCoding);
+
+            // Always reset editor when question changes
             setCodeContent("");
-            setLastQuestionText(nextQuestionClean);
 
-            setConversation((prev) => [
-              ...prev,
-              {
-                role: "interviewer",
-                content: nextQuestionClean,
-                timestamp: new Date().toISOString(),
-                isCodingQuestion: isCoding,
-              },
-            ]);
+            if (!isCoding) {
+              setCodeLanguage("java"); // optional reset
+            }
+
+            // Item 14: Store last question for repeat
+            setLastQuestionText(fullText);
+
+            setConversation((prev) => {
+              const filtered = prev.filter((e) => !e.isStreaming);
+              return [
+                ...filtered,
+                {
+                  role: "interviewer" as const,
+                  content: fullText,
+                  timestamp: new Date().toISOString(),
+                  isCodingQuestion: isCoding,
+                },
+              ];
+            });
+          } else {
+            streamingTextRef.current += msg.token;
+            setStreamingText(streamingTextRef.current);
+
+            setConversation((prev) => {
+              const filtered = prev.filter((e) => !e.isStreaming);
+              return [
+                ...filtered,
+                {
+                  role: "interviewer" as const,
+                  content: streamingTextRef.current,
+                  timestamp: new Date().toISOString(),
+                  isStreaming: true,
+                },
+              ];
+            });
           }
-        }
+        },
+      );
 
-        setQuestionsAsked(msg.questionsAsked);
+      // TTS audio chunks - Item 14: Store for repeat
+      interviewWsService.subscribe(
+        `/topic/interview/${id}/tts-audio`,
+        (msg: TTSAudioMessage) => {
+          if (msg.isLast || msg.chunkIndex === 0) {
+            setLastQuestionAudio(msg.audio);
+          }
+          enqueueAudioRef.current(msg.audio, msg.text, msg.isLast);
+        },
+      );
 
-        if (msg.isComplete || msg.terminated) {
-          setState("completed");
-        } else {
-          setState((prev) => (prev === "completed" ? prev : "active"));
-        }
-      },
-    );
+      // TTS fallback (browser TTS)
+      interviewWsService.subscribe(
+        `/topic/interview/${id}/tts-fallback`,
+        (msg: TTSFallbackMessage) => {
+          playBrowserTTSRef.current(msg.text);
+        },
+      );
 
-    // Transcription errors
-    interviewWsService.subscribe(
-      "transcription-error",
-      (msg: { error: string }) => {
-        console.error("Transcription error:", msg.error);
-        setTranscriptionError(msg.error);
-        setTimeout(() => setTranscriptionError(null), 5000);
-      },
-    );
-  }, []);
+      // Filler messages
+      interviewWsService.subscribe(
+        `/topic/interview/${id}/filler`,
+        (msg: FillerMessage) => {
+          setConversation((prev) => [
+            ...prev,
+            {
+              role: "filler" as const,
+              content: msg.text,
+              timestamp: new Date().toISOString(),
+            },
+          ]);
+        },
+      );
+
+      // // Response complete
+      // interviewWsService.subscribe(
+      //   "response-complete",
+      //   (msg: ResponseCompleteMessage) => {
+      //     // Clear processing timeout — response arrived
+      //     if (processingTimeoutRef.current) {
+      //       clearTimeout(processingTimeoutRef.current);
+      //       processingTimeoutRef.current = null;
+      //     }
+
+      //     if (msg.error) {
+      //       setState("active");
+      //       setError(
+      //         "Something went wrong processing your answer. Please try again.",
+      //       );
+      //       return;
+      //     }
+
+      //     setQuestionsAsked(msg.questionsAsked);
+
+      //     if (msg.isComplete || msg.terminated) {
+      //       setState("completed");
+      //     } else {
+      //       setState("active");
+      //     }
+      //   },
+      // );
+
+      // In useVoiceInterview.ts - response-complete subscription
+      interviewWsService.subscribe(
+        `/topic/interview/${id}/response-complete`,
+        (msg: ResponseCompleteMessage) => {
+          if (processingTimeoutRef.current) {
+            clearTimeout(processingTimeoutRef.current);
+            processingTimeoutRef.current = null;
+          }
+
+          if (msg.error) {
+            setState((prev) => (prev === "completed" ? prev : "active"));
+            setError(
+              "Something went wrong processing your answer. Please try again.",
+            );
+            return;
+          }
+
+          if (msg.response) {
+            const responseText = msg.response;
+            // 1. Handle retry message (language warning)
+            if (responseText.startsWith("RETRY:")) {
+              const retryMessage = responseText.replace("RETRY:", "").trim();
+              setConversation((prev) => [
+                ...prev,
+                {
+                  role: "system",
+                  content: retryMessage,
+                  timestamp: new Date().toISOString(),
+                },
+              ]);
+              // Stay in active state – same question remains
+              setState("active");
+              return;
+            }
+
+            // 2. Check if this is the final summary (no "FEEDBACK:" prefix)
+            if (!responseText.startsWith("FEEDBACK:")) {
+              // Final summary
+              setConversation((prev) => [
+                ...prev,
+                {
+                  role: "interviewer",
+                  content: responseText,
+                  timestamp: new Date().toISOString(),
+                },
+              ]);
+              setState("completed");
+              return;
+            }
+
+            // 3. Normal feedback + next question
+            const feedbackMatch = responseText.match(
+              /FEEDBACK:\s*(.*?)\s*NEXT QUESTION:\s*(.*)/s,
+            );
+            if (feedbackMatch) {
+              const feedback = feedbackMatch[1].trim();
+              const nextQuestion = feedbackMatch[2].trim();
+
+              // Add feedback as a system message
+              setConversation((prev) => [
+                ...prev,
+                {
+                  role: "system",
+                  content: feedback,
+                  timestamp: new Date().toISOString(),
+                },
+              ]);
+
+              // Add the next question as interviewer message
+              const { cleanText: nextQuestionClean, isCoding } =
+                detectAndCleanCodingTag(nextQuestion);
+              setIsCodingQuestion(isCoding);
+              setCodeContent("");
+              setLastQuestionText(nextQuestionClean);
+
+              setConversation((prev) => [
+                ...prev,
+                {
+                  role: "interviewer",
+                  content: nextQuestionClean,
+                  timestamp: new Date().toISOString(),
+                  isCodingQuestion: isCoding,
+                },
+              ]);
+            }
+          }
+
+          setQuestionsAsked(msg.questionsAsked);
+
+          if (msg.isComplete || msg.terminated) {
+            setState("completed");
+          } else {
+            setState((prev) => (prev === "completed" ? prev : "active"));
+          }
+        },
+      );
+
+      // Transcription errors
+      interviewWsService.subscribe(
+        `/topic/interview/${id}/transcription-error`,
+        (msg: { error: string }) => {
+          console.error("Transcription error:", msg.error);
+          setTranscriptionError(msg.error);
+          setTimeout(() => setTranscriptionError(null), 5000);
+        },
+      );
+    },
+    [detectAndCleanCodingTag],
+  );
 
   // Start interview
   const startInterview = useCallback(
@@ -315,6 +333,7 @@ export function useVoiceInterview() {
 
         const { data: response } = await aiService.startVoiceInterview(request);
         setScheduleId(response.scheduleId);
+        setUserEmail(request.email);
         setInterviewerName(response.interviewerName);
 
         // Detect and strip question type tags from first question
@@ -342,17 +361,29 @@ export function useVoiceInterview() {
           },
         ]);
 
-        // Connect WebSocket
-        interviewWsService.connect(
-          response.scheduleId,
-          () => {
+        interviewWsService.disconnect();
+        // Connect WebSocket with both scheduleId and JWT token
+        const token = getAccessToken();
+
+        if (!token) {
+          console.error("❌ No JWT token found. WebSocket connection blocked.");
+          return;
+        }
+
+        interviewWsService.connect({
+          scheduleId: response.scheduleId,
+          token: token, // ✅ REQUIRED
+          email: request.email,
+          mobileToken: request.mobileToken || undefined, // ✅ OPTIONAL
+          // mobileToken: request.mobileToken, // Pass mobile token if available
+          onConnect: () => {
             setIsWsConnected(true);
-            setupSubscriptions();
+            setupSubscriptions(response.scheduleId);
           },
-          () => {
+          onDisconnect: () => {
             setIsWsConnected(false);
           },
-        );
+        });
 
         // Play first question audio
         if (response.firstQuestionAudio) {
@@ -387,7 +418,9 @@ export function useVoiceInterview() {
 
     // Interrupt any playing audio
     audioPlayback.stopPlayback();
-    interviewWsService.send("interrupt", { reason: "candidate_speaking" });
+    interviewWsService.send(`/app/interview/${scheduleId}/interrupt`, {
+      reason: "candidate_speaking",
+    });
 
     await audioStreaming.startRecording();
     setState("answering");
@@ -447,7 +480,10 @@ export function useVoiceInterview() {
         payload.codeContent = submittedCode;
         payload.codeLanguage = submittedLanguage;
       }
-      interviewWsService.send("submit-answer", payload);
+      interviewWsService.send(
+        `/app/interview/${scheduleId}/submit-answer`,
+        payload,
+      );
 
       setState("processing");
 
@@ -477,7 +513,7 @@ export function useVoiceInterview() {
     ]);
 
     // Send only the answer (empty) with skip flag
-    interviewWsService.send("submit-answer", {
+    interviewWsService.send(`/app/interview/${scheduleId}/submit-answer`, {
       transcript: "",
       wordTimestamps: [],
       skipped: true,
@@ -495,9 +531,16 @@ export function useVoiceInterview() {
   }, []);
 
   // Send proctoring event
-  const sendProctoringEvent = useCallback((type: string, details: string) => {
-    interviewWsService.send("proctoring-event", { type, details });
-  }, []);
+  const sendProctoringEvent = useCallback(
+    (type: string, details: string) => {
+      if (!scheduleId) return;
+      interviewWsService.send(`/app/interview/${scheduleId}/proctoring-event`, {
+        type,
+        details,
+      });
+    },
+    [scheduleId],
+  );
 
   // End interview
   const endInterview = useCallback(async () => {

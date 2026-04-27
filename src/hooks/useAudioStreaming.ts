@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { APP_CONFIG } from "@/config/app.config";
 import { interviewWsService } from "@/services/interview-ws.service";
+import { getAccessToken } from "@/services/api.service";
 
 /**
  * Hook for streaming audio chunks to the backend for live transcription.
@@ -11,7 +12,7 @@ import { interviewWsService } from "@/services/interview-ws.service";
  * approach only puts headers in the first chunk, making subsequent
  * chunks undecodeable.
  */
-export function useAudioStreaming() {
+export function useAudioStreaming(scheduleId: number | null) {
   const [isRecording, setIsRecording] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -27,14 +28,43 @@ export function useAudioStreaming() {
   const animFrameRef = useRef<number | null>(null);
 
   /** Send a complete audio blob to the backend via WebSocket. */
-  const sendChunk = useCallback((blob: Blob) => {
-    if (blob.size === 0 || !interviewWsService.connected) return;
+  const sendChunk = useCallback(
+    (blob: Blob) => {
+      if (blob.size === 0 || !interviewWsService.connected || !scheduleId)
+        return;
 
-    blob.arrayBuffer().then((buffer) => {
-      interviewWsService.sendBinary("audio-chunk", buffer);
-      chunkIndexRef.current++;
-    });
-  }, []);
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = (reader.result as string).split(",")[1];
+        const destination = `/app/interview/${scheduleId}/audio-chunk`;
+
+        const token = getAccessToken();
+        const payload: any = {
+          audio: base64,
+          chunkIndex: chunkIndexRef.current,
+        };
+
+        if (token) {
+          payload.token = token;
+          payload.accessToken = token;
+        }
+
+        console.log(
+          `Sending audio chunk ${chunkIndexRef.current}. Token present: ${!!token}`,
+        );
+
+        interviewWsService.send(
+          destination,
+          payload,
+          token ? { Authorization: `Bearer ${token}` } : {},
+        );
+
+        chunkIndexRef.current++;
+      };
+      reader.readAsDataURL(blob);
+    },
+    [scheduleId],
+  );
 
   /** Create a new MediaRecorder on the given stream and start it. */
   const createRecorder = useCallback(
@@ -205,5 +235,11 @@ export function useAudioStreaming() {
 
   const getAudioStream = useCallback(() => streamRef.current, []);
 
-  return { isRecording, audioLevel, startRecording, stopRecording, getAudioStream };
+  return {
+    isRecording,
+    audioLevel,
+    startRecording,
+    stopRecording,
+    getAudioStream,
+  };
 }

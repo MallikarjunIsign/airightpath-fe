@@ -79,6 +79,7 @@ export interface StartInterviewRequest {
   email: string;
   jobPrefix: string;
   resumeSummary?: string;
+  mobileToken?: string;
 }
 
 export interface StartInterviewResponse {

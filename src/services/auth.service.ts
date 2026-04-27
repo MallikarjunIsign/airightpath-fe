@@ -1,6 +1,6 @@
-import api from './api.service';
-import { ENDPOINTS } from '@/config/api.endpoints';
-import type { ApiResponse } from '@/types/api.types';
+import api from "./api.service";
+import { ENDPOINTS } from "@/config/api.endpoints";
+import type { ApiResponse } from "@/types/api.types";
 import type {
   LoginRequest,
   LoginData,
@@ -11,7 +11,7 @@ import type {
   UpdatePasswordRequest,
   ChangePasswordRequest,
   AccessTokenData,
-} from '@/types/auth.types';
+} from "@/types/auth.types";
 
 export const authService = {
   login(data: LoginRequest) {
@@ -23,7 +23,9 @@ export const authService = {
   },
 
   refresh() {
-    return api.post<ApiResponse<AccessTokenData>>(ENDPOINTS.AUTH.REFRESH);
+    return api.post<ApiResponse<AccessTokenData>>(ENDPOINTS.AUTH.REFRESH, {}, {
+      _skipErrorToast: true,
+    } as any);
   },
 
   logout() {
@@ -31,26 +33,42 @@ export const authService = {
   },
 
   me() {
-    return api.get<ApiResponse<MeResponse>>(ENDPOINTS.AUTH.ME);
+    return api.get<ApiResponse<MeResponse>>(ENDPOINTS.AUTH.ME, {
+      _skipErrorToast: true,
+    } as any);
   },
 
   generateOtp(data: GenerateOtpRequest) {
-    return api.post<ApiResponse<{ message: string }>>(ENDPOINTS.AUTH.GENERATE_OTP, data);
+    return api.post<ApiResponse<{ message: string }>>(
+      ENDPOINTS.AUTH.GENERATE_OTP,
+      data,
+    );
   },
 
   validateOtp(data: ValidateOtpRequest) {
-    return api.post<ApiResponse<{ message: string }>>(ENDPOINTS.AUTH.VALIDATE_OTP, data);
+    return api.post<ApiResponse<{ message: string }>>(
+      ENDPOINTS.AUTH.VALIDATE_OTP,
+      data,
+    );
   },
 
   updatePassword(data: UpdatePasswordRequest) {
-    return api.put<ApiResponse<{ message: string }>>(ENDPOINTS.AUTH.UPDATE_PASSWORD, null, {
-      params: data,
-    });
+    return api.put<ApiResponse<{ message: string }>>(
+      ENDPOINTS.AUTH.UPDATE_PASSWORD,
+      null,
+      {
+        params: data,
+      },
+    );
   },
 
   changePassword(data: ChangePasswordRequest) {
-    return api.put<ApiResponse<{ message: string }>>(ENDPOINTS.AUTH.CHANGE_PASSWORD, null, {
-      params: data,
-    });
+    return api.put<ApiResponse<{ message: string }>>(
+      ENDPOINTS.AUTH.CHANGE_PASSWORD,
+      null,
+      {
+        params: data,
+      },
+    );
   },
 };

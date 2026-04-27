@@ -45,7 +45,7 @@ import { InterviewPage } from '@/pages/candidate/InterviewPage';
 import { InterviewSummaryPage } from '@/pages/candidate/InterviewSummaryPage';
 import { ResultsListPage } from '@/pages/candidate/ResultsListPage';
 import { ResultDetailPage } from '@/pages/candidate/ResultDetailPage';
-
+import MobileConnect from './pages/candidate/MobileConnect';
 // Public pages
 import { HomePage } from '@/pages/public/HomePage';
 import { AboutPage } from '@/pages/public/AboutPage';
@@ -71,7 +71,7 @@ function App() {
       <Route path={ROUTES.PUBLIC.HOME} element={<HomePage />} />
       <Route path={ROUTES.PUBLIC.ABOUT} element={<AboutPage />} />
       <Route path={ROUTES.PUBLIC.CONTACT} element={<ContactPage />} />
-
+      <Route path="/mobile-connect" element={<MobileConnect />} />
       {/* Auth routes (redirect if already authenticated) */}
       <Route
         path={ROUTES.PUBLIC.LOGIN}
@@ -109,6 +109,7 @@ function App() {
         <Route path="prompts" element={<JobPromptPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="change-password" element={<ChangePasswordPage />} />
+
       </Route>
 
       {/* Exam routes (no sidebar/navbar — lockdown mode) */}

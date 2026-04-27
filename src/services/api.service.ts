@@ -1,9 +1,9 @@
-import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
-import { ENV } from '@/config/env';
-import { ENDPOINTS } from '@/config/api.endpoints';
-import { getErrorMessage } from '@/config/error-messages';
-import { dispatchErrorToast } from '@/config/toast-events';
-import type { ApiErrorEnvelope } from '@/types/api.types';
+import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
+import { ENV } from "@/config/env";
+import { ENDPOINTS } from "@/config/api.endpoints";
+import { getErrorMessage } from "@/config/error-messages";
+import { dispatchErrorToast } from "@/config/toast-events";
+import type { ApiErrorEnvelope } from "@/types/api.types";
 
 // ── In-memory token store ────────────────────────────────────────────
 let accessToken: string | null = null;
@@ -11,7 +11,7 @@ let accessToken: string | null = null;
 // BroadcastChannel for cross-tab auth sync (replaces localStorage events)
 let authChannel: BroadcastChannel | null = null;
 try {
-  authChannel = new BroadcastChannel('rightpath_auth');
+  authChannel = new BroadcastChannel("rightpath_auth");
 } catch {
   // BroadcastChannel not supported — cross-tab sync disabled
 }
@@ -28,7 +28,7 @@ export function setAccessToken(token: string | null): void {
   // Only broadcast when value actually changes to avoid cross-tab ping-pong
   if (prev !== token) {
     try {
-      authChannel?.postMessage({ type: token ? 'login' : 'logout' });
+      authChannel?.postMessage({ type: token ? "login" : "logout" });
     } catch {
       // Silently ignore
     }
@@ -41,7 +41,7 @@ export function clearTokens(): void {
   // Only broadcast if there was a token to clear
   if (had) {
     try {
-      authChannel?.postMessage({ type: 'logout' });
+      authChannel?.postMessage({ type: "logout" });
     } catch {
       // Silently ignore
     }
@@ -53,7 +53,7 @@ const api = axios.create({
   baseURL: ENV.API_BASE_URL,
   withCredentials: true,
   timeout: 30000,
-  headers: { 'Content-Type': 'application/json' },
+  headers: { "Content-Type": "application/json" },
 });
 
 // ── Endpoints that skip the auth header ──────────────────────────────
@@ -102,7 +102,9 @@ function processQueue(error: unknown, token: string | null): void {
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError<ApiErrorEnvelope>) => {
-    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+    const originalRequest = error.config as InternalAxiosRequestConfig & {
+      _retry?: boolean;
+    };
     const status = error.response?.status;
 
     // ── 401 handling for non-public paths: attempt silent refresh ─────
@@ -112,8 +114,13 @@ api.interceptors.response.use(
       !originalRequest._retry &&
       !isPublicPath(originalRequest.url)
     ) {
-      const errorCode = (error.response?.data as ApiErrorEnvelope | undefined)?.code;
-      if (!errorCode || errorCode === 'AUTH_INVALID_TOKEN' || errorCode === 'AUTH_UNAUTHORIZED') {
+      const errorCode = (error.response?.data as ApiErrorEnvelope | undefined)
+        ?.code;
+      if (
+        !errorCode ||
+        errorCode === "AUTH_INVALID_TOKEN" ||
+        errorCode === "AUTH_UNAUTHORIZED"
+      ) {
         if (isRefreshing) {
           return new Promise<string>((resolve, reject) => {
             failedQueue.push({ resolve, reject });
@@ -130,7 +137,7 @@ api.interceptors.response.use(
           const response = await axios.post(
             `${ENV.API_BASE_URL}${ENDPOINTS.AUTH.REFRESH}`,
             {},
-            { withCredentials: true }
+            { withCredentials: true },
           );
           const newToken = response.data?.data?.accessToken;
           if (newToken) {
@@ -139,12 +146,12 @@ api.interceptors.response.use(
             processQueue(null, newToken);
             return api(originalRequest);
           }
-          throw new Error('No token in refresh response');
+          throw new Error("No token in refresh response");
         } catch (refreshError) {
           processQueue(refreshError, null);
           clearTokens();
-          dispatchErrorToast(getErrorMessage('AUTH_INVALID_REFRESH'));
-          window.dispatchEvent(new CustomEvent('auth:forceLogout'));
+          dispatchErrorToast(getErrorMessage("AUTH_INVALID_REFRESH"));
+          window.dispatchEvent(new CustomEvent("auth:forceLogout"));
           return Promise.reject(refreshError);
         } finally {
           isRefreshing = false;
@@ -155,7 +162,7 @@ api.interceptors.response.use(
     // ── Auto-toast for all other errors ──────────────────────────────
     if (!originalRequest?._skipErrorToast) {
       if (status && status >= 500) {
-        dispatchErrorToast(getErrorMessage('INTERNAL_ERROR'));
+        dispatchErrorToast(getErrorMessage("INTERNAL_ERROR"));
       } else {
         const { message } = extractApiError(error);
         dispatchErrorToast(message);
@@ -163,11 +170,14 @@ api.interceptors.response.use(
     }
 
     return Promise.reject(error);
-  }
+  },
 );
 
 // ── Error extraction helper ──────────────────────────────────────────
-export function extractApiError(error: unknown): { code: string; message: string } {
+export function extractApiError(error: unknown): {
+  code: string;
+  message: string;
+} {
   if (axios.isAxiosError(error)) {
     const data = error.response?.data as ApiErrorEnvelope | undefined;
     // V2 format: flat object with code field
@@ -178,17 +188,23 @@ export function extractApiError(error: unknown): { code: string; message: string
       };
     }
     // Legacy format: { message, timestamp } — no code
-    if (data && typeof (data as Record<string, unknown>).message === 'string') {
+    if (data && typeof (data as Record<string, unknown>).message === "string") {
       return {
         code: `HTTP_${error.response?.status}`,
         message: (data as Record<string, unknown>).message as string,
       };
     }
-    if (error.code === 'ECONNABORTED') {
-      return { code: 'TIMEOUT_ERROR', message: getErrorMessage('TIMEOUT_ERROR') };
+    if (error.code === "ECONNABORTED") {
+      return {
+        code: "TIMEOUT_ERROR",
+        message: getErrorMessage("TIMEOUT_ERROR"),
+      };
     }
     if (!error.response) {
-      return { code: 'NETWORK_ERROR', message: getErrorMessage('NETWORK_ERROR') };
+      return {
+        code: "NETWORK_ERROR",
+        message: getErrorMessage("NETWORK_ERROR"),
+      };
     }
     return {
       code: `HTTP_${error.response.status}`,
@@ -196,7 +212,7 @@ export function extractApiError(error: unknown): { code: string; message: string
     };
   }
   return {
-    code: 'UNKNOWN',
+    code: "UNKNOWN",
     message: error instanceof Error ? error.message : getErrorMessage(),
   };
 }
