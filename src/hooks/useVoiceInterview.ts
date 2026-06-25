@@ -372,10 +372,10 @@ export function useVoiceInterview() {
 
         interviewWsService.connect({
           scheduleId: response.scheduleId,
-          token: token, // ✅ REQUIRED
+          token: token, // REQUIRED
           email: request.email,
-          mobileToken: request.mobileToken || undefined, // ✅ OPTIONAL
-          // mobileToken: request.mobileToken, // Pass mobile token if available
+          mobileToken: request.mobileToken || undefined, 
+      
           onConnect: () => {
             setIsWsConnected(true);
             setupSubscriptions(response.scheduleId);
