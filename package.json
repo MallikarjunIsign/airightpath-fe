@@ -16,6 +16,8 @@
     "@stomp/stompjs": "^7.3.0",
     "@tanstack/react-query": "^5.90.21",
     "axios": "^1.13.5",
+    "baseline-browser-mapping": "^2.10.40",
+    "caniuse-lite": "^1.0.30001800",
     "date-fns": "^4.1.0",
     "face-api.js": "^0.22.2",
     "lucide-react": "^0.344.0",

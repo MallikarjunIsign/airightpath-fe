@@ -20,7 +20,11 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 function normalizeRole(role: string): RoleName {
-  return role.replace(/^ROLE_/, '') as RoleName;
+  return role
+    .replace(/^ROLE_/i, '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, '_') as RoleName;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
