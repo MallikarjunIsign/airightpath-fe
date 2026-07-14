@@ -23,28 +23,27 @@ export function getAccessToken(): string | null {
 }
 
 export function setAccessToken(token: string | null): void {
-  const prev = accessToken;
+  // Pure store. Deliberately does NOT broadcast: silent token rotation
+  // (e.g. via /refresh) must not signal other tabs, or the receiving tab's
+  // bootstrap → refresh → setAccessToken path would re-broadcast and create a
+  // cross-tab feedback loop. Use broadcastAuthChange() for user-initiated auth.
   accessToken = token;
-  // Only broadcast when value actually changes to avoid cross-tab ping-pong
-  if (prev !== token) {
-    try {
-      authChannel?.postMessage({ type: token ? "login" : "logout" });
-    } catch {
-      // Silently ignore
-    }
-  }
 }
 
 export function clearTokens(): void {
-  const had = accessToken !== null;
+  // Pure store — see setAccessToken. Broadcast logout explicitly via
+  // broadcastAuthChange('logout') only for genuine session-end transitions.
   accessToken = null;
-  // Only broadcast if there was a token to clear
-  if (had) {
-    try {
-      authChannel?.postMessage({ type: "logout" });
-    } catch {
-      // Silently ignore
-    }
+}
+
+// Explicitly notify other tabs about a user-initiated auth change (login on
+// success, logout, or a dead session). Kept separate from token storage so
+// silent rotations never trigger cross-tab work.
+export function broadcastAuthChange(type: "login" | "logout"): void {
+  try {
+    authChannel?.postMessage({ type });
+  } catch {
+    // Silently ignore — cross-tab sync is best-effort
   }
 }
 
@@ -150,6 +149,7 @@ api.interceptors.response.use(
         } catch (refreshError) {
           processQueue(refreshError, null);
           clearTokens();
+          broadcastAuthChange("logout");
           dispatchErrorToast(getErrorMessage("AUTH_INVALID_REFRESH"));
           window.dispatchEvent(new CustomEvent("auth:forceLogout"));
           return Promise.reject(refreshError);

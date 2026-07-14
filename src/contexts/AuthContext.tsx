@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
 import { authService } from '@/services/auth.service';
-import { setAccessToken, getAccessToken, clearTokens, authChannel } from '@/services/api.service';
+import { setAccessToken, getAccessToken, clearTokens, broadcastAuthChange, authChannel } from '@/services/api.service';
 import { isJwtExpired } from '@/utils/jwt.utils';
 import type { RoleName } from '@/config/roles';
 import type { PermissionName } from '@/config/permissions';
@@ -99,7 +99,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setRoles([]);
         setPermissions([]);
       } else if (e.data?.type === 'login') {
-        bootstrapSession();
+        // Another tab logged in. Only adopt the shared (refresh-cookie) session
+        // if this tab has no token yet — prevents redundant bootstraps. Because
+        // setAccessToken no longer re-broadcasts, this cannot feed back into a loop.
+        if (!getAccessToken()) {
+          bootstrapSession();
+        }
       }
     };
 
@@ -127,6 +132,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const normalizedRoles = loginData.roles.map(normalizeRole);
       setRoles(normalizedRoles);
       setPermissions(loginData.permissions as PermissionName[]);
+      // Signal other tabs exactly once for this user-initiated login.
+      broadcastAuthChange('login');
       return { roles: normalizedRoles };
     },
     []
@@ -146,6 +153,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setRoles([]);
       setPermissions([]);
       clearTokens();
+      // Signal other tabs to tear down their session as well.
+      broadcastAuthChange('logout');
     }
   }, []);
 
