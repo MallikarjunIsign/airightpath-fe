@@ -22,6 +22,7 @@ import { useSidebar } from '@/contexts/SidebarContext';
 import { useRbac } from '@/hooks/useRbac';
 import { ROUTES } from '@/config/routes';
 import { Badge } from '../ui/Badge';
+import { Logo } from '../ui/Logo';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -148,13 +149,8 @@ export function Sidebar({ environment = 'prod' }: SidebarProps) {
         `}
       >
         {isExpanded && (
-          <div className="flex items-center gap-3 min-w-0 flex-1">
-            <div className="sidebar-logo-mark w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-sm gradient-brand flex-shrink-0">
-              RP
-            </div>
-            <span className="font-heading font-bold text-[1.05rem] gradient-text truncate">
-              RightPath
-            </span>
+          <div className="flex items-center min-w-0 flex-1">
+            <Logo className="h-8 w-auto" />
           </div>
         )}
 

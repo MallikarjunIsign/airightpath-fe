@@ -8,6 +8,7 @@ import { useToast } from '@/components/ui/Toast';
 import { authService } from '@/services/auth.service';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
+import { Logo } from '@/components/ui/Logo';
 import { changePasswordSchema } from '@/config/validation';
 
 type ChangePasswordFormValues = z.infer<typeof changePasswordSchema>;
@@ -58,8 +59,8 @@ export function ChangePasswordPage() {
       <div className="w-full max-w-md">
         {/* Branded Header */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-[var(--primary)] rounded-2xl mb-4">
-            <span className="text-white text-2xl font-bold">RP</span>
+          <div className="flex justify-center mb-4">
+            <Logo className="h-10 w-auto" />
           </div>
           <h1 className="text-3xl font-bold text-[var(--text)] mb-2">Change password</h1>
           <p className="text-[var(--textSecondary)]">Update your account password</p>
