@@ -1,10 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
   Users,
   Calendar,
-  LogOut,
   Briefcase,
   FileText,
   ClipboardList,
@@ -16,19 +15,13 @@ import {
   FileSearch,
   Layers,
   Video,
-  User,
-  Pin,
+  Menu,
   PanelLeftClose,
-  PanelLeftOpen,
 } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { useRbac } from '@/hooks/useRbac';
 import { ROUTES } from '@/config/routes';
 import { Badge } from '../ui/Badge';
-import { Avatar } from '../ui/Avatar';
-import { useProfileImage } from '@/contexts/ProfileImageContext';
-import { formatName } from '@/utils/format.utils';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -102,15 +95,9 @@ interface SidebarProps {
 
 export function Sidebar({ environment = 'prod' }: SidebarProps) {
   const { collapsed, toggle } = useSidebar();
-  const [hovered, setHovered] = useState(false);
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
-  const [showAccountMenu, setShowAccountMenu] = useState(false);
   const location = useLocation();
-  const navigate = useNavigate();
-  const { user, logout } = useAuth();
-  const { hasAnyRole, roles } = useRbac();
-  const { imageUrl } = useProfileImage();
-  const accountRef = useRef<HTMLDivElement>(null);
+  const { hasAnyRole } = useRbac();
 
   const isAdmin = hasAnyRole(['ADMIN', 'SUPER_ADMIN']);
   const navItems = isAdmin ? adminNavItems : candidateNavItems;
@@ -129,21 +116,9 @@ export function Sidebar({ environment = 'prod' }: SidebarProps) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (accountRef.current && !accountRef.current.contains(target)) {
-        setShowAccountMenu(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClick);
-    return () => document.removeEventListener('mousedown', handleClick);
-  }, []);
-
-  // When collapsed, expand on hover for a "peek" experience
-  const isExpanded = !collapsed || hovered;
-  const showTooltips = collapsed && !hovered;
+  // Collapse/expand is driven purely by the toggle (click or the [ shortcut).
+  const isExpanded = !collapsed;
+  const showTooltips = collapsed;
 
   const envColors = {
     dev: 'warning',
@@ -151,51 +126,52 @@ export function Sidebar({ environment = 'prod' }: SidebarProps) {
     prod: 'success',
   } as const;
 
-  const profilePath = isAdmin ? ROUTES.ADMIN.PROFILE : ROUTES.CANDIDATE.PROFILE;
-
-  const handleProfileClick = () => {
-    setShowAccountMenu(false);
-    navigate(profilePath);
-  };
-
-  const handleLogout = async () => {
-    setShowAccountMenu(false);
-    await logout();
-    navigate(ROUTES.PUBLIC.LOGIN);
-  };
-
   return (
     <aside
-      onMouseEnter={() => collapsed && setHovered(true)}
-      onMouseLeave={() => { setHovered(false); setHoveredItem(null); setShowAccountMenu(false); }}
+      onMouseLeave={() => setHoveredItem(null)}
       className={`
         sidebar-surface
         fixed left-0 top-0 h-screen
         transition-all duration-moderate ease-spring
         ${isExpanded ? 'w-[240px]' : 'w-[72px]'}
-        ${collapsed && hovered ? 'sidebar-preview' : ''}
         flex flex-col z-sidebar
         hidden md:flex
       `}
     >
       {/* ----------------------------------------------------------------
-          Logo — Brand identity
+          Logo + Hamburger toggle
           ---------------------------------------------------------------- */}
-      <div className="flex items-center h-16 px-4 flex-shrink-0 relative z-10">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="sidebar-logo-mark w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-sm gradient-brand flex-shrink-0">
-            RP
+      <div
+        className={`
+          flex items-center h-16 flex-shrink-0 relative z-10
+          ${isExpanded ? 'px-4 gap-2' : 'px-0 justify-center'}
+        `}
+      >
+        {isExpanded && (
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="sidebar-logo-mark w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-sm gradient-brand flex-shrink-0">
+              RP
+            </div>
+            <span className="font-heading font-bold text-[1.05rem] gradient-text truncate">
+              RightPath
+            </span>
           </div>
-          <span
-            className={`
-              font-heading font-bold text-[1.05rem] gradient-text
-              transition-all duration-moderate ease-spring
-              ${isExpanded ? 'opacity-100 w-auto' : 'opacity-0 w-0 overflow-hidden'}
-            `}
-          >
-            RightPath
-          </span>
-        </div>
+        )}
+
+        {/* Hamburger — collapse / expand the sidebar */}
+        <button
+          onClick={toggle}
+          className={`
+            sidebar-collapse-btn p-2 rounded-xl flex-shrink-0
+            transition-all duration-200 ease-spring
+            text-[var(--sidebarText)] hover:text-[var(--sidebarTextHover,var(--text))]
+            hover:bg-[var(--sidebarItemHover,var(--bgOverlay,var(--surface1)))]
+          `}
+          title={collapsed ? 'Expand sidebar (press [)' : 'Collapse sidebar (press [)'}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          {isExpanded ? <PanelLeftClose size={18} /> : <Menu size={18} />}
+        </button>
       </div>
 
       {/* Environment badge */}
@@ -272,106 +248,6 @@ export function Sidebar({ environment = 'prod' }: SidebarProps) {
           })}
         </ul>
       </nav>
-
-      {/* ----------------------------------------------------------------
-          Bottom: User Card + Collapse Toggle
-          ---------------------------------------------------------------- */}
-      <div className={`flex-shrink-0 ${isExpanded ? 'px-3' : 'px-0'} pb-3 pt-2 space-y-1.5 relative z-10 transition-all duration-moderate ease-spring`}>
-        {/* User card + collapse button */}
-        <div ref={accountRef} className={`flex items-center relative ${isExpanded ? 'gap-2' : 'justify-center'}`}>
-          {showAccountMenu && (
-            <div
-              className={`
-                dropdown-menu bottom-full mb-2 w-56
-                ${isExpanded ? 'left-0' : 'left-full ml-3'}
-              `}
-            >
-              <div className="px-4 py-3">
-                <p className="text-[0.8125rem] font-semibold text-[var(--text)] truncate">
-                  {formatName(user?.firstName, user?.lastName)}
-                </p>
-                <p className="text-[0.6875rem] text-[var(--textTertiary)] mt-0.5 truncate">
-                  {user?.email}
-                </p>
-              </div>
-              <div className="py-1">
-                <button onClick={handleProfileClick} className="dropdown-item">
-                  <User size={16} />
-                  <span>My Profile</span>
-                </button>
-                <button onClick={handleLogout} className="dropdown-item text-[var(--error)] hover:bg-[var(--errorMuted,var(--errorLight))]">
-                  <LogOut size={16} />
-                  <span>Logout</span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={() => setShowAccountMenu((value) => !value)}
-            onMouseEnter={() => setHoveredItem('account')}
-            onMouseLeave={() => setHoveredItem(null)}
-            className={`
-              sidebar-user-card
-              flex items-center rounded-2xl text-left
-              transition-all duration-200
-              ${isExpanded ? 'gap-3 flex-1 min-w-0 p-2.5' : 'justify-center p-1.5'}
-            `}
-          >
-            <Avatar
-              src={imageUrl}
-              firstName={user?.firstName}
-              lastName={user?.lastName}
-              size="sm"
-            />
-            <div
-              className={`
-                min-w-0 transition-all duration-moderate ease-spring
-                ${isExpanded ? 'opacity-100 w-auto' : 'opacity-0 w-0 overflow-hidden'}
-              `}
-            >
-              <p className="text-[0.8125rem] font-semibold text-[var(--text)] truncate leading-tight">
-                {formatName(user?.firstName, user?.lastName)}
-              </p>
-              <p className="text-[0.6875rem] text-[var(--textTertiary)] truncate capitalize leading-tight mt-0.5">
-                {roles[0]?.toLowerCase().replace('_', ' ') || 'User'}
-              </p>
-            </div>
-            <NavTooltip
-              label="Account"
-              visible={showTooltips && hoveredItem === 'account'}
-            />
-          </button>
-          {/* Sidebar control — always visible, state-aware icon */}
-          <button
-            onClick={toggle}
-            className={`
-              sidebar-collapse-btn p-1.5 rounded-xl
-              transition-all duration-200 ease-spring flex-shrink-0
-              ${hovered && collapsed
-                ? 'text-[var(--sidebarTextActive)] hover:bg-[var(--sidebarItemActive,rgba(16,185,129,0.12))]'
-                : 'text-[var(--sidebarText)] hover:text-[var(--sidebarTextHover)]'
-              }
-            `}
-            title={
-              collapsed && hovered
-                ? 'Pin sidebar open (press [)'
-                : collapsed
-                  ? 'Expand sidebar (press [)'
-                  : 'Collapse sidebar (press [)'
-            }
-          >
-            {collapsed && hovered ? (
-              <Pin size={16} className="rotate-45" />
-            ) : collapsed ? (
-              <PanelLeftOpen size={16} />
-            ) : (
-              <PanelLeftClose size={16} />
-            )}
-          </button>
-        </div>
-      </div>
     </aside>
   );
 }
