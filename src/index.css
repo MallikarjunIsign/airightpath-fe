@@ -415,33 +415,21 @@
 
   /* ------------------------------------------------------------------
      Navbar Surface — Floating header
-     Transparent by default. On scroll: soft blur, NO hard border.
-     Feels like part of the same system as the sidebar.
+     Solid frosted background with a soft divider so it reads as a header.
      ------------------------------------------------------------------ */
   .navbar-surface {
-    background: transparent;
+    background: var(--sidebarBg);
     border-bottom: none;
   }
 
-  /* On scroll: frosted glass appearance with soft shadow, NO border */
+  /* On scroll: add a soft shadow */
   .navbar-scrolled {
-    background: color-mix(in srgb, var(--navbarBg) 75%, transparent);
-    backdrop-filter: blur(16px) saturate(160%);
-    -webkit-backdrop-filter: blur(16px) saturate(160%);
-    box-shadow: 0 1px 12px rgba(0, 0, 0, 0.04);
-    border-bottom: none;
+    background: var(--sidebarBg);
+    box-shadow: 0 1px 12px rgba(0, 0, 0, 0.06);
   }
 
   .dark .navbar-scrolled {
-    background: color-mix(in srgb, var(--navbarBg) 70%, transparent);
-    box-shadow: 0 1px 16px rgba(0, 0, 0, 0.12);
-  }
-
-  @supports not (background: color-mix(in srgb, red 50%, blue)) {
-    .navbar-scrolled {
-      background: var(--navbarBg);
-      opacity: 0.95;
-    }
+    box-shadow: 0 1px 16px rgba(0, 0, 0, 0.16);
   }
 
   /* ------------------------------------------------------------------

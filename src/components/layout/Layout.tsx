@@ -2,6 +2,7 @@ import { ReactNode } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Navbar } from './Navbar';
+import { PageBreadcrumbs } from './PageBreadcrumbs';
 import { Logo } from '@/components/ui/Logo';
 import { ENV } from '@/config/env';
 
@@ -31,6 +32,7 @@ export function Layout({ children }: LayoutProps) {
         }}
       >
         <div className="max-w-[1400px] mx-auto animate-fade-in-up">
+          <PageBreadcrumbs />
           {children || <Outlet />}
         </div>
       </main>

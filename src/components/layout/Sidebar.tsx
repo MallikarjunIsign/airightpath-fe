@@ -184,11 +184,16 @@ export function Sidebar({ environment = 'prod' }: SidebarProps) {
           No category groupings. Spacing creates visual rhythm.
           ---------------------------------------------------------------- */}
       <nav className="flex-1 overflow-y-auto overflow-x-hidden scrollbar-none py-3 relative z-10">
-        <ul className={`space-y-0.5 transition-all duration-moderate ease-spring ${isExpanded ? 'px-3' : 'px-0'}`}>
+        <ul
+          className={`
+            transition-all duration-moderate ease-spring
+            ${isExpanded ? 'px-3 space-y-0.5' : 'px-0 space-y-1 flex flex-col items-center'}
+          `}
+        >
           {navItems.map((item) => {
             const isActive = location.pathname === item.path;
             return (
-              <li key={item.path} className={`relative ${!isExpanded ? 'flex justify-center' : ''}`}>
+              <li key={item.path} className={`relative ${!isExpanded ? 'flex justify-center w-full' : ''}`}>
                 <Link
                   to={item.path}
                   onMouseEnter={() => setHoveredItem(item.path)}
@@ -219,9 +224,9 @@ export function Sidebar({ environment = 'prod' }: SidebarProps) {
 
                   <span
                     className={`
-                      flex-1 truncate text-[0.8125rem] tracking-[-0.01em]
+                      truncate text-[0.8125rem] tracking-[-0.01em]
                       transition-all duration-moderate ease-spring
-                      ${isExpanded ? 'opacity-100 w-auto' : 'opacity-0 w-0 overflow-hidden'}
+                      ${isExpanded ? 'flex-1 opacity-100 w-auto' : 'hidden'}
                     `}
                   >
                     {item.label}
