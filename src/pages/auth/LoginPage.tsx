@@ -29,6 +29,7 @@ export function LoginPage() {
     formState: { errors, isSubmitting },
   } = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
+    mode: 'onTouched',
     defaultValues: {
       email: '',
       password: '',
@@ -119,10 +120,11 @@ export function LoginPage() {
           </div>
 
           <div className="bg-[var(--cardBg)] border border-[var(--cardBorder)] rounded-xl p-8 shadow-card">
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+            <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-5">
               <Input
                 type="email"
                 label="Email"
+                required
                 placeholder="you@example.com"
                 leftIcon={<Mail size={18} />}
                 error={errors.email?.message}
@@ -133,6 +135,7 @@ export function LoginPage() {
                 <Input
                   type={showPassword ? 'text' : 'password'}
                   label="Password"
+                  required
                   placeholder="Enter your password"
                   leftIcon={<Lock size={18} />}
                   rightIcon={
