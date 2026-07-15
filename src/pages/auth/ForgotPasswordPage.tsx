@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Mail, Phone, Lock, Eye, EyeOff, ArrowLeft, KeyRound, ShieldCheck } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, ArrowLeft, KeyRound, ShieldCheck } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -192,6 +192,7 @@ export function ForgotPasswordPage() {
                     <Mail size={16} className="text-[var(--textSecondary)]" />
                     <span className="text-sm text-[var(--text)]">Email</span>
                   </label>
+                  {/* Mobile OTP disabled — backend does not support mobile-based OTP send.
                   <label className="flex items-center gap-2 cursor-pointer px-4 py-2.5 rounded-[10px] border border-[var(--border)] hover:border-[var(--primary)] transition-colors flex-1">
                     <input
                       type="radio"
@@ -202,6 +203,7 @@ export function ForgotPasswordPage() {
                     <Phone size={16} className="text-[var(--textSecondary)]" />
                     <span className="text-sm text-[var(--text)]">Mobile</span>
                   </label>
+                  */}
                 </div>
                 {contactForm.formState.errors.otpMethod && (
                   <p className="mt-1.5 text-sm text-[var(--error)]">
