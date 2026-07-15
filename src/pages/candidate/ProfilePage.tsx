@@ -134,17 +134,7 @@ export function ProfilePage() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-3xl font-bold text-[var(--text)]">My Profile</h1>
-        <Button
-          type="button"
-          variant="secondary"
-          leftIcon={<Lock size={18} />}
-          onClick={() => navigate(changePasswordPath)}
-        >
-          Change password
-        </Button>
-      </div>
+      <h1 className="text-3xl font-bold text-[var(--text)]">My Profile</h1>
 
       {/* Photo Upload Section */}
       <Card>
@@ -247,6 +237,31 @@ export function ProfilePage() {
               </Button>
             </div>
           </form>
+        </CardContent>
+      </Card>
+
+      {/* Security / Change Password */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Security</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-medium text-[var(--text)]">Password</p>
+              <p className="text-sm text-[var(--textSecondary)]">
+                Update your password to keep your account secure.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              leftIcon={<Lock size={18} />}
+              onClick={() => navigate(changePasswordPath)}
+            >
+              Change password
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
