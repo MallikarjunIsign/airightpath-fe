@@ -1,17 +1,21 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Camera, Loader2, Save } from 'lucide-react';
+import { Camera, Loader2, Lock, Save } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfileImage } from '@/contexts/ProfileImageContext';
 import { useToast } from '@/components/ui/Toast';
+import { useRbac } from '@/hooks/useRbac';
 import { userService } from '@/services/user.service';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Avatar } from '@/components/ui/Avatar';
+import { Modal } from '@/components/ui/Modal';
 import { mobileSchema } from '@/config/validation';
+import { ROUTES } from '@/config/routes';
 import type { UsersDto } from '@/types/user.types';
 
 const profileSchema = z.object({
@@ -32,11 +36,17 @@ export function ProfilePage() {
   const { user } = useAuth();
   const { imageUrl, refreshImage } = useProfileImage();
   const { showToast } = useToast();
+  const { hasAnyRole } = useRbac();
+  const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [showImageViewer, setShowImageViewer] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const changePasswordPath = hasAnyRole(['ADMIN', 'SUPER_ADMIN'])
+    ? ROUTES.ADMIN.CHANGE_PASSWORD
+    : ROUTES.CANDIDATE.CHANGE_PASSWORD;
 
   const {
     register,
@@ -124,7 +134,17 @@ export function ProfilePage() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      <h1 className="text-3xl font-bold text-[var(--text)]">My Profile</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-3xl font-bold text-[var(--text)]">My Profile</h1>
+        <Button
+          type="button"
+          variant="secondary"
+          leftIcon={<Lock size={18} />}
+          onClick={() => navigate(changePasswordPath)}
+        >
+          Change password
+        </Button>
+      </div>
 
       {/* Photo Upload Section */}
       <Card>
@@ -134,13 +154,21 @@ export function ProfilePage() {
         <CardContent>
           <div className="flex items-center gap-6">
             <div className="relative">
-              <Avatar
-                src={imageUrl}
-                firstName={user?.firstName}
-                lastName={user?.lastName}
-                size="xl"
-                className="w-24 h-24 text-2xl border-2 border-[var(--border)]"
-              />
+              <button
+                type="button"
+                onClick={() => imageUrl && setShowImageViewer(true)}
+                disabled={!imageUrl}
+                title={imageUrl ? 'View profile photo' : undefined}
+                className={`rounded-full ${imageUrl ? 'cursor-zoom-in' : 'cursor-default'}`}
+              >
+                <Avatar
+                  src={imageUrl}
+                  firstName={user?.firstName}
+                  lastName={user?.lastName}
+                  size="xl"
+                  className="w-24 h-24 text-2xl border-2 border-[var(--border)]"
+                />
+              </button>
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -221,6 +249,24 @@ export function ProfilePage() {
           </form>
         </CardContent>
       </Card>
+
+      {/* Profile image viewer */}
+      {imageUrl && (
+        <Modal
+          isOpen={showImageViewer}
+          onClose={() => setShowImageViewer(false)}
+          title="Profile Photo"
+          size="lg"
+        >
+          <div className="flex items-center justify-center">
+            <img
+              src={imageUrl}
+              alt="Profile"
+              className="max-h-[70vh] w-auto rounded-xl object-contain"
+            />
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

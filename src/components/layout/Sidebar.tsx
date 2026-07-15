@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   Users,
@@ -17,7 +17,6 @@ import {
   Layers,
   Video,
   User,
-  Lock,
   Pin,
   PanelLeftClose,
   PanelLeftOpen,
@@ -57,20 +56,16 @@ const adminNavItems: NavItem[] = [
   { label: 'Schedule', icon: <Calendar size={18} />, path: ROUTES.ADMIN.INTERVIEWS_SCHEDULE },
   { label: 'Interview Results', icon: <Video size={18} />, path: ROUTES.ADMIN.INTERVIEWS_RESULTS },
   { label: 'Prompts', icon: <MessageSquare size={18} />, path: ROUTES.ADMIN.PROMPTS },
-  { label: 'Profile', icon: <User size={18} />, path: ROUTES.ADMIN.PROFILE },
-  { label: 'Password', icon: <Lock size={18} />, path: ROUTES.ADMIN.CHANGE_PASSWORD },
 ];
 
 const candidateNavItems: NavItem[] = [
   { label: 'Dashboard', icon: <LayoutDashboard size={18} />, path: ROUTES.CANDIDATE.DASHBOARD },
-  { label: 'Profile', icon: <User size={18} />, path: ROUTES.CANDIDATE.PROFILE },
   { label: 'Resume', icon: <FileText size={18} />, path: ROUTES.CANDIDATE.RESUME },
   { label: 'Events', icon: <BookOpen size={18} />, path: ROUTES.CANDIDATE.EVENTS },
   { label: 'Applications', icon: <FileText size={18} />, path: ROUTES.CANDIDATE.APPLICATIONS },
   { label: 'Assessments', icon: <ClipboardList size={18} />, path: ROUTES.CANDIDATE.ASSESSMENTS },
   { label: 'Interviews', icon: <Video size={18} />, path: ROUTES.CANDIDATE.INTERVIEWS },
   { label: 'Results', icon: <Award size={18} />, path: ROUTES.CANDIDATE.RESULTS },
-  { label: 'Password', icon: <Lock size={18} />, path: ROUTES.CANDIDATE.CHANGE_PASSWORD },
 ];
 
 // ---------------------------------------------------------------------------
@@ -109,10 +104,13 @@ export function Sidebar({ environment = 'prod' }: SidebarProps) {
   const { collapsed, toggle } = useSidebar();
   const [hovered, setHovered] = useState(false);
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
   const { user, logout } = useAuth();
   const { hasAnyRole, roles } = useRbac();
   const { imageUrl } = useProfileImage();
+  const accountRef = useRef<HTMLDivElement>(null);
 
   const isAdmin = hasAnyRole(['ADMIN', 'SUPER_ADMIN']);
   const navItems = isAdmin ? adminNavItems : candidateNavItems;
@@ -131,6 +129,18 @@ export function Sidebar({ environment = 'prod' }: SidebarProps) {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleKeyDown]);
 
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (accountRef.current && !accountRef.current.contains(target)) {
+        setShowAccountMenu(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
   // When collapsed, expand on hover for a "peek" experience
   const isExpanded = !collapsed || hovered;
   const showTooltips = collapsed && !hovered;
@@ -141,10 +151,23 @@ export function Sidebar({ environment = 'prod' }: SidebarProps) {
     prod: 'success',
   } as const;
 
+  const profilePath = isAdmin ? ROUTES.ADMIN.PROFILE : ROUTES.CANDIDATE.PROFILE;
+
+  const handleProfileClick = () => {
+    setShowAccountMenu(false);
+    navigate(profilePath);
+  };
+
+  const handleLogout = async () => {
+    setShowAccountMenu(false);
+    await logout();
+    navigate(ROUTES.PUBLIC.LOGIN);
+  };
+
   return (
     <aside
       onMouseEnter={() => collapsed && setHovered(true)}
-      onMouseLeave={() => { setHovered(false); setHoveredItem(null); }}
+      onMouseLeave={() => { setHovered(false); setHoveredItem(null); setShowAccountMenu(false); }}
       className={`
         sidebar-surface
         fixed left-0 top-0 h-screen
@@ -254,43 +277,44 @@ export function Sidebar({ environment = 'prod' }: SidebarProps) {
           Bottom: User Card + Collapse Toggle
           ---------------------------------------------------------------- */}
       <div className={`flex-shrink-0 ${isExpanded ? 'px-3' : 'px-0'} pb-3 pt-2 space-y-1.5 relative z-10 transition-all duration-moderate ease-spring`}>
-        {/* Logout */}
-        <div className={!isExpanded ? 'flex justify-center' : ''}>
+        {/* User card + collapse button */}
+        <div ref={accountRef} className={`flex items-center relative ${isExpanded ? 'gap-2' : 'justify-center'}`}>
+          {showAccountMenu && (
+            <div
+              className={`
+                dropdown-menu bottom-full mb-2 w-56
+                ${isExpanded ? 'left-0' : 'left-full ml-3'}
+              `}
+            >
+              <div className="px-4 py-3">
+                <p className="text-[0.8125rem] font-semibold text-[var(--text)] truncate">
+                  {formatName(user?.firstName, user?.lastName)}
+                </p>
+                <p className="text-[0.6875rem] text-[var(--textTertiary)] mt-0.5 truncate">
+                  {user?.email}
+                </p>
+              </div>
+              <div className="py-1">
+                <button onClick={handleProfileClick} className="dropdown-item">
+                  <User size={16} />
+                  <span>My Profile</span>
+                </button>
+                <button onClick={handleLogout} className="dropdown-item text-[var(--error)] hover:bg-[var(--errorMuted,var(--errorLight))]">
+                  <LogOut size={16} />
+                  <span>Logout</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           <button
-            onClick={() => logout()}
-            onMouseEnter={() => setHoveredItem('logout')}
+            type="button"
+            onClick={() => setShowAccountMenu((value) => !value)}
+            onMouseEnter={() => setHoveredItem('account')}
             onMouseLeave={() => setHoveredItem(null)}
             className={`
-              group flex items-center relative
-              text-[var(--sidebarText)] font-medium
-              hover:bg-[var(--errorMuted,var(--errorLight))] hover:text-[var(--error)]
-              transition-all duration-200 ease-spring
-              ${isExpanded ? 'gap-3 w-full rounded-2xl px-3.5 py-2' : 'justify-center rounded-full w-10 h-10'}
-            `}
-          >
-          <LogOut size={18} className="flex-shrink-0 opacity-70 group-hover:opacity-100" />
-          <span
-            className={`
-              text-[0.8125rem]
-              transition-all duration-moderate ease-spring
-              ${isExpanded ? 'opacity-100 w-auto' : 'opacity-0 w-0 overflow-hidden'}
-            `}
-          >
-            Logout
-          </span>
-          <NavTooltip
-            label="Logout"
-            visible={showTooltips && hoveredItem === 'logout'}
-          />
-          </button>
-        </div>
-
-        {/* User card + collapse button */}
-        <div className={`flex items-center ${isExpanded ? 'gap-2' : 'justify-center'}`}>
-          <div
-            className={`
               sidebar-user-card
-              flex items-center rounded-2xl
+              flex items-center rounded-2xl text-left
               transition-all duration-200
               ${isExpanded ? 'gap-3 flex-1 min-w-0 p-2.5' : 'justify-center p-1.5'}
             `}
@@ -314,8 +338,11 @@ export function Sidebar({ environment = 'prod' }: SidebarProps) {
                 {roles[0]?.toLowerCase().replace('_', ' ') || 'User'}
               </p>
             </div>
-          </div>
-
+            <NavTooltip
+              label="Account"
+              visible={showTooltips && hoveredItem === 'account'}
+            />
+          </button>
           {/* Sidebar control — always visible, state-aware icon */}
           <button
             onClick={toggle}
