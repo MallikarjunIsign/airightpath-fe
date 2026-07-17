@@ -9,9 +9,16 @@ interface ModalProps {
   children: ReactNode;
   footer?: ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl';
+  /**
+   * When true, the overlay is confined to the content area (right of the
+   * sidebar, below the navbar) instead of the whole viewport — so it doesn't
+   * overlap the app chrome. On mobile the sidebar width is 0, so it fills the
+   * screen as usual.
+   */
+  contained?: boolean;
 }
 
-export function Modal({ isOpen, onClose, title, children, footer, size = 'md' }: ModalProps) {
+export function Modal({ isOpen, onClose, title, children, footer, size = 'md', contained = false }: ModalProps) {
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = 'hidden';
@@ -43,7 +50,10 @@ export function Modal({ isOpen, onClose, title, children, footer, size = 'md' }:
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center animate-fade-in">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center animate-fade-in"
+      style={contained ? { left: 'var(--sidebar-width, 0px)', top: 'var(--navbar-height, 3.5rem)' } : undefined}
+    >
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"

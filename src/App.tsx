@@ -16,6 +16,7 @@ import { ChangePasswordPage } from '@/pages/auth/ChangePasswordPage';
 
 // Admin pages
 import { AdminDashboardPage } from '@/pages/admin/AdminDashboardPage';
+import { AdminJobsPage } from '@/pages/admin/AdminJobsPage';
 import { JobPostFormPage } from '@/pages/admin/JobPostFormPage';
 import { CandidateDetailsPage } from '@/pages/admin/CandidateDetailsPage';
 import { UserListPage } from '@/pages/admin/UserListPage';
@@ -95,6 +96,7 @@ function App() {
       >
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<AdminDashboardPage />} />
+        <Route path="jobs" element={<AdminJobsPage />} />
         <Route path="jobs/create" element={<JobPostFormPage />} />
         <Route path="candidates" element={<CandidateDetailsPage />} />
         <Route path="users" element={<UserListPage />} />

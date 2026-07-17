@@ -1,5 +1,23 @@
 import { useState, useEffect, Dispatch, SetStateAction } from 'react';
 
+const STORAGE_PREFIX = 'rightpath:persist:';
+
+/**
+ * Imperatively seed a persisted value (same store used by usePersistentState),
+ * e.g. to pre-select a control on another screen before navigating to it.
+ */
+export function writePersistentValue<T>(
+  key: string,
+  value: T,
+  storage: Storage = sessionStorage,
+): void {
+  try {
+    storage.setItem(`${STORAGE_PREFIX}${key}`, JSON.stringify(value));
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
 /**
  * Drop-in replacement for `useState` that persists the value so it survives a
  * page refresh/reload. Backed by `sessionStorage` by default (per-tab, cleared
@@ -18,7 +36,7 @@ export function usePersistentState<T>(
   defaultValue: T,
   storage: Storage = sessionStorage,
 ): [T, Dispatch<SetStateAction<T>>] {
-  const storageKey = `rightpath:persist:${key}`;
+  const storageKey = `${STORAGE_PREFIX}${key}`;
 
   const [value, setValue] = useState<T>(() => {
     try {
