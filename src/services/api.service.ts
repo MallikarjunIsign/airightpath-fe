@@ -161,11 +161,17 @@ api.interceptors.response.use(
 
     // ── Auto-toast for all other errors ──────────────────────────────
     if (!originalRequest?._skipErrorToast) {
-      if (status && status >= 500) {
+      const data = error.response?.data as ApiErrorEnvelope | undefined;
+      const hasStructuredError =
+        !!data?.code || typeof data?.message === "string";
+      if (hasStructuredError) {
+        // Prefer the server's specific error (mapped if known) even for 5xx, so
+        // failures like AI_SERVICE_ERROR aren't masked by a generic message.
+        dispatchErrorToast(extractApiError(error).message);
+      } else if (status && status >= 500) {
         dispatchErrorToast(getErrorMessage("INTERNAL_ERROR"));
       } else {
-        const { message } = extractApiError(error);
-        dispatchErrorToast(message);
+        dispatchErrorToast(extractApiError(error).message);
       }
     }
 

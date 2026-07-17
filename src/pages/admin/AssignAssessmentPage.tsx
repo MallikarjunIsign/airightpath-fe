@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
-import { Loader2, ClipboardList, Send, Sparkles, Upload, Eye, FileText, X } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { Loader2, ClipboardList, Send, Sparkles, Upload, Eye, FileText, X, FileCog } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -11,6 +11,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
 import { assessmentService } from '@/services/assessment.service';
+import api from '@/services/api.service';
+import { ENDPOINTS } from '@/config/api.endpoints';
+import { ROUTES } from '@/config/routes';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
 
 interface FileState {
@@ -22,6 +25,7 @@ export function AssignAssessmentPage() {
   const { showToast } = useToast();
   const { user } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
 
   // Candidates to pre-select once they load (passed from the Candidate page).
   const pendingEmailsRef = useRef<string[] | null>(null);
@@ -48,6 +52,9 @@ export function AssignAssessmentPage() {
   const [generatingAptitude, setGeneratingAptitude] = useState(false);
   const [generatingCoding, setGeneratingCoding] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Prompt types already configured for the selected job (to label Edit vs Create).
+  const [configuredPromptTypes, setConfiguredPromptTypes] = useState<Set<string>>(new Set());
 
   // File input refs
   const aptitudeInputRef = useRef<HTMLInputElement>(null);
@@ -76,6 +83,51 @@ export function AssignAssessmentPage() {
     }
     setSelectedEmails(new Set());
   }, [selectedPrefix]);
+
+  // Track which prompts this job already has, to label the button Edit vs Create.
+  const refreshConfiguredPrompts = useCallback(async (prefix: string) => {
+    if (!prefix) {
+      setConfiguredPromptTypes(new Set());
+      return;
+    }
+    try {
+      const res = await api.get(ENDPOINTS.PROMPTS.GET_BY_JOB(prefix), {
+        _skipErrorToast: true,
+      } as never);
+      // Tolerate both a raw array and an { data: [...] } envelope; normalize case.
+      const body = res.data as unknown;
+      const list: Array<{ promptType?: string }> = Array.isArray(body)
+        ? body
+        : Array.isArray((body as { data?: unknown })?.data)
+          ? ((body as { data: Array<{ promptType?: string }> }).data)
+          : [];
+      setConfiguredPromptTypes(
+        new Set(list.map((p) => String(p.promptType ?? '').toUpperCase()).filter(Boolean))
+      );
+    } catch {
+      setConfiguredPromptTypes(new Set());
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshConfiguredPrompts(selectedPrefix);
+  }, [selectedPrefix, refreshConfiguredPrompts]);
+
+  // Re-check when returning to this tab (e.g. after configuring on the Prompts screen).
+  useEffect(() => {
+    const onFocus = () => refreshConfiguredPrompts(selectedPrefix);
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [selectedPrefix, refreshConfiguredPrompts]);
+
+  // Go to the Prompts screen (with this job selected) to reuse/create/edit a prompt.
+  function goToPromptScreen() {
+    if (!selectedPrefix) {
+      showToast('Please select a job first', 'warning');
+      return;
+    }
+    navigate(ROUTES.ADMIN.PROMPTS, { state: { jobPrefix: selectedPrefix } });
+  }
 
   // Apply the pending pre-selection once the candidate list has loaded.
   useEffect(() => {
@@ -159,7 +211,8 @@ export function AssignAssessmentPage() {
       setAptitudeFile({ file, source: 'ai' });
       showToast('Aptitude questions generated successfully!', 'success');
     } catch {
-      // Error toast auto-handled by interceptor
+      // Error toast auto-handled by interceptor. If the prompt isn't configured,
+      // the admin can click "Create Prompt" to set it up on the Prompts screen.
     } finally {
       setGeneratingAptitude(false);
     }
@@ -181,7 +234,7 @@ export function AssignAssessmentPage() {
       setCodingFile({ file, source: 'ai' });
       showToast('Coding questions generated successfully!', 'success');
     } catch {
-      // Error toast auto-handled by interceptor
+      // Error toast auto-handled by interceptor.
     } finally {
       setGeneratingCoding(false);
     }
@@ -353,17 +406,36 @@ export function AssignAssessmentPage() {
                 <h3 className="text-sm font-semibold text-[var(--text)]">
                   Aptitude Question Paper
                 </h3>
-                <div className="flex flex-wrap gap-3">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleGenerateAptitude}
-                    isLoading={generatingAptitude}
-                    leftIcon={!generatingAptitude ? <Sparkles size={14} /> : undefined}
-                    disabled={submitting}
-                  >
-                    Generate via AI
-                  </Button>
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleGenerateAptitude}
+                      isLoading={generatingAptitude}
+                      leftIcon={!generatingAptitude ? <Sparkles size={14} /> : undefined}
+                      disabled={submitting}
+                    >
+                      Generate via AI
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={goToPromptScreen}
+                      leftIcon={<FileCog size={14} />}
+                      disabled={submitting}
+                      title="Reuse another job's prompt or create/edit this job's prompt"
+                    >
+                      {configuredPromptTypes.has('APTITUDE') ? 'Edit Prompt' : 'Create Prompt'}
+                    </Button>
+                  </div>
+
+                  <div className="flex items-center gap-3 text-xs text-[var(--textTertiary)]">
+                    <span className="h-px flex-1 bg-[var(--border)]" />
+                    or
+                    <span className="h-px flex-1 bg-[var(--border)]" />
+                  </div>
+
                   <Button
                     variant="outline"
                     size="sm"
@@ -371,7 +443,7 @@ export function AssignAssessmentPage() {
                     leftIcon={<Upload size={14} />}
                     disabled={generatingAptitude || submitting}
                   >
-                    Upload from Local
+                    Upload from Local System
                   </Button>
                   <input
                     ref={aptitudeInputRef}
@@ -418,17 +490,36 @@ export function AssignAssessmentPage() {
                 <h3 className="text-sm font-semibold text-[var(--text)]">
                   Coding Question Paper
                 </h3>
-                <div className="flex flex-wrap gap-3">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleGenerateCoding}
-                    isLoading={generatingCoding}
-                    leftIcon={!generatingCoding ? <Sparkles size={14} /> : undefined}
-                    disabled={submitting}
-                  >
-                    Generate via AI
-                  </Button>
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleGenerateCoding}
+                      isLoading={generatingCoding}
+                      leftIcon={!generatingCoding ? <Sparkles size={14} /> : undefined}
+                      disabled={submitting}
+                    >
+                      Generate via AI
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={goToPromptScreen}
+                      leftIcon={<FileCog size={14} />}
+                      disabled={submitting}
+                      title="Reuse another job's prompt or create/edit this job's prompt"
+                    >
+                      {configuredPromptTypes.has('CODING') ? 'Edit Prompt' : 'Create Prompt'}
+                    </Button>
+                  </div>
+
+                  <div className="flex items-center gap-3 text-xs text-[var(--textTertiary)]">
+                    <span className="h-px flex-1 bg-[var(--border)]" />
+                    or
+                    <span className="h-px flex-1 bg-[var(--border)]" />
+                  </div>
+
                   <Button
                     variant="outline"
                     size="sm"
@@ -436,7 +527,7 @@ export function AssignAssessmentPage() {
                     leftIcon={<Upload size={14} />}
                     disabled={generatingCoding || submitting}
                   >
-                    Upload from Local
+                    Upload from Local System
                   </Button>
                   <input
                     ref={codingInputRef}

@@ -7,6 +7,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   AUTH_REFRESH_REUSE_DETECTED: 'For your security, this session has been terminated. Please sign in again.',
   AUTH_FORBIDDEN: "You don't have permission to do that.",
   INTERNAL_ERROR: 'Something went wrong on our end. Please try again in a moment.',
+  AI_SERVICE_ERROR: 'The AI service is temporarily unavailable. Please try again in a moment.',
   // Domain
   USER_NOT_FOUND: "We couldn't find an account with that email address.",
   USER_ALREADY_EXISTS: 'An account with this email already exists. Try signing in instead.',

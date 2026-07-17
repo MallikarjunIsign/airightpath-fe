@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Loader2, Sparkles, Save, Plus, X, BarChart3, Info, Copy, Check, ArrowLeft, Search, Briefcase } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -79,6 +80,7 @@ const PROMPT_TABS: PromptTab[] = [
 
 export function JobPromptPage() {
   const { showToast } = useToast();
+  const location = useLocation();
 
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
   const [selectedPrefix, setSelectedPrefix] = useState('');
@@ -124,6 +126,15 @@ export function JobPromptPage() {
 
   useEffect(() => {
     fetchJobs();
+  }, []);
+
+  // Open directly in edit mode for a job when navigated here (e.g. from Assign).
+  useEffect(() => {
+    const navState = location.state as { jobPrefix?: string } | null;
+    if (navState?.jobPrefix) {
+      openEditor(navState.jobPrefix);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
