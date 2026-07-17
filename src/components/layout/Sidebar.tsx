@@ -17,6 +17,7 @@ import {
   Video,
   Menu,
   PanelLeftClose,
+  X,
 } from "lucide-react";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { useRbac } from "@/hooks/useRbac";
@@ -172,7 +173,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({ environment = "prod" }: SidebarProps) {
-  const { collapsed, toggle } = useSidebar();
+  const { collapsed, toggle, mobileOpen, closeMobile, isMobile } = useSidebar();
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const location = useLocation();
   const { hasAnyRole } = useRbac();
@@ -202,9 +203,10 @@ export function Sidebar({ environment = "prod" }: SidebarProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
-  // Collapse/expand is driven purely by the toggle (click or the [ shortcut).
-  const isExpanded = !collapsed;
-  const showTooltips = collapsed;
+  // On mobile the sidebar is an off-canvas drawer and always shows full width
+  // with labels. On desktop, collapse/expand is driven by the toggle / [ shortcut.
+  const isExpanded = isMobile ? true : !collapsed;
+  const showTooltips = !isMobile && collapsed;
 
   const envColors = {
     dev: "warning",
@@ -213,17 +215,27 @@ export function Sidebar({ environment = "prod" }: SidebarProps) {
   } as const;
 
   return (
-    <aside
-      onMouseLeave={() => setHoveredItem(null)}
-      className={`
-        sidebar-surface
-        fixed left-0 top-0 h-screen
-        transition-all duration-moderate ease-spring
-        ${isExpanded ? "w-[240px]" : "w-[72px]"}
-        flex flex-col z-sidebar
-        hidden md:flex
-      `}
-    >
+    <>
+      {/* Mobile backdrop */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[45] md:hidden"
+          onClick={closeMobile}
+          aria-hidden="true"
+        />
+      )}
+
+      <aside
+        onMouseLeave={() => setHoveredItem(null)}
+        className={`
+          sidebar-surface
+          fixed left-0 top-0 h-screen
+          transition-transform duration-moderate ease-spring md:transition-all
+          ${isExpanded ? "w-[240px]" : "w-[72px]"}
+          ${mobileOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"} md:translate-x-0
+          flex flex-col z-sidebar
+        `}
+      >
       {/* ----------------------------------------------------------------
           Logo + Hamburger toggle
           ---------------------------------------------------------------- */}
@@ -239,9 +251,9 @@ export function Sidebar({ environment = "prod" }: SidebarProps) {
           </div>
         )}
 
-        {/* Hamburger — collapse / expand the sidebar */}
+        {/* Mobile: close drawer. Desktop: collapse / expand the sidebar. */}
         <button
-          onClick={toggle}
+          onClick={isMobile ? closeMobile : toggle}
           className={`
             sidebar-collapse-btn p-2 rounded-xl flex-shrink-0
             transition-all duration-200 ease-spring
@@ -249,13 +261,15 @@ export function Sidebar({ environment = "prod" }: SidebarProps) {
             hover:bg-[var(--sidebarItemHover,var(--bgOverlay,var(--surface1)))]
           `}
           title={
-            collapsed
-              ? "Expand sidebar (press [)"
-              : "Collapse sidebar (press [)"
+            isMobile
+              ? "Close menu"
+              : collapsed
+                ? "Expand sidebar (press [)"
+                : "Collapse sidebar (press [)"
           }
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-label={isMobile ? "Close menu" : collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          {isExpanded ? <PanelLeftClose size={18} /> : <Menu size={18} />}
+          {isMobile ? <X size={18} /> : isExpanded ? <PanelLeftClose size={18} /> : <Menu size={18} />}
         </button>
       </div>
 
@@ -288,6 +302,7 @@ export function Sidebar({ environment = "prod" }: SidebarProps) {
               >
                 <Link
                   to={item.path}
+                  onClick={closeMobile}
                   onMouseEnter={() => setHoveredItem(item.path)}
                   onMouseLeave={() => setHoveredItem(null)}
                   className={`
@@ -343,5 +358,6 @@ export function Sidebar({ environment = "prod" }: SidebarProps) {
         </ul>
       </nav>
     </aside>
+    </>
   );
 }
