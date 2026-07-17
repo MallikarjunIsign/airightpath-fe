@@ -27,6 +27,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { EmptyState } from '@/components/ui/EmptyState';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
+import { usePersistentState } from '@/hooks/usePersistentState';
 import { useToast } from '@/components/ui/Toast';
 import type { JobPostDTO, JobApplicationDTO, JobApplicationStatus } from '@/types/job.types';
 
@@ -100,8 +101,8 @@ export function CandidateDetailsPage() {
   const { showToast } = useToast();
 
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
-  const [selectedPrefix, setSelectedPrefix] = useState('');
-  const [activeStage, setActiveStage] = useState<JobApplicationStatus>('APPLIED');
+  const [selectedPrefix, setSelectedPrefix] = usePersistentState('candidates:selectedPrefix', '');
+  const [activeStage, setActiveStage] = usePersistentState<JobApplicationStatus>('candidates:activeStage', 'APPLIED');
   const [candidates, setCandidates] = useState<JobApplicationDTO[]>([]);
   const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set());
   const [loadingJobs, setLoadingJobs] = useState(true);

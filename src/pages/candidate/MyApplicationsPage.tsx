@@ -24,6 +24,7 @@ import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { ROUTES } from '@/config/routes';
 import { formatDate } from '@/utils/format.utils';
+import { usePersistentState } from '@/hooks/usePersistentState';
 import type { JobApplicationDTO, JobApplicationStatus } from '@/types/job.types';
 
 const STATUS_CONFIG: Record<
@@ -54,8 +55,8 @@ export function MyApplicationsPage() {
 
   const [applications, setApplications] = useState<JobApplicationDTO[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
+  const [searchQuery, setSearchQuery] = usePersistentState('myApplications:searchQuery', '');
+  const [filterStatus, setFilterStatus] = usePersistentState('myApplications:filterStatus', '');
   const [selectedApp, setSelectedApp] = useState<JobApplicationDTO | null>(null);
 
   useEffect(() => {

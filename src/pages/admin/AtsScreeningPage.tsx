@@ -31,6 +31,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
 import { useToast } from '@/components/ui/Toast';
+import { usePersistentState } from '@/hooks/usePersistentState';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
 
 type FilterTab = 'all' | 'shortlisted' | 'rejected';
@@ -41,16 +42,16 @@ export function AtsScreeningPage() {
   const { showToast } = useToast();
 
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
-  const [selectedPrefix, setSelectedPrefix] = useState('');
+  const [selectedPrefix, setSelectedPrefix] = usePersistentState('ats:selectedPrefix', '');
   const [selectedJob, setSelectedJob] = useState<JobPostDTO | null>(null);
   const [candidates, setCandidates] = useState<JobApplicationDTO[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [screening, setScreening] = useState(false);
   const [screened, setScreened] = useState(false);
-  const [activeTab, setActiveTab] = useState<FilterTab>('all');
-  const [sortField, setSortField] = useState<SortField>('matchPercent');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [activeTab, setActiveTab] = usePersistentState<FilterTab>('ats:activeTab', 'all');
+  const [sortField, setSortField] = usePersistentState<SortField>('ats:sortField', 'matchPercent');
+  const [sortDirection, setSortDirection] = usePersistentState<SortDirection>('ats:sortDirection', 'desc');
+  const [searchQuery, setSearchQuery] = usePersistentState('ats:searchQuery', '');
 
   // Candidate detail modal
   const [selectedCandidate, setSelectedCandidate] = useState<JobApplicationDTO | null>(null);
@@ -58,6 +59,14 @@ export function AtsScreeningPage() {
   useEffect(() => {
     fetchJobs();
   }, []);
+
+  // Re-derive the selected job from the persisted prefix once jobs load,
+  // so the selection survives a page refresh.
+  useEffect(() => {
+    if (selectedPrefix && jobs.length > 0) {
+      setSelectedJob(jobs.find((j) => j.jobPrefix === selectedPrefix) ?? null);
+    }
+  }, [jobs, selectedPrefix]);
 
   async function fetchJobs() {
     setLoadingJobs(true);

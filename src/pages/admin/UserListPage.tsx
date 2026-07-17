@@ -8,6 +8,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { EmptyState } from '@/components/ui/EmptyState';
 import { userService } from '@/services/user.service';
 import { useToast } from '@/components/ui/Toast';
+import { usePersistentState } from '@/hooks/usePersistentState';
 import type { UsersDto } from '@/types/user.types';
 
 export function UserListPage() {
@@ -15,7 +16,7 @@ export function UserListPage() {
 
   const [users, setUsers] = useState<UsersDto[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = usePersistentState('users:searchTerm', '');
   const [togglingEmail, setTogglingEmail] = useState<string | null>(null);
 
   useEffect(() => {
@@ -93,6 +94,7 @@ export function UserListPage() {
             </CardTitle>
             <SearchInput
               onSearch={handleSearch}
+              initialValue={searchTerm}
               placeholder="Search by name or email..."
               className="w-full sm:w-80"
             />
