@@ -17,6 +17,8 @@ import {
   Briefcase,
   Clock,
   ClipboardList,
+  Download,
+  ExternalLink,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -30,6 +32,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
 import { assessmentService } from '@/services/assessment.service';
+import { resumeService } from '@/services/resume.service';
 import { usePersistentState } from '@/hooks/usePersistentState';
 import { useToast } from '@/components/ui/Toast';
 import { ROUTES } from '@/config/routes';
@@ -131,9 +134,20 @@ export function CandidateDetailsPage() {
   // Candidate detail modal
   const [selectedCandidate, setSelectedCandidate] = useState<JobApplicationDTO | null>(null);
 
+  // Resume viewer
+  const [resumeView, setResumeView] = useState<{ url: string; name: string } | null>(null);
+  const [resumeLoading, setResumeLoading] = useState(false);
+
   useEffect(() => {
     fetchJobs();
   }, []);
+
+  // Revoke the blob URL when the resume viewer closes / on unmount.
+  useEffect(() => {
+    return () => {
+      if (resumeView) URL.revokeObjectURL(resumeView.url);
+    };
+  }, [resumeView]);
 
   useEffect(() => {
     if (selectedPrefix) {
@@ -222,6 +236,38 @@ export function CandidateDetailsPage() {
     setModalAction(action);
     setModalDateTime('');
     setModalContent('');
+  }
+
+  async function openResume(candidate: JobApplicationDTO) {
+    const email = getAppEmail(candidate);
+    if (!email) return;
+    setResumeLoading(true);
+    try {
+      const res = await resumeService.view(email);
+      const url = URL.createObjectURL(res.data);
+      setResumeView({ url, name: candidate.resumeFileName || `${email}-resume.pdf` });
+    } catch {
+      // Error toast auto-handled by interceptor
+    } finally {
+      setResumeLoading(false);
+    }
+  }
+
+  function closeResume() {
+    setResumeView((prev) => {
+      if (prev) URL.revokeObjectURL(prev.url);
+      return null;
+    });
+  }
+
+  function downloadResume() {
+    if (!resumeView) return;
+    const a = document.createElement('a');
+    a.href = resumeView.url;
+    a.download = resumeView.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   }
 
   // Go to the Assign page with this job + the selected candidates pre-selected.
@@ -749,13 +795,25 @@ export function CandidateDetailsPage() {
 
             {/* Resume */}
             {selectedCandidate.resumeFileName && (
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
+              <button
+                type="button"
+                onClick={() => openResume(selectedCandidate)}
+                disabled={resumeLoading}
+                className="w-full flex items-center gap-3 p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)] hover:border-[var(--primary)] hover:bg-[var(--primary)]/[0.04] transition-colors text-left disabled:opacity-60"
+              >
                 <FileText size={20} className="text-[var(--primary)] flex-shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-[var(--text)]">Resume</p>
                   <p className="text-xs text-[var(--textSecondary)] truncate">{selectedCandidate.resumeFileName}</p>
                 </div>
-              </div>
+                {resumeLoading ? (
+                  <Loader2 size={16} className="animate-spin text-[var(--primary)] flex-shrink-0" />
+                ) : (
+                  <span className="text-xs text-[var(--primary)] font-medium flex items-center gap-1 flex-shrink-0">
+                    <Eye size={14} /> View
+                  </span>
+                )}
+              </button>
             )}
 
             {/* Match Percent */}
@@ -782,6 +840,39 @@ export function CandidateDetailsPage() {
               </div>
             )}
           </div>
+        </Modal>
+      )}
+
+      {/* Resume viewer */}
+      {resumeView && (
+        <Modal
+          isOpen={!!resumeView}
+          onClose={closeResume}
+          title={resumeView.name}
+          size="xl"
+          footer={
+            <>
+              <Button variant="ghost" onClick={closeResume}>
+                Close
+              </Button>
+              <Button
+                variant="outline"
+                leftIcon={<ExternalLink size={16} />}
+                onClick={() => window.open(resumeView.url, '_blank', 'noopener,noreferrer')}
+              >
+                Open in New Tab
+              </Button>
+              <Button leftIcon={<Download size={16} />} onClick={downloadResume}>
+                Download
+              </Button>
+            </>
+          }
+        >
+          <iframe
+            src={resumeView.url}
+            title="Resume"
+            className="w-full h-[70vh] rounded-lg border border-[var(--border)] bg-white"
+          />
         </Modal>
       )}
     </div>
