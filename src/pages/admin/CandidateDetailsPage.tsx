@@ -27,6 +27,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { EmptyState } from '@/components/ui/EmptyState';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
+import { assessmentService } from '@/services/assessment.service';
 import { usePersistentState } from '@/hooks/usePersistentState';
 import { useToast } from '@/components/ui/Toast';
 import type { JobPostDTO, JobApplicationDTO, JobApplicationStatus } from '@/types/job.types';
@@ -222,6 +223,38 @@ export function CandidateDetailsPage() {
     setSending(true);
 
     const emails = Array.from(selectedEmails);
+
+    // Guard: an exam link is meaningless unless each candidate actually has an
+    // assessment assigned for this job. Without this, the server would mark them
+    // EXAM_SENT with no exam to take. Block and point the admin to the Assign step.
+    if (modalAction === 'examLink') {
+      try {
+        const checks = await Promise.all(
+          emails.map(async (email) => {
+            try {
+              const res = await assessmentService.getCandidateAssessments(email);
+              const hasExam = (res.data ?? []).some((a) => a.jobPrefix === selectedPrefix);
+              return { email, hasExam };
+            } catch {
+              return { email, hasExam: false };
+            }
+          })
+        );
+        const missing = checks.filter((c) => !c.hasExam).map((c) => c.email);
+        if (missing.length > 0) {
+          showToast(
+            `No exam assigned for ${missing.length} candidate(s): ${missing.join(', ')}. ` +
+              'Assign an assessment first (Assign) before sending the exam link.',
+            'error'
+          );
+          setSending(false);
+          return;
+        }
+      } catch {
+        // If the pre-check itself fails, fall through and let the send proceed.
+      }
+    }
+
     const payload: {
       emails: string[];
       jobPrefix: string;
