@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Loader2, ClipboardList, Send, Sparkles, Upload, Eye, FileText, X } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -20,6 +21,11 @@ interface FileState {
 export function AssignAssessmentPage() {
   const { showToast } = useToast();
   const { user } = useAuth();
+  const location = useLocation();
+
+  // Candidates to pre-select once they load (passed from the Candidate page).
+  const pendingEmailsRef = useRef<string[] | null>(null);
+  const preselectAppliedRef = useRef(false);
 
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
   const [selectedPrefix, setSelectedPrefix] = useState('');
@@ -51,6 +57,17 @@ export function AssignAssessmentPage() {
     fetchJobs();
   }, []);
 
+  // Pre-fill the job + candidates when navigated here from the Candidate page.
+  useEffect(() => {
+    if (preselectAppliedRef.current) return;
+    const navState = location.state as { jobPrefix?: string; emails?: string[] } | null;
+    if (navState?.jobPrefix) {
+      preselectAppliedRef.current = true;
+      pendingEmailsRef.current = navState.emails ?? null;
+      setSelectedPrefix(navState.jobPrefix);
+    }
+  }, [location.state]);
+
   useEffect(() => {
     if (selectedPrefix) {
       fetchCandidates();
@@ -59,6 +76,20 @@ export function AssignAssessmentPage() {
     }
     setSelectedEmails(new Set());
   }, [selectedPrefix]);
+
+  // Apply the pending pre-selection once the candidate list has loaded.
+  useEffect(() => {
+    if (!pendingEmailsRef.current || candidates.length === 0) return;
+    const wanted = new Set(pendingEmailsRef.current);
+    const toSelect = new Set<string>();
+    candidates.forEach((c) => {
+      if (wanted.has(c.email) || (c.userEmail && wanted.has(c.userEmail))) {
+        toSelect.add(c.email);
+      }
+    });
+    if (toSelect.size > 0) setSelectedEmails(toSelect);
+    pendingEmailsRef.current = null;
+  }, [candidates]);
 
   // Clear file when checkbox unchecked
   useEffect(() => {

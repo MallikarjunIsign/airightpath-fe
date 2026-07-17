@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Loader2,
   Users,
@@ -15,6 +16,7 @@ import {
   MapPin,
   Briefcase,
   Clock,
+  ClipboardList,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -30,7 +32,17 @@ import { jobApplicationService } from '@/services/job-application.service';
 import { assessmentService } from '@/services/assessment.service';
 import { usePersistentState } from '@/hooks/usePersistentState';
 import { useToast } from '@/components/ui/Toast';
+import { ROUTES } from '@/config/routes';
 import type { JobPostDTO, JobApplicationDTO, JobApplicationStatus } from '@/types/job.types';
+
+// Stages (before an exam is sent) where assigning an assessment makes sense.
+const ASSIGN_STAGES: JobApplicationStatus[] = [
+  'APPLIED',
+  'SHORTLISTED',
+  'ACKNOWLEDGED',
+  'ACKNOWLEDGED_BACK',
+  'RECONFIRMED',
+];
 
 const STAGES: JobApplicationStatus[] = [
   'APPLIED',
@@ -100,6 +112,7 @@ function getAppEmail(app: JobApplicationDTO): string {
 
 export function CandidateDetailsPage() {
   const { showToast } = useToast();
+  const navigate = useNavigate();
 
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
   const [selectedPrefix, setSelectedPrefix] = usePersistentState('candidates:selectedPrefix', '');
@@ -209,6 +222,17 @@ export function CandidateDetailsPage() {
     setModalAction(action);
     setModalDateTime('');
     setModalContent('');
+  }
+
+  // Go to the Assign page with this job + the selected candidates pre-selected.
+  function handleAssignAssessment() {
+    if (selectedEmails.size === 0) {
+      showToast('Please select at least one candidate', 'warning');
+      return;
+    }
+    navigate(ROUTES.ADMIN.ASSESSMENTS_ASSIGN, {
+      state: { jobPrefix: selectedPrefix, emails: Array.from(selectedEmails) },
+    });
   }
 
   async function handleSendAction() {
@@ -417,9 +441,19 @@ export function CandidateDetailsPage() {
             </CardContent>
           </Card>
 
-          {/* Bulk Actions — only show actions relevant to the active stage */}
-          {availableActions.length > 0 && (
+          {/* Bulk Actions — stage-relevant mail actions + assign assessment */}
+          {(availableActions.length > 0 || ASSIGN_STAGES.includes(activeStage)) && (
             <div className="flex flex-wrap gap-2">
+              {ASSIGN_STAGES.includes(activeStage) && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  leftIcon={<ClipboardList size={16} />}
+                  onClick={handleAssignAssessment}
+                >
+                  Assign Assessment
+                </Button>
+              )}
               {availableActions.map((key) => {
                 const config = BULK_ACTION_CONFIG[key];
                 return (
