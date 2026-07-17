@@ -33,19 +33,13 @@ import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
 import { assessmentService } from '@/services/assessment.service';
 import { resumeService } from '@/services/resume.service';
-import { usePersistentState } from '@/hooks/usePersistentState';
+import { usePersistentState, writePersistentValue } from '@/hooks/usePersistentState';
 import { useToast } from '@/components/ui/Toast';
 import { ROUTES } from '@/config/routes';
 import type { JobPostDTO, JobApplicationDTO, JobApplicationStatus } from '@/types/job.types';
 
-// Stages (before an exam is sent) where assigning an assessment makes sense.
-const ASSIGN_STAGES: JobApplicationStatus[] = [
-  'APPLIED',
-  'SHORTLISTED',
-  'ACKNOWLEDGED',
-  'ACKNOWLEDGED_BACK',
-  'RECONFIRMED',
-];
+// Assessments are assigned at the RECONFIRMED stage, just before the exam link is sent.
+const ASSIGN_STAGE: JobApplicationStatus = 'RECONFIRMED';
 
 const STAGES: JobApplicationStatus[] = [
   'APPLIED',
@@ -270,6 +264,16 @@ export function CandidateDetailsPage() {
     a.remove();
   }
 
+  // Applied candidates are screened via ATS to become shortlisted.
+  function handleScreenAts() {
+    if (!selectedPrefix) {
+      showToast('Please select a job first', 'warning');
+      return;
+    }
+    writePersistentValue('ats:selectedPrefix', selectedPrefix);
+    navigate(ROUTES.ADMIN.ATS);
+  }
+
   // Go to the Assign page with this job + the selected candidates pre-selected.
   function handleAssignAssessment() {
     if (selectedEmails.size === 0) {
@@ -487,10 +491,22 @@ export function CandidateDetailsPage() {
             </CardContent>
           </Card>
 
-          {/* Bulk Actions — stage-relevant mail actions + assign assessment */}
-          {(availableActions.length > 0 || ASSIGN_STAGES.includes(activeStage)) && (
+          {/* Bulk Actions — stage-relevant: Applied → ATS screening, Shortlisted → Assign */}
+          {(availableActions.length > 0 ||
+            activeStage === ('APPLIED' as JobApplicationStatus) ||
+            activeStage === ASSIGN_STAGE) && (
             <div className="flex flex-wrap gap-2">
-              {ASSIGN_STAGES.includes(activeStage) && (
+              {activeStage === ('APPLIED' as JobApplicationStatus) && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  leftIcon={<FileText size={16} />}
+                  onClick={handleScreenAts}
+                >
+                  Screen with ATS
+                </Button>
+              )}
+              {activeStage === ASSIGN_STAGE && (
                 <Button
                   variant="primary"
                   size="sm"
