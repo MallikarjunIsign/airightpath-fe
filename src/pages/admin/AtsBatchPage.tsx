@@ -41,7 +41,7 @@ export function AtsBatchPage() {
     setResults([]);
     try {
       const formData = new FormData();
-      files.forEach((file) => formData.append('files', file));
+      files.forEach((file) => formData.append('resumes', file));
       formData.append('jobDescription', jobDescription.trim());
 
       const res = await api.post<BatchResult[]>(ENDPOINTS.ATS.SCREEN_BATCH, formData, {
