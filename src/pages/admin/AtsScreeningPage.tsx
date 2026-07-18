@@ -511,6 +511,7 @@ export function AtsScreeningPage() {
                             <ArrowUpDown size={14} className={sortField === 'matchPercent' ? 'text-[var(--primary)]' : ''} />
                           </button>
                         </TableHead>
+                        <TableHead>Scan</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Actions</TableHead>
                       </TableRow>
@@ -518,7 +519,15 @@ export function AtsScreeningPage() {
                     <TableBody>
                       {filteredCandidates.map((candidate, idx) => {
                         const score = candidate.matchPercent ?? 0;
-                        const isShortlisted = candidate.status === 'SHORTLISTED';
+                        // Prefer the genuine shortlistStatus column; fall back to status.
+                        const isShortlisted = candidate.shortlistStatus
+                          ? !/not/i.test(candidate.shortlistStatus)
+                          : candidate.status === 'SHORTLISTED';
+                        const shortlistLabel =
+                          candidate.shortlistStatus ?? (isShortlisted ? 'Shortlisted' : 'Rejected');
+                        const scanDone = candidate.atsScanStatus
+                          ? /complet/i.test(candidate.atsScanStatus)
+                          : undefined;
 
                         return (
                           <TableRow key={candidate.id ?? getAppEmail(candidate)}>
@@ -558,13 +567,22 @@ export function AtsScreeningPage() {
                               </div>
                             </TableCell>
                             <TableCell>
+                              {candidate.atsScanStatus ? (
+                                <Badge variant={scanDone ? 'info' : 'warning'} size="sm">
+                                  {candidate.atsScanStatus}
+                                </Badge>
+                              ) : (
+                                <span className="text-sm text-[var(--textTertiary)]">-</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
                               <Badge
                                 variant={isShortlisted ? 'success' : 'error'}
                                 size="sm"
                               >
                                 <span className="flex items-center gap-1">
                                   {isShortlisted ? <CheckCircle size={12} /> : <XCircle size={12} />}
-                                  {isShortlisted ? 'Shortlisted' : 'Rejected'}
+                                  {shortlistLabel}
                                 </span>
                               </Badge>
                             </TableCell>
@@ -618,12 +636,23 @@ export function AtsScreeningPage() {
                 <div className={`text-3xl font-bold ${getScoreColor(selectedCandidate.matchPercent ?? 0)}`}>
                   {(selectedCandidate.matchPercent ?? 0).toFixed(1)}%
                 </div>
-                <Badge
-                  variant={selectedCandidate.status === 'SHORTLISTED' ? 'success' : 'error'}
-                  size="sm"
-                >
-                  {selectedCandidate.status === 'SHORTLISTED' ? 'Shortlisted' : 'Rejected'}
-                </Badge>
+                <div className="flex flex-col items-end gap-1 mt-1">
+                  {(() => {
+                    const shortlisted = selectedCandidate.shortlistStatus
+                      ? !/not/i.test(selectedCandidate.shortlistStatus)
+                      : selectedCandidate.status === 'SHORTLISTED';
+                    return (
+                      <Badge variant={shortlisted ? 'success' : 'error'} size="sm">
+                        {selectedCandidate.shortlistStatus ?? (shortlisted ? 'Shortlisted' : 'Rejected')}
+                      </Badge>
+                    );
+                  })()}
+                  {selectedCandidate.atsScanStatus && (
+                    <Badge variant={/complet/i.test(selectedCandidate.atsScanStatus) ? 'info' : 'warning'} size="sm">
+                      {selectedCandidate.atsScanStatus}
+                    </Badge>
+                  )}
+                </div>
               </div>
             </div>
 
