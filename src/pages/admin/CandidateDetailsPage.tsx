@@ -33,6 +33,7 @@ import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
 import { assessmentService } from '@/services/assessment.service';
 import { resumeService } from '@/services/resume.service';
+import axios from 'axios';
 import { usePersistentState, writePersistentValue } from '@/hooks/usePersistentState';
 import { useToast } from '@/components/ui/Toast';
 import { ROUTES } from '@/config/routes';
@@ -237,11 +238,17 @@ export function CandidateDetailsPage() {
     if (!email) return;
     setResumeLoading(true);
     try {
-      const res = await resumeService.view(email);
+      const res = await resumeService.view(email, { _skipErrorToast: true });
       const url = URL.createObjectURL(res.data);
       setResumeView({ url, name: candidate.resumeFileName || `${email}-resume.pdf` });
-    } catch {
-      // Error toast auto-handled by interceptor
+    } catch (err) {
+      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+      showToast(
+        status === 400 || status === 404
+          ? "This candidate's resume is not available."
+          : 'Unable to open the resume. Please try again.',
+        'error',
+      );
     } finally {
       setResumeLoading(false);
     }
