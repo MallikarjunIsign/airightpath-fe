@@ -106,6 +106,24 @@ api.interceptors.response.use(
     };
     const status = error.response?.status;
 
+    // ── Normalize Blob error bodies ──────────────────────────────────
+    // Requests with responseType: 'blob' (e.g. resume/file downloads) also
+    // receive their *error* body as a Blob, so error.response.data has no
+    // readable `code`/`message`. Parse it back to JSON (or text) here so the
+    // real server error surfaces instead of a generic "Bad Request".
+    if (error.response?.data instanceof Blob) {
+      try {
+        const text = await error.response.data.text();
+        try {
+          error.response.data = JSON.parse(text);
+        } catch {
+          error.response.data = { message: text } as ApiErrorEnvelope;
+        }
+      } catch {
+        // Blob unreadable — leave as-is and fall through to generic handling
+      }
+    }
+
     // ── 401 handling for non-public paths: attempt silent refresh ─────
     if (
       status === 401 &&
