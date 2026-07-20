@@ -95,7 +95,7 @@ export const ENDPOINTS = {
   },
   ATS: {
     SCREEN_SINGLE: "/api/ats/screen",
-    SCREEN_BATCH: "/api/ats/screen-batch",
+    SCREEN_BATCH: "/api/upload-multiple-resumes",
   },
   PROMPTS: {
     GET_BY_JOB: (prefix: string) => `/api/prompts/${prefix}`,

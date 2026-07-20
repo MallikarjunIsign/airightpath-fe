@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Loader2,
   Users,
@@ -15,6 +16,9 @@ import {
   MapPin,
   Briefcase,
   Clock,
+  ClipboardList,
+  Download,
+  ExternalLink,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -27,8 +31,15 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { EmptyState } from '@/components/ui/EmptyState';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
+import { assessmentService } from '@/services/assessment.service';
+import { resumeService } from '@/services/resume.service';
+import { usePersistentState, writePersistentValue } from '@/hooks/usePersistentState';
 import { useToast } from '@/components/ui/Toast';
+import { ROUTES } from '@/config/routes';
 import type { JobPostDTO, JobApplicationDTO, JobApplicationStatus } from '@/types/job.types';
+
+// Assessments are assigned at the RECONFIRMED stage, just before the exam link is sent.
+const ASSIGN_STAGE: JobApplicationStatus = 'RECONFIRMED';
 
 const STAGES: JobApplicationStatus[] = [
   'APPLIED',
@@ -98,10 +109,11 @@ function getAppEmail(app: JobApplicationDTO): string {
 
 export function CandidateDetailsPage() {
   const { showToast } = useToast();
+  const navigate = useNavigate();
 
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
-  const [selectedPrefix, setSelectedPrefix] = useState('');
-  const [activeStage, setActiveStage] = useState<JobApplicationStatus>('APPLIED');
+  const [selectedPrefix, setSelectedPrefix] = usePersistentState('candidates:selectedPrefix', '');
+  const [activeStage, setActiveStage] = usePersistentState<JobApplicationStatus>('candidates:activeStage', 'APPLIED');
   const [candidates, setCandidates] = useState<JobApplicationDTO[]>([]);
   const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set());
   const [loadingJobs, setLoadingJobs] = useState(true);
@@ -116,9 +128,20 @@ export function CandidateDetailsPage() {
   // Candidate detail modal
   const [selectedCandidate, setSelectedCandidate] = useState<JobApplicationDTO | null>(null);
 
+  // Resume viewer
+  const [resumeView, setResumeView] = useState<{ url: string; name: string } | null>(null);
+  const [resumeLoading, setResumeLoading] = useState(false);
+
   useEffect(() => {
     fetchJobs();
   }, []);
+
+  // Revoke the blob URL when the resume viewer closes / on unmount.
+  useEffect(() => {
+    return () => {
+      if (resumeView) URL.revokeObjectURL(resumeView.url);
+    };
+  }, [resumeView]);
 
   useEffect(() => {
     if (selectedPrefix) {
@@ -209,6 +232,59 @@ export function CandidateDetailsPage() {
     setModalContent('');
   }
 
+  async function openResume(candidate: JobApplicationDTO) {
+    const email = getAppEmail(candidate);
+    if (!email) return;
+    setResumeLoading(true);
+    try {
+      const res = await resumeService.view(email);
+      const url = URL.createObjectURL(res.data);
+      setResumeView({ url, name: candidate.resumeFileName || `${email}-resume.pdf` });
+    } catch {
+      // Error toast auto-handled by interceptor
+    } finally {
+      setResumeLoading(false);
+    }
+  }
+
+  function closeResume() {
+    setResumeView((prev) => {
+      if (prev) URL.revokeObjectURL(prev.url);
+      return null;
+    });
+  }
+
+  function downloadResume() {
+    if (!resumeView) return;
+    const a = document.createElement('a');
+    a.href = resumeView.url;
+    a.download = resumeView.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  // Applied candidates are screened via ATS to become shortlisted.
+  function handleScreenAts() {
+    if (!selectedPrefix) {
+      showToast('Please select a job first', 'warning');
+      return;
+    }
+    writePersistentValue('ats:selectedPrefix', selectedPrefix);
+    navigate(ROUTES.ADMIN.ATS);
+  }
+
+  // Go to the Assign page with this job + the selected candidates pre-selected.
+  function handleAssignAssessment() {
+    if (selectedEmails.size === 0) {
+      showToast('Please select at least one candidate', 'warning');
+      return;
+    }
+    navigate(ROUTES.ADMIN.ASSESSMENTS_ASSIGN, {
+      state: { jobPrefix: selectedPrefix, emails: Array.from(selectedEmails) },
+    });
+  }
+
   async function handleSendAction() {
     if (!modalAction || !selectedPrefix) return;
 
@@ -221,6 +297,38 @@ export function CandidateDetailsPage() {
     setSending(true);
 
     const emails = Array.from(selectedEmails);
+
+    // Guard: an exam link is meaningless unless each candidate actually has an
+    // assessment assigned for this job. Without this, the server would mark them
+    // EXAM_SENT with no exam to take. Block and point the admin to the Assign step.
+    if (modalAction === 'examLink') {
+      try {
+        const checks = await Promise.all(
+          emails.map(async (email) => {
+            try {
+              const res = await assessmentService.getCandidateAssessments(email);
+              const hasExam = (res.data ?? []).some((a) => a.jobPrefix === selectedPrefix);
+              return { email, hasExam };
+            } catch {
+              return { email, hasExam: false };
+            }
+          })
+        );
+        const missing = checks.filter((c) => !c.hasExam).map((c) => c.email);
+        if (missing.length > 0) {
+          showToast(
+            `No exam assigned for ${missing.length} candidate(s): ${missing.join(', ')}. ` +
+              'Assign an assessment first (Assign) before sending the exam link.',
+            'error'
+          );
+          setSending(false);
+          return;
+        }
+      } catch {
+        // If the pre-check itself fails, fall through and let the send proceed.
+      }
+    }
+
     const payload: {
       emails: string[];
       jobPrefix: string;
@@ -383,9 +491,31 @@ export function CandidateDetailsPage() {
             </CardContent>
           </Card>
 
-          {/* Bulk Actions — only show actions relevant to the active stage */}
-          {availableActions.length > 0 && (
+          {/* Bulk Actions — stage-relevant: Applied → ATS screening, Shortlisted → Assign */}
+          {(availableActions.length > 0 ||
+            activeStage === ('APPLIED' as JobApplicationStatus) ||
+            activeStage === ASSIGN_STAGE) && (
             <div className="flex flex-wrap gap-2">
+              {activeStage === ('APPLIED' as JobApplicationStatus) && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  leftIcon={<FileText size={16} />}
+                  onClick={handleScreenAts}
+                >
+                  Screen with ATS
+                </Button>
+              )}
+              {activeStage === ASSIGN_STAGE && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  leftIcon={<ClipboardList size={16} />}
+                  onClick={handleAssignAssessment}
+                >
+                  Assign Assessment
+                </Button>
+              )}
               {availableActions.map((key) => {
                 const config = BULK_ACTION_CONFIG[key];
                 return (
@@ -681,13 +811,25 @@ export function CandidateDetailsPage() {
 
             {/* Resume */}
             {selectedCandidate.resumeFileName && (
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
+              <button
+                type="button"
+                onClick={() => openResume(selectedCandidate)}
+                disabled={resumeLoading}
+                className="w-full flex items-center gap-3 p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)] hover:border-[var(--primary)] hover:bg-[var(--primary)]/[0.04] transition-colors text-left disabled:opacity-60"
+              >
                 <FileText size={20} className="text-[var(--primary)] flex-shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-[var(--text)]">Resume</p>
                   <p className="text-xs text-[var(--textSecondary)] truncate">{selectedCandidate.resumeFileName}</p>
                 </div>
-              </div>
+                {resumeLoading ? (
+                  <Loader2 size={16} className="animate-spin text-[var(--primary)] flex-shrink-0" />
+                ) : (
+                  <span className="text-xs text-[var(--primary)] font-medium flex items-center gap-1 flex-shrink-0">
+                    <Eye size={14} /> View
+                  </span>
+                )}
+              </button>
             )}
 
             {/* Match Percent */}
@@ -714,6 +856,39 @@ export function CandidateDetailsPage() {
               </div>
             )}
           </div>
+        </Modal>
+      )}
+
+      {/* Resume viewer */}
+      {resumeView && (
+        <Modal
+          isOpen={!!resumeView}
+          onClose={closeResume}
+          title={resumeView.name}
+          size="xl"
+          footer={
+            <>
+              <Button variant="ghost" onClick={closeResume}>
+                Close
+              </Button>
+              <Button
+                variant="outline"
+                leftIcon={<ExternalLink size={16} />}
+                onClick={() => window.open(resumeView.url, '_blank', 'noopener,noreferrer')}
+              >
+                Open in New Tab
+              </Button>
+              <Button leftIcon={<Download size={16} />} onClick={downloadResume}>
+                Download
+              </Button>
+            </>
+          }
+        >
+          <iframe
+            src={resumeView.url}
+            title="Resume"
+            className="w-full h-[70vh] rounded-lg border border-[var(--border)] bg-white"
+          />
         </Modal>
       )}
     </div>

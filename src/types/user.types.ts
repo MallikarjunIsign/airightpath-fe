@@ -5,7 +5,8 @@ export interface UsersDto {
   email: string;
   mobileNumber: string;
   alternativeMobileNumber?: string;
-  active: boolean;
+  /** Backend field: whether the account is enabled/active. */
+  enabled: boolean;
   roles?: string[];
   createdAt?: string;
   updatedAt?: string;

@@ -18,6 +18,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { jobService } from '@/services/job.service';
 import { assessmentService } from '@/services/assessment.service';
 import { compilerService } from '@/services/compiler.service';
+import { usePersistentState } from '@/hooks/usePersistentState';
 import type { JobPostDTO } from '@/types/job.types';
 import type { Result } from '@/types/result.types';
 import type { CodeSubmissionResponse } from '@/types/compiler.types';
@@ -34,7 +35,7 @@ interface CandidateRow {
 export function ResultsPage() {
   const navigate = useNavigate();
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
-  const [selectedPrefix, setSelectedPrefix] = useState('');
+  const [selectedPrefix, setSelectedPrefix] = usePersistentState('results:selectedPrefix', '');
   const [results, setResults] = useState<Result[]>([]);
   const [codeSubmissions, setCodeSubmissions] = useState<CodeSubmissionResponse[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(true);

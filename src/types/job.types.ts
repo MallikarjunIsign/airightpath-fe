@@ -48,6 +48,10 @@ export interface JobApplicationDTO {
   resumeFileName?: string;
   contentType?: string;
   matchPercent?: number;
+  /** ATS shortlisting outcome, e.g. "Shortlisted" / "Not Shortlisted". */
+  shortlistStatus?: string;
+  /** Whether the ATS scan has run, e.g. "Screening Completed" / "Pending". */
+  atsScanStatus?: string;
   confirmationStatus?: string;
   acknowledgedStatus?: string;
   reconfirmationStatus?: string;

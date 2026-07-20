@@ -6,8 +6,10 @@ import { Badge } from '@/components/ui/Badge';
 import { SearchInput } from '@/components/ui/SearchInput';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { userService } from '@/services/user.service';
 import { useToast } from '@/components/ui/Toast';
+import { usePersistentState } from '@/hooks/usePersistentState';
 import type { UsersDto } from '@/types/user.types';
 
 export function UserListPage() {
@@ -15,8 +17,9 @@ export function UserListPage() {
 
   const [users, setUsers] = useState<UsersDto[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = usePersistentState('users:searchTerm', '');
   const [togglingEmail, setTogglingEmail] = useState<string | null>(null);
+  const [confirmUser, setConfirmUser] = useState<UsersDto | null>(null);
 
   useEffect(() => {
     fetchUsers();
@@ -45,10 +48,12 @@ export function UserListPage() {
     return fullName.includes(term) || user.email.toLowerCase().includes(term);
   });
 
-  async function handleToggleStatus(user: UsersDto) {
+  async function confirmToggleStatus() {
+    const user = confirmUser;
+    if (!user) return;
     setTogglingEmail(user.email);
     try {
-      if (user.active) {
+      if (user.enabled) {
         await userService.deactivate(user.email);
         showToast(`${user.firstName} ${user.lastName} deactivated`, 'success');
       } else {
@@ -58,9 +63,10 @@ export function UserListPage() {
       // Update local state
       setUsers((prev) =>
         prev.map((u) =>
-          u.email === user.email ? { ...u, active: !u.active } : u
+          u.email === user.email ? { ...u, enabled: !u.enabled } : u
         )
       );
+      setConfirmUser(null);
     } catch {
       // Error toast auto-handled by interceptor
     } finally {
@@ -93,6 +99,7 @@ export function UserListPage() {
             </CardTitle>
             <SearchInput
               onSearch={handleSearch}
+              initialValue={searchTerm}
               placeholder="Search by name or email..."
               className="w-full sm:w-80"
             />
@@ -129,25 +136,25 @@ export function UserListPage() {
                     <TableCell>{user.email}</TableCell>
                     <TableCell>{user.mobileNumber}</TableCell>
                     <TableCell>
-                      <Badge variant={user.active ? 'success' : 'error'} size="sm">
-                        {user.active ? 'Active' : 'Inactive'}
+                      <Badge variant={user.enabled ? 'success' : 'error'} size="sm">
+                        {user.enabled ? 'Active' : 'Inactive'}
                       </Badge>
                     </TableCell>
                     <TableCell>
                       <Button
-                        variant={user.active ? 'danger' : 'primary'}
+                        variant={user.enabled ? 'danger' : 'primary'}
                         size="sm"
                         isLoading={togglingEmail === user.email}
                         leftIcon={
                           togglingEmail !== user.email
-                            ? user.active
+                            ? user.enabled
                               ? <UserX size={14} />
                               : <UserCheck size={14} />
                             : undefined
                         }
-                        onClick={() => handleToggleStatus(user)}
+                        onClick={() => setConfirmUser(user)}
                       >
-                        {user.active ? 'Deactivate' : 'Activate'}
+                        {user.enabled ? 'Deactivate' : 'Activate'}
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -157,6 +164,22 @@ export function UserListPage() {
           )}
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        isOpen={!!confirmUser}
+        onClose={() => setConfirmUser(null)}
+        onConfirm={confirmToggleStatus}
+        isLoading={!!confirmUser && togglingEmail === confirmUser.email}
+        variant={confirmUser?.enabled ? 'danger' : 'success'}
+        icon={confirmUser?.enabled ? <UserX size={24} /> : <UserCheck size={24} />}
+        title={confirmUser?.enabled ? 'Deactivate user?' : 'Activate user?'}
+        confirmText={confirmUser?.enabled ? 'Deactivate' : 'Activate'}
+        message={
+          confirmUser
+            ? `Are you sure you want to ${confirmUser.enabled ? 'deactivate' : 'activate'} ${confirmUser.firstName} ${confirmUser.lastName} (${confirmUser.email})?`
+            : ''
+        }
+      />
     </div>
   );
 }

@@ -9,7 +9,6 @@ import {
   Tag,
   Loader2,
   AlertTriangle,
-  CheckCircle,
   Eye,
   Building2,
   GraduationCap,
@@ -17,10 +16,10 @@ import {
   Users,
   Mail,
   FileText,
+  Plus,
+  UserCheck,
 } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
 import { jobService } from '@/services/job.service';
-import { jobApplicationService } from '@/services/job-application.service';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -28,58 +27,53 @@ import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { ROUTES } from '@/config/routes';
 import { formatDate } from '@/utils/format.utils';
-import { usePersistentState } from '@/hooks/usePersistentState';
-import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
+import { usePersistentState, writePersistentValue } from '@/hooks/usePersistentState';
+import type { JobPostDTO } from '@/types/job.types';
 
-export function EventsPage() {
+/**
+ * Admin / Super-Admin view of every job event created on the platform.
+ * Mirrors the candidate Events page, but read-only (no apply flow).
+ */
+export function AdminJobsPage() {
   const navigate = useNavigate();
-  const { user } = useAuth();
 
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
-  const [appliedJobPrefixes, setAppliedJobPrefixes] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = usePersistentState('events:searchQuery', '');
-  const [filterType, setFilterType] = usePersistentState('events:filterType', '');
+  const [searchQuery, setSearchQuery] = usePersistentState('adminJobs:searchQuery', '');
+  const [filterType, setFilterType] = usePersistentState('adminJobs:filterType', '');
   const [selectedJob, setSelectedJob] = useState<JobPostDTO | null>(null);
 
   useEffect(() => {
-    async function fetchData() {
+    async function fetchJobs() {
       setLoading(true);
       try {
-        const [jobsRes, appsRes] = await Promise.all([
-          jobService.getAllJobs(),
-          user?.email ? jobApplicationService.getByEmail(user.email) : Promise.resolve({ data: [] }),
-        ]);
-        setJobs(jobsRes.data ?? []);
-        const appliedPrefixes = new Set(
-          (appsRes.data ?? []).map((app: JobApplicationDTO) => app.jobPrefix)
-        );
-        setAppliedJobPrefixes(appliedPrefixes);
+        const res = await jobService.getAllJobs();
+        setJobs(res.data ?? []);
       } catch {
         // Error toast auto-handled by interceptor
       } finally {
         setLoading(false);
       }
     }
-    fetchData();
-  }, [user?.email]);
+    fetchJobs();
+  }, []);
 
   const jobTypes = useMemo(() => {
-    const types = new Set(jobs.map((j) => j.jobType));
-    return Array.from(types);
+    return Array.from(new Set(jobs.map((j) => j.jobType).filter(Boolean)));
   }, [jobs]);
 
   const filteredJobs = useMemo(() => {
     return jobs.filter((job) => {
+      const q = searchQuery.toLowerCase();
       const matchesSearch =
         !searchQuery ||
-        job.jobTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        job.companyName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (job.keySkills ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-        job.location.toLowerCase().includes(searchQuery.toLowerCase());
+        job.jobTitle.toLowerCase().includes(q) ||
+        job.companyName.toLowerCase().includes(q) ||
+        (job.keySkills ?? '').toLowerCase().includes(q) ||
+        job.location.toLowerCase().includes(q) ||
+        job.jobPrefix.toLowerCase().includes(q);
 
       const matchesType = !filterType || job.jobType === filterType;
-
       return matchesSearch && matchesType;
     });
   }, [jobs, searchQuery, filterType]);
@@ -89,16 +83,11 @@ export function EventsPage() {
     return new Date(deadline) < new Date(new Date().toDateString());
   };
 
-  const isJobApplied = (job: JobPostDTO) => {
-    return appliedJobPrefixes.has(job.jobPrefix);
-  };
-
-  const handleApply = (job: JobPostDTO) => {
-    navigate(ROUTES.CANDIDATE.APPLY, { state: { job } });
-  };
-
-  const handleViewDetails = (job: JobPostDTO) => {
-    setSelectedJob(job);
+  const handleViewCandidates = (job: JobPostDTO) => {
+    // Pre-select this job on the Candidates page, then navigate there.
+    // CandidateDetailsPage auto-loads candidates for the persisted prefix.
+    writePersistentValue('candidates:selectedPrefix', job.jobPrefix);
+    navigate(ROUTES.ADMIN.CANDIDATES);
   };
 
   if (loading) {
@@ -111,13 +100,24 @@ export function EventsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold text-[var(--text)]">Available Jobs</h1>
+      {/* Header */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-[var(--text)]">Job Events</h1>
+          <p className="text-[var(--textSecondary)] mt-1">
+            All jobs created across the platform
+          </p>
+        </div>
+        <Button leftIcon={<Plus size={18} />} onClick={() => navigate(ROUTES.ADMIN.JOBS_CREATE)}>
+          Create Job
+        </Button>
+      </div>
 
       {/* Search and Filter */}
       <div className="flex flex-col sm:flex-row gap-4">
         <div className="flex-1">
           <Input
-            placeholder="Search jobs by title, company, skills, location..."
+            placeholder="Search jobs by title, company, skills, location, prefix..."
             leftIcon={<Search size={18} />}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -125,7 +125,7 @@ export function EventsPage() {
         </div>
         <div className="sm:w-48">
           <select
-            className="w-full px-4 py-2 rounded-lg appearance-none bg-[var(--inputBg)] border border-[var(--inputBorder)] text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--inputFocus)] focus:border-transparent transition-all duration-200"
+            className="w-full px-4 py-2 h-11 rounded-lg appearance-none bg-[var(--inputBg)] border border-[var(--inputBorder)] text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--inputFocus)] focus:border-transparent transition-all duration-200"
             value={filterType}
             onChange={(e) => setFilterType(e.target.value)}
           >
@@ -150,42 +150,41 @@ export function EventsPage() {
           <Briefcase className="w-12 h-12 mx-auto text-[var(--textTertiary)] mb-4" />
           <p className="text-lg font-medium text-[var(--text)]">No jobs found</p>
           <p className="text-[var(--textSecondary)] mt-1">
-            Try adjusting your search or filter criteria.
+            {jobs.length === 0
+              ? 'No jobs have been created yet.'
+              : 'Try adjusting your search or filter criteria.'}
           </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredJobs.map((job) => {
-            const applied = isJobApplied(job);
             const expired = isDeadlinePassed(job.applicationDeadline);
-
             return (
               <Card key={job.id ?? job.jobPrefix} hover>
                 <CardContent>
                   <div className="space-y-4">
-                    {/* Job Title, Company and Applied Badge */}
+                    {/* Title + prefix */}
                     <div className="flex items-start justify-between gap-2">
                       <div
                         className="min-w-0 cursor-pointer"
-                        onClick={() => handleViewDetails(job)}
+                        onClick={() => setSelectedJob(job)}
                       >
-                        <h3 className="text-lg font-semibold text-[var(--text)] hover:text-[var(--primary)] transition-colors">
+                        <h3 className="text-lg font-semibold text-[var(--text)] hover:text-[var(--primary)] transition-colors truncate">
                           {job.jobTitle}
                         </h3>
                         <p className="text-sm text-[var(--textSecondary)]">{job.companyName}</p>
                       </div>
-                      {applied && (
-                        <Badge variant="success" size="sm">
-                          <span className="flex items-center gap-1">
-                            <CheckCircle size={12} />
-                            Applied
-                          </span>
-                        </Badge>
-                      )}
+                      <Badge variant={expired ? 'error' : 'success'} size="sm">
+                        {expired ? 'Expired' : 'Active'}
+                      </Badge>
                     </div>
 
                     {/* Details */}
                     <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-sm text-[var(--textSecondary)]">
+                        <Tag size={14} className="flex-shrink-0" />
+                        <span>{job.jobPrefix}</span>
+                      </div>
                       <div className="flex items-center gap-2 text-sm text-[var(--textSecondary)]">
                         <MapPin size={14} className="flex-shrink-0" />
                         <span>{job.location}</span>
@@ -195,8 +194,10 @@ export function EventsPage() {
                         <span>{job.jobType}</span>
                       </div>
                       <div className="flex items-center gap-2 text-sm text-[var(--textSecondary)]">
-                        <Clock size={14} className="flex-shrink-0" />
-                        <span>{job.experience} experience</span>
+                        <Users size={14} className="flex-shrink-0" />
+                        <span>
+                          {job.numberOfOpenings} opening{job.numberOfOpenings !== 1 ? 's' : ''}
+                        </span>
                       </div>
                       <div className={`flex items-center gap-2 text-sm ${expired ? 'text-red-500 dark:text-red-400 font-medium' : 'text-[var(--textSecondary)]'}`}>
                         {expired ? (
@@ -212,56 +213,24 @@ export function EventsPage() {
                       </div>
                     </div>
 
-                    {/* Skills */}
-                    {job.keySkills && (
-                      <div className="flex items-start gap-2">
-                        <Tag size={14} className="flex-shrink-0 mt-1 text-[var(--textTertiary)]" />
-                        <div className="flex flex-wrap gap-1">
-                          {job.keySkills
-                            .split(',')
-                            .slice(0, 4)
-                            .map((skill, index) => (
-                              <Badge key={index} variant="secondary" size="sm">
-                                {skill.trim()}
-                              </Badge>
-                            ))}
-                          {job.keySkills.split(',').length > 4 && (
-                            <Badge variant="default" size="sm">
-                              +{job.keySkills.split(',').length - 4}
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
                     {/* Action Buttons */}
                     <div className="flex gap-2">
                       <Button
                         variant="outline"
                         className="flex-1"
-                        onClick={() => handleViewDetails(job)}
+                        onClick={() => setSelectedJob(job)}
                         leftIcon={<Eye size={16} />}
                       >
                         Details
                       </Button>
-                      {applied ? (
-                        <Button
-                          className="flex-1"
-                          variant="outline"
-                          onClick={() => handleApply(job)}
-                          leftIcon={<CheckCircle size={16} />}
-                        >
-                          View Application
-                        </Button>
-                      ) : expired ? (
-                        <Button className="flex-1" disabled>
-                          Deadline Passed
-                        </Button>
-                      ) : (
-                        <Button className="flex-1" onClick={() => handleApply(job)}>
-                          Apply Now
-                        </Button>
-                      )}
+                      <Button
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => handleViewCandidates(job)}
+                        leftIcon={<UserCheck size={16} />}
+                      >
+                        Candidates
+                      </Button>
                     </div>
                   </div>
                 </CardContent>
@@ -278,32 +247,11 @@ export function EventsPage() {
           onClose={() => setSelectedJob(null)}
           title="Job Details"
           size="lg"
+          contained
           footer={
-            <>
-              <Button variant="ghost" onClick={() => setSelectedJob(null)}>
-                Close
-              </Button>
-              {isJobApplied(selectedJob) ? (
-                <Button
-                  onClick={() => {
-                    setSelectedJob(null);
-                    handleApply(selectedJob);
-                  }}
-                  leftIcon={<CheckCircle size={16} />}
-                >
-                  View Application
-                </Button>
-              ) : !isDeadlinePassed(selectedJob.applicationDeadline) ? (
-                <Button
-                  onClick={() => {
-                    setSelectedJob(null);
-                    handleApply(selectedJob);
-                  }}
-                >
-                  Apply Now
-                </Button>
-              ) : null}
-            </>
+            <Button variant="ghost" onClick={() => setSelectedJob(null)}>
+              Close
+            </Button>
           }
         >
           <div className="space-y-6">
@@ -318,14 +266,9 @@ export function EventsPage() {
               </div>
               <div className="flex flex-col items-end gap-1">
                 <Badge variant="primary" size="sm">{selectedJob.jobPrefix}</Badge>
-                {isJobApplied(selectedJob) && (
-                  <Badge variant="success" size="sm">
-                    <span className="flex items-center gap-1">
-                      <CheckCircle size={12} />
-                      Applied
-                    </span>
-                  </Badge>
-                )}
+                <Badge variant={isDeadlinePassed(selectedJob.applicationDeadline) ? 'error' : 'success'} size="sm">
+                  {isDeadlinePassed(selectedJob.applicationDeadline) ? 'Expired' : 'Active'}
+                </Badge>
               </div>
             </div>
 
@@ -368,15 +311,13 @@ export function EventsPage() {
                   </div>
                 </div>
               )}
-              {selectedJob.numberOfOpenings && (
-                <div className="flex items-center gap-2 text-sm">
-                  <Users size={16} className="text-[var(--primary)] flex-shrink-0" />
-                  <div>
-                    <p className="text-[var(--textTertiary)] text-xs">Openings</p>
-                    <p className="text-[var(--text)] font-medium">{selectedJob.numberOfOpenings}</p>
-                  </div>
+              <div className="flex items-center gap-2 text-sm">
+                <Users size={16} className="text-[var(--primary)] flex-shrink-0" />
+                <div>
+                  <p className="text-[var(--textTertiary)] text-xs">Openings</p>
+                  <p className="text-[var(--text)] font-medium">{selectedJob.numberOfOpenings}</p>
                 </div>
-              )}
+              </div>
               {selectedJob.industry && (
                 <div className="flex items-center gap-2 text-sm">
                   <Building2 size={16} className="text-[var(--primary)] flex-shrink-0" />
@@ -399,8 +340,17 @@ export function EventsPage() {
                 <div className="flex items-center gap-2 text-sm">
                   <Mail size={16} className="text-[var(--primary)] flex-shrink-0" />
                   <div>
-                    <p className="text-[var(--textTertiary)] text-xs">Contact</p>
+                    <p className="text-[var(--textTertiary)] text-xs">Contact / Created by</p>
                     <p className="text-[var(--text)] font-medium">{selectedJob.contactEmail}</p>
+                  </div>
+                </div>
+              )}
+              {selectedJob.createdAt && (
+                <div className="flex items-center gap-2 text-sm">
+                  <Calendar size={16} className="text-[var(--primary)] flex-shrink-0" />
+                  <div>
+                    <p className="text-[var(--textTertiary)] text-xs">Created</p>
+                    <p className="text-[var(--text)] font-medium">{formatDate(selectedJob.createdAt)}</p>
                   </div>
                 </div>
               )}

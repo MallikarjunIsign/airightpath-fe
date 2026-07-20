@@ -84,7 +84,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [loadMe]);
 
-  // Bootstrap on mount
+  // Bootstrap on mount — acquire the access token (via refresh) and load the
+  // user BEFORE any protected page renders, so pages never fire token-less
+  // requests that would 401-storm and trip refresh-token reuse detection.
   useEffect(() => {
     bootstrapSession();
   }, [bootstrapSession]);

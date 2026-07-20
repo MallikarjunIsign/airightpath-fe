@@ -10,6 +10,7 @@ export const ROUTES = {
   },
   ADMIN: {
     DASHBOARD: '/admin/dashboard',
+    JOBS: '/admin/jobs',
     JOBS_CREATE: '/admin/jobs/create',
     CANDIDATES: '/admin/candidates',
     USERS: '/admin/users',

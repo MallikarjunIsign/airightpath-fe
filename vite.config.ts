@@ -24,6 +24,9 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    exclude: ["lucide-react"],
+    // Pre-bundle lucide-react so its icons load as ONE optimized dependency.
+    // Excluding it makes the dev server serve every icon as a separate module
+    // request (hundreds/thousands of requests on reload), hurting load time.
+    include: ["lucide-react"],
   },
 });

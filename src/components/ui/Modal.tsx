@@ -9,9 +9,18 @@ interface ModalProps {
   children: ReactNode;
   footer?: ReactNode;
   size?: 'sm' | 'md' | 'lg' | 'xl';
+  /**
+   * When true (default), the overlay is confined to the content area (right of
+   * the sidebar, below the navbar) so it doesn't overlap the app chrome. The
+   * offset comes from `--app-content-left` / `--app-content-top`, which only the
+   * main app Layout sets — on the exam/public layouts (no sidebar) those vars are
+   * unset (0), so the modal fills the screen. Pass `contained={false}` to force
+   * a full-viewport overlay.
+   */
+  contained?: boolean;
 }
 
-export function Modal({ isOpen, onClose, title, children, footer, size = 'md' }: ModalProps) {
+export function Modal({ isOpen, onClose, title, children, footer, size = 'md', contained = true }: ModalProps) {
   useEffect(() => {
     if (isOpen) {
       document.body.style.overflow = 'hidden';
@@ -43,7 +52,10 @@ export function Modal({ isOpen, onClose, title, children, footer, size = 'md' }:
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center animate-fade-in">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center animate-fade-in"
+      style={contained ? { left: 'var(--app-content-left, 0px)', top: 'var(--app-content-top, 0px)' } : undefined}
+    >
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
