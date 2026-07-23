@@ -96,9 +96,14 @@ export const jobPostSchema = z.object({
     .string()
     .min(1, 'Application deadline is required')
     .refine((val) => {
-      const time = new Date(val).getTime();
-      return !Number.isNaN(time) && time > Date.now();
-    }, 'Deadline must be a future date and time'),
+      // Backend stores a LocalDate and only closes applications the day AFTER the
+      // deadline, so today is still valid. Compare at local day granularity.
+      const selected = new Date(`${val}T00:00:00`);
+      if (Number.isNaN(selected.getTime())) return false;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      return selected.getTime() >= today.getTime();
+    }, 'Deadline cannot be in the past'),
 });
 
 export const jobApplicationSchema = z.object({

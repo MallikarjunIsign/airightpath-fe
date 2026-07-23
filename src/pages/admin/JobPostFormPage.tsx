@@ -22,12 +22,11 @@ const JOB_TYPE_OPTIONS = [
   { value: 'Internship', label: 'Internship' },
 ];
 
-/** Current local date-time as `YYYY-MM-DDTHH:mm` for a datetime-local `min`. */
-function localDateTimeNow(): string {
+/** Today's local date as `YYYY-MM-DD` for a date input `min`. */
+function localDateToday(): string {
   const now = new Date();
-  now.setSeconds(0, 0);
   const offsetMs = now.getTimezoneOffset() * 60000;
-  return new Date(now.getTime() - offsetMs).toISOString().slice(0, 16);
+  return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
 }
 
 // Keystrokes that would produce a non-integer opening count.
@@ -37,7 +36,7 @@ export function JobPostFormPage() {
   const { showToast } = useToast();
   const [submitting, setSubmitting] = useState(false);
   // Computed once on mount so the deadline floor doesn't drift each render.
-  const [minDeadline] = useState(localDateTimeNow);
+  const [minDeadline] = useState(localDateToday);
 
   const {
     register,
@@ -237,9 +236,9 @@ export function JobPostFormPage() {
               <Input
                 label="Application Deadline"
                 required
-                type="datetime-local"
+                type="date"
                 min={minDeadline}
-                helperText="Must be a future date and time"
+                helperText="Today or later"
                 error={errors.applicationDeadline?.message}
                 {...register('applicationDeadline')}
               />
