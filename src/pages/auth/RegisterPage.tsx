@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Mail, Lock, Eye, EyeOff, User, Phone, ArrowRight, CheckCircle } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, User, Phone, ArrowRight } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/Button';
 import { Logo } from '@/components/ui/Logo';
 import { ROUTES } from '@/config/routes';
 import { registerSchema } from '@/config/validation';
+import { digitsOnly } from '@/utils/input.utils';
 
 type RegisterFormValues = z.infer<typeof registerSchema>;
 
@@ -24,6 +25,7 @@ export function RegisterPage() {
   const {
     register,
     handleSubmit,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<RegisterFormValues>({
     resolver: zodResolver(registerSchema),
@@ -139,11 +141,20 @@ export function RegisterPage() {
 
               <Input
                 type="tel"
+                inputMode="numeric"
+                maxLength={10}
+                autoComplete="tel"
                 label="Mobile Number"
                 placeholder="9876543210"
                 leftIcon={<Phone size={18} />}
                 error={errors.mobileNumber?.message}
                 {...register('mobileNumber')}
+                onChange={(e) =>
+                  setValue('mobileNumber', digitsOnly(e.target.value), {
+                    shouldValidate: true,
+                    shouldDirty: true,
+                  })
+                }
               />
 
               <Input

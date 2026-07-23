@@ -16,6 +16,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Modal } from '@/components/ui/Modal';
 import { mobileSchema } from '@/config/validation';
 import { ROUTES } from '@/config/routes';
+import { digitsOnly } from '@/utils/input.utils';
 import type { UsersDto } from '@/types/user.types';
 
 const profileSchema = z.object({
@@ -25,7 +26,7 @@ const profileSchema = z.object({
   mobileNumber: mobileSchema,
   alternativeMobileNumber: z
     .string()
-    .regex(/^[0-9]{10}$/, 'Please enter a valid 10-digit mobile number')
+    .regex(/^[6-9]\d{9}$/, 'Enter a valid 10-digit mobile number starting with 6-9')
     .or(z.literal(''))
     .optional(),
 });
@@ -52,6 +53,7 @@ export function ProfilePage() {
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors },
   } = useForm<ProfileFormData>({
     resolver: zodResolver(profileSchema),
@@ -219,15 +221,35 @@ export function ProfilePage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
                 label="Mobile Number"
-                {...register('mobileNumber')}
-                error={errors.mobileNumber?.message}
+                type="tel"
+                inputMode="numeric"
+                maxLength={10}
+                autoComplete="tel"
                 placeholder="Enter 10-digit mobile number"
+                error={errors.mobileNumber?.message}
+                {...register('mobileNumber')}
+                onChange={(e) =>
+                  setValue('mobileNumber', digitsOnly(e.target.value), {
+                    shouldValidate: true,
+                    shouldDirty: true,
+                  })
+                }
               />
               <Input
                 label="Alternative Mobile Number"
-                {...register('alternativeMobileNumber')}
-                error={errors.alternativeMobileNumber?.message}
+                type="tel"
+                inputMode="numeric"
+                maxLength={10}
+                autoComplete="tel"
                 placeholder="Optional"
+                error={errors.alternativeMobileNumber?.message}
+                {...register('alternativeMobileNumber')}
+                onChange={(e) =>
+                  setValue('alternativeMobileNumber', digitsOnly(e.target.value), {
+                    shouldValidate: true,
+                    shouldDirty: true,
+                  })
+                }
               />
             </div>
 

@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/Badge';
 import { ROUTES } from '@/config/routes';
 import { jobApplicationSchema } from '@/config/validation';
 import { validateResumeFile } from '@/utils/file.utils';
+import { digitsOnly } from '@/utils/input.utils';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
 
 type JobApplicationFormData = z.infer<typeof jobApplicationSchema>;
@@ -42,6 +43,7 @@ export function JobApplicationPage() {
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors },
   } = useForm<JobApplicationFormData>({
     resolver: zodResolver(jobApplicationSchema),
@@ -257,9 +259,19 @@ export function JobApplicationPage() {
 
             <Input
               label="Mobile Number"
-              {...register('mobileNumber')}
-              error={errors.mobileNumber?.message}
+              type="tel"
+              inputMode="numeric"
+              maxLength={10}
+              autoComplete="tel"
               placeholder="Enter 10-digit mobile number"
+              error={errors.mobileNumber?.message}
+              {...register('mobileNumber')}
+              onChange={(e) =>
+                setValue('mobileNumber', digitsOnly(e.target.value), {
+                  shouldValidate: true,
+                  shouldDirty: true,
+                })
+              }
             />
 
             <Input

@@ -13,7 +13,9 @@ export const passwordSchema = z
 
 export const mobileSchema = z
   .string()
-  .regex(/^[0-9]{10}$/, 'Please enter a valid 10-digit mobile number');
+  .min(1, 'Mobile number is required')
+  // Indian mobile format: 10 digits starting 6-9 (rejects 0000000000, 1111111111, etc.)
+  .regex(/^[6-9]\d{9}$/, 'Enter a valid 10-digit mobile number starting with 6-9');
 
 export const resumeFileSchema = z
   .instanceof(File)
