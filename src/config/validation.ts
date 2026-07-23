@@ -70,21 +70,35 @@ export const resetPasswordSchema = z
   });
 
 export const jobPostSchema = z.object({
-  jobPrefix: z.string().min(1, 'Job prefix is required'),
-  jobTitle: z.string().min(1, 'Job title is required'),
-  companyName: z.string().min(1, 'Company name is required'),
-  location: z.string().min(1, 'Location is required'),
-  jobDescription: z.string().min(1, 'Job description is required').max(3000, 'Max 3000 characters'),
-  keySkills: z.string().min(1, 'Skills are required'),
-  experience: z.string().min(1, 'Experience is required'),
-  education: z.string().min(1, 'Education is required'),
+  jobPrefix: z.string().trim().min(1, 'Job prefix is required'),
+  jobTitle: z.string().trim().min(1, 'Job title is required'),
+  companyName: z.string().trim().min(1, 'Company name is required'),
+  location: z.string().trim().min(1, 'Location is required'),
+  jobDescription: z
+    .string()
+    .trim()
+    .min(1, 'Job description is required')
+    .max(3000, 'Job description must be 3000 characters or fewer'),
+  keySkills: z.string().trim().min(1, 'At least one skill is required'),
+  experience: z.string().trim().min(1, 'Experience is required'),
+  education: z.string().trim().min(1, 'Education is required'),
   salaryRange: z.string().optional(),
-  jobType: z.string().min(1, 'Job type is required'),
+  jobType: z.string().min(1, 'Please select a job type'),
   industry: z.string().optional(),
   department: z.string().optional(),
   role: z.string().optional(),
-  numberOfOpenings: z.number().min(1, 'At least 1 opening required'),
-  applicationDeadline: z.string().min(1, 'Deadline is required'),
+  numberOfOpenings: z
+    .number({ invalid_type_error: 'Number of openings is required' })
+    .int('Openings must be a whole number (no decimals)')
+    .min(1, 'At least 1 opening is required')
+    .max(100000, 'Number of openings looks too high'),
+  applicationDeadline: z
+    .string()
+    .min(1, 'Application deadline is required')
+    .refine((val) => {
+      const time = new Date(val).getTime();
+      return !Number.isNaN(time) && time > Date.now();
+    }, 'Deadline must be a future date and time'),
 });
 
 export const jobApplicationSchema = z.object({
