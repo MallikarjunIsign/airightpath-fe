@@ -19,11 +19,13 @@ import { useTimer } from '@/hooks/useTimer';
 import { useFullscreen } from '@/hooks/useFullscreen';
 import { usePageVisibility } from '@/hooks/usePageVisibility';
 import { useFaceDetection } from '@/hooks/useFaceDetection';
+import { useExamCamera } from '@/hooks/useExamCamera';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { APP_CONFIG } from '@/config/app.config';
+import { PROCTORING_CONFIG } from '@/config/proctoring.config';
 import { ROUTES } from '@/config/routes';
 import { formatTimer } from '@/utils/format.utils';
 import type { Assessment, Question, RawQuestion } from '@/types/assessment.types';
@@ -76,6 +78,12 @@ export function AptitudeAssessmentPage() {
   const isSubmittingRef = useRef(false);
   const initRef = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Proctoring only starts counting once the exam is fully initialised, so the
+  // initial camera/fullscreen permission prompts don't register as violations.
+  const proctoringActiveRef = useRef(false);
+
+  const proctoring = PROCTORING_CONFIG;
+  const camera = useExamCamera();
 
   // Refs for stable access in callbacks
   const questionsRef = useRef<Question[]>([]);
@@ -97,38 +105,54 @@ export function AptitudeAssessmentPage() {
     },
   });
 
-  // Page visibility / tab switch detection
+  // Page visibility / tab switch detection (config-driven)
   usePageVisibility({
     onHidden: () => {
+      if (!proctoring.tabSwitch.enabled || !proctoringActiveRef.current) return;
       setTabWarnings((prev) => {
         const next = prev + 1;
-        showToast(`Warning: Tab switch detected! (${next})`, 'warning');
+        const max = proctoring.tabSwitch.maxBeforeAutoSubmit;
+        if (max > 0 && next >= max) {
+          handleAutoSubmit('Too many tab switches.');
+        } else {
+          const counter = max > 0 ? `${next}/${max}` : `${next}`;
+          showToast(`Warning: Tab switch detected! (${counter})`, 'warning');
+        }
         return next;
       });
     },
   });
 
-  // Face detection
+  // Face / eye detection (config-driven). maxWarnings = 0 → warn only.
   const { loadModels, startDetection, stopDetection, warningCount, faceDetected } =
     useFaceDetection({
-      maxWarnings: APP_CONFIG.FACE_DETECTION_MAX_WARNINGS,
-      onMaxWarnings: () => handleAutoSubmit('Face not detected too many times.'),
-      onNoFace: () => {
-        showToast('Warning: Your face is not detected!', 'warning');
-      },
+      maxWarnings:
+        proctoring.eyeDetection.maxBeforeAutoSubmit > 0
+          ? proctoring.eyeDetection.maxBeforeAutoSubmit
+          : Number.POSITIVE_INFINITY,
+      onMaxWarnings: () => handleAutoSubmit('Too many face/eye warnings.'),
+      onNoFace: () => showToast('Warning: Your face is not detected!', 'warning'),
+      onMultipleFaces: (count) =>
+        showToast(`Warning: Multiple faces detected (${count})!`, 'warning'),
+      onLookingAway: (direction) =>
+        showToast(`Warning: Please keep looking at the screen (${direction}).`, 'warning'),
     });
 
-  // Consolidated warnings
+  // Consolidated warning count (display only; auto-submit is per-category above)
   const totalWarnings = tabWarnings + warningCount + fullscreenExitCount;
-  const maxWarnings = APP_CONFIG.PROCTORING_MAX_TOTAL_WARNINGS;
 
-  // Auto-submit when total warnings exceed max
-  useEffect(() => {
-    if (totalWarnings >= maxWarnings && !isSubmittingRef.current && !loading) {
-      handleAutoSubmit('Too many proctoring warnings.');
+  // Wires the camera stream into the preview and (re)starts face detection.
+  // Reused for the initial setup and the "Enable Camera & Retry" action.
+  const setupCamera = useCallback(async () => {
+    const stream = await camera.start();
+    if (!stream || !videoRef.current) return;
+    videoRef.current.srcObject = stream;
+    if (proctoring.eyeDetection.enabled) {
+      const begin = () => startDetection(videoRef.current!);
+      if (videoRef.current.readyState >= 1) begin();
+      else videoRef.current.onloadedmetadata = begin;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [totalWarnings]);
+  }, [camera, startDetection, proctoring.eyeDetection.enabled]);
 
   const handleSubmit = useCallback(async () => {
     if (isSubmittingRef.current) return;
@@ -214,22 +238,20 @@ export function AptitudeAssessmentPage() {
 
         setQuestions(normalizeQuestions(parsed));
 
-        // Enter fullscreen
-        await enterFullscreen();
-
-        // Load face detection models and start camera (non-blocking)
-        try {
-          await loadModels();
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-            videoRef.current.onloadedmetadata = () => {
-              startDetection(videoRef.current!);
-            };
-          }
-        } catch (camErr) {
-          console.warn('Face detection/camera unavailable:', camErr);
+        // Enter fullscreen (if enabled)
+        if (proctoring.fullscreen.enabled) {
+          await enterFullscreen();
         }
+
+        // Load face-detection models first so detection can start as soon as the
+        // camera stream is live (skipped entirely when eye detection is disabled).
+        if (proctoring.eyeDetection.enabled) {
+          await loadModels();
+        }
+
+        // Request the camera and wire up the preview + detection. On failure the
+        // camera hook exposes a status the UI renders a blocking overlay from.
+        await setupCamera();
 
         // Mark assessment as attended
         if (user?.email) {
@@ -239,6 +261,8 @@ export function AptitudeAssessmentPage() {
           });
         }
 
+        // Proctoring counters go live only now — after all permission prompts.
+        proctoringActiveRef.current = true;
         startTimer();
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to load exam questions.';
@@ -255,9 +279,7 @@ export function AptitudeAssessmentPage() {
   useEffect(() => {
     return () => {
       stopDetection();
-      if (videoRef.current?.srcObject) {
-        (videoRef.current.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
-      }
+      camera.stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -316,8 +338,32 @@ export function AptitudeAssessmentPage() {
 
   return (
     <div className="min-h-screen bg-[var(--background)] flex flex-col">
+      {/* Camera Required Overlay — blocks the exam until the camera is live */}
+      {proctoring.camera.required &&
+        !loading &&
+        (camera.status === 'denied' ||
+          camera.status === 'unavailable' ||
+          camera.status === 'error') && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 backdrop-blur-sm">
+            <div className="text-center p-8 rounded-2xl bg-[var(--cardBg)] border border-[var(--border)] max-w-md mx-4 shadow-2xl">
+              <Camera className="w-16 h-16 text-red-500 mx-auto mb-4" />
+              <h2 className="text-xl font-bold text-[var(--text)] mb-2">Camera Required</h2>
+              <p className="text-[var(--textSecondary)] mb-6">
+                {camera.message} Your exam cannot continue until camera access is enabled.
+              </p>
+              <Button
+                onClick={setupCamera}
+                isLoading={camera.status === 'requesting'}
+                leftIcon={<Camera size={16} />}
+              >
+                Enable Camera &amp; Retry
+              </Button>
+            </div>
+          </div>
+        )}
+
       {/* Fullscreen Exit Overlay */}
-      {!isFullscreen && !loading && (
+      {proctoring.fullscreen.enabled && !isFullscreen && !loading && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
           <div className="text-center p-8 rounded-2xl bg-[var(--cardBg)] border border-[var(--border)] max-w-md mx-4 shadow-2xl">
             <ShieldAlert className="w-16 h-16 text-amber-500 mx-auto mb-4" />
@@ -353,15 +399,32 @@ export function AptitudeAssessmentPage() {
             <div className="relative group">
               <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold ${warningColor}`}>
                 <AlertTriangle size={14} />
-                <span>{totalWarnings}/{maxWarnings}</span>
+                <span>{totalWarnings} warning{totalWarnings === 1 ? '' : 's'}</span>
               </div>
-              <div className="absolute right-0 top-full mt-2 w-56 p-3 rounded-lg bg-[var(--cardBg)] border border-[var(--border)] shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity z-20">
+              <div className="absolute right-0 top-full mt-2 w-64 p-3 rounded-lg bg-[var(--cardBg)] border border-[var(--border)] shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity z-20">
                 <p className="text-xs font-semibold text-[var(--text)] mb-2">Warning Breakdown</p>
                 <div className="space-y-1 text-xs text-[var(--textSecondary)]">
-                  <p>Tab switches: {tabWarnings}</p>
-                  <p>Face detection: {warningCount}</p>
-                  <p>Fullscreen exits: {fullscreenExitCount}</p>
+                  {proctoring.tabSwitch.enabled && (
+                    <p>
+                      Tab switches: {tabWarnings}
+                      {proctoring.tabSwitch.maxBeforeAutoSubmit > 0
+                        ? ` / ${proctoring.tabSwitch.maxBeforeAutoSubmit}`
+                        : ''}
+                    </p>
+                  )}
+                  {proctoring.eyeDetection.enabled && (
+                    <p>
+                      Face / eye: {warningCount}
+                      {proctoring.eyeDetection.maxBeforeAutoSubmit > 0
+                        ? ` / ${proctoring.eyeDetection.maxBeforeAutoSubmit}`
+                        : ''}
+                    </p>
+                  )}
+                  {proctoring.fullscreen.enabled && <p>Fullscreen exits: {fullscreenExitCount}</p>}
                 </div>
+                <p className="mt-2 text-[11px] text-[var(--textSecondary)] border-t border-[var(--border)] pt-2">
+                  Reaching a limit auto-submits your exam.
+                </p>
               </div>
             </div>
 
@@ -394,12 +457,39 @@ export function AptitudeAssessmentPage() {
         <div className="w-64 border-r border-[var(--border)] bg-[var(--cardBg)] p-4 overflow-y-auto">
           {/* Camera Preview */}
           <div className="mb-4">
-            <div className="aspect-video bg-black rounded-lg overflow-hidden">
+            <div className="aspect-video bg-black rounded-lg overflow-hidden relative">
               <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+              {camera.status !== 'active' && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/70 px-2 text-center">
+                  <Camera size={20} className="text-white/60" />
+                  <span className="text-[11px] leading-tight text-white/80">
+                    {camera.status === 'requesting' ? 'Starting camera…' : 'Camera off'}
+                  </span>
+                  {(camera.status === 'denied' ||
+                    camera.status === 'unavailable' ||
+                    camera.status === 'error') && (
+                    <button
+                      onClick={setupCamera}
+                      className="mt-1 rounded-md bg-white/15 px-2 py-1 text-[11px] font-medium text-white hover:bg-white/25"
+                    >
+                      Retry
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
-            <div className="flex items-center gap-1 mt-1 text-xs text-[var(--textSecondary)]">
-              <Camera size={12} />
-              <span>Camera active</span>
+            <div className="flex items-center gap-1 mt-1 text-xs">
+              <Camera
+                size={12}
+                className={camera.status === 'active' ? 'text-green-500' : 'text-red-500'}
+              />
+              <span
+                className={
+                  camera.status === 'active' ? 'text-green-600 dark:text-green-400' : 'text-red-500'
+                }
+              >
+                {camera.status === 'active' ? 'Camera active' : 'Camera not active'}
+              </span>
             </div>
           </div>
 
