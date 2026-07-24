@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -7,6 +7,7 @@ import { Send, Upload, FileText, X, Loader2, AlertTriangle, CheckCircle } from '
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/Toast';
 import { jobApplicationService } from '@/services/job-application.service';
+import { jobService } from '@/services/job.service';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -25,12 +26,19 @@ export function JobApplicationPage() {
   const { user } = useAuth();
   const { showToast } = useToast();
 
+  const { jobPrefix: paramPrefix } = useParams<{ jobPrefix: string }>();
+
   const locationState = location.state as {
     job?: JobPostDTO;
     existingApplication?: JobApplicationDTO;
   } | null;
-  const job = locationState?.job;
   const passedApplication = locationState?.existingApplication;
+
+  // Job comes either from in-app navigation state or, for a shared link, is
+  // resolved from the :jobPrefix URL param.
+  const [job, setJob] = useState<JobPostDTO | null>(locationState?.job ?? null);
+  const [resolvingJob, setResolvingJob] = useState(!locationState?.job && !!paramPrefix);
+  const [jobNotFound, setJobNotFound] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -57,6 +65,37 @@ export function JobApplicationPage() {
       role: job?.role || job?.jobTitle || '',
     },
   });
+
+  // Resolve the job from the URL param for shared apply links (no nav state).
+  useEffect(() => {
+    let cancelled = false;
+    async function resolveJob() {
+      if (job || !paramPrefix) return;
+      setResolvingJob(true);
+      setJobNotFound(false);
+      try {
+        const res = await jobService.getAllJobs();
+        const match = res.data?.find((j) => j.jobPrefix === paramPrefix);
+        if (cancelled) return;
+        if (match) {
+          setJob(match);
+          // Prefill the role for a fresh application (edit mode overrides later).
+          setValue('role', match.role || match.jobTitle || '');
+        } else {
+          setJobNotFound(true);
+        }
+      } catch {
+        if (!cancelled) setJobNotFound(true);
+      } finally {
+        if (!cancelled) setResolvingJob(false);
+      }
+    }
+    resolveJob();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paramPrefix]);
 
   // Check deadline
   useEffect(() => {
@@ -174,11 +213,22 @@ export function JobApplicationPage() {
     }
   };
 
+  // Resolving a shared link's job by prefix.
+  if (resolvingJob) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-8 h-8 animate-spin text-[var(--primary)]" />
+      </div>
+    );
+  }
+
   if (!job) {
     return (
       <div className="text-center py-16">
         <p className="text-lg text-[var(--textSecondary)]">
-          No job selected. Please go to the Events page and select a job to apply.
+          {jobNotFound
+            ? 'This job could not be found. It may have been removed or the link is incorrect.'
+            : 'No job selected. Please go to the Events page and select a job to apply.'}
         </p>
         <Button className="mt-4" onClick={() => navigate(ROUTES.CANDIDATE.EVENTS)}>
           Browse Jobs

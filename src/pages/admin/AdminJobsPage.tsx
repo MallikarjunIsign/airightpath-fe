@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
+import { ShareJobLink } from '@/components/admin/ShareJobLink';
 import { ROUTES } from '@/config/routes';
 import { formatDate } from '@/utils/format.utils';
 import { usePersistentState, writePersistentValue } from '@/hooks/usePersistentState';
@@ -368,6 +369,11 @@ export function AdminJobsPage() {
                   ? `Application Deadline Passed: ${formatDate(selectedJob.applicationDeadline)}`
                   : `Application Deadline: ${formatDate(selectedJob.applicationDeadline)}`}
               </span>
+            </div>
+
+            {/* Shareable apply link */}
+            <div className="p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
+              <ShareJobLink jobPrefix={selectedJob.jobPrefix} />
             </div>
 
             {/* Job Description */}

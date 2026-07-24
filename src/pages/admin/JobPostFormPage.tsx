@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Send, Briefcase } from 'lucide-react';
+import { Send, Briefcase, CheckCircle } from 'lucide-react';
 import { jobPostSchema } from '@/config/validation';
 import { jobService } from '@/services/job.service';
 import { useToast } from '@/components/ui/Toast';
@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { ShareJobLink } from '@/components/admin/ShareJobLink';
 
 type JobPostFormData = z.infer<typeof jobPostSchema>;
 
@@ -35,6 +36,8 @@ const BLOCKED_NUMBER_KEYS = new Set(['.', ',', 'e', 'E', '+', '-']);
 export function JobPostFormPage() {
   const { showToast } = useToast();
   const [submitting, setSubmitting] = useState(false);
+  // Job prefix of the most recently created job — drives the share-link panel.
+  const [createdPrefix, setCreatedPrefix] = useState<string | null>(null);
   // Computed once on mount so the deadline floor doesn't drift each render.
   const [minDeadline] = useState(localDateToday);
 
@@ -71,6 +74,7 @@ export function JobPostFormPage() {
     try {
       await jobService.createJob(data);
       showToast('Job posted successfully!', 'success');
+      setCreatedPrefix(data.jobPrefix);
       reset();
     } catch {
       // Error toast (with the server's specific message) auto-handled by the API interceptor.
@@ -87,6 +91,34 @@ export function JobPostFormPage() {
           Fill in the details below to create a new job posting
         </p>
       </div>
+
+      {createdPrefix && (
+        <Card>
+          <CardContent>
+            <div className="flex items-start gap-3 pt-5">
+              <CheckCircle size={22} className="mt-0.5 flex-shrink-0 text-green-500" />
+              <div className="min-w-0 flex-1 space-y-3">
+                <div>
+                  <p className="font-semibold text-[var(--text)]">
+                    Job <span className="text-[var(--primary)]">{createdPrefix}</span> created
+                  </p>
+                  <p className="text-sm text-[var(--textSecondary)]">
+                    Share this link so candidates can apply directly.
+                  </p>
+                </div>
+                <ShareJobLink jobPrefix={createdPrefix} />
+                <button
+                  type="button"
+                  onClick={() => setCreatedPrefix(null)}
+                  className="text-sm font-medium text-[var(--primary)] hover:underline"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

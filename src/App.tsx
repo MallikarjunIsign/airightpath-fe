@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRbac } from '@/hooks/useRbac';
-import { Layout, PublicLayout } from '@/components/layout/Layout';
+import { Layout } from '@/components/layout/Layout';
 import { ExamLayout } from '@/components/layout/ExamLayout';
 import { InterviewLayout } from '@/components/layout/InterviewLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -157,6 +157,8 @@ function App() {
         <Route path="events" element={<EventsPage />} />
         <Route path="applications" element={<MyApplicationsPage />} />
         <Route path="apply" element={<JobApplicationPage />} />
+        {/* Shareable per-job apply link (loads the job by prefix from the URL) */}
+        <Route path="apply/:jobPrefix" element={<JobApplicationPage />} />
         <Route path="assessments" element={<AssessmentListPage />} />
         <Route path="instructions" element={<ExamInstructionsPage />} />
         <Route path="interviews" element={<InterviewListPage />} />
