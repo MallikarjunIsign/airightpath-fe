@@ -722,6 +722,7 @@ export function AtsScreeningPage() {
                 <ReferralFields
                   referralName={selectedCandidate.referralName}
                   referralId={selectedCandidate.referralId}
+                  alwaysShow
                 />
                 <div className="flex items-center gap-2 text-sm col-span-full">
                   <MapPin size={16} className="text-[var(--primary)] flex-shrink-0" />
