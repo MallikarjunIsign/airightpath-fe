@@ -15,7 +15,6 @@ import {
   MapPin,
   Clock,
   FileText,
-  AlertTriangle,
   TrendingUp,
   TrendingDown,
   Search,
@@ -36,6 +35,7 @@ import { resumeService } from '@/services/resume.service';
 import axios from 'axios';
 import { useToast } from '@/components/ui/Toast';
 import { usePersistentState } from '@/hooks/usePersistentState';
+import { ReferralFields } from '@/components/application/ReferralFields';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
 
 type FilterTab = 'all' | 'shortlisted' | 'rejected';
@@ -719,6 +719,10 @@ export function AtsScreeningPage() {
                     <p className="text-[var(--text)] font-medium">{selectedCandidate.jobRole || 'N/A'}</p>
                   </div>
                 </div>
+                <ReferralFields
+                  referralName={selectedCandidate.referralName}
+                  referralId={selectedCandidate.referralId}
+                />
                 <div className="flex items-center gap-2 text-sm col-span-full">
                   <MapPin size={16} className="text-[var(--primary)] flex-shrink-0" />
                   <div>

@@ -16,6 +16,7 @@ import { ROUTES } from '@/config/routes';
 import { jobApplicationSchema } from '@/config/validation';
 import { validateResumeFile } from '@/utils/file.utils';
 import { digitsOnly } from '@/utils/input.utils';
+import { hasReferral } from '@/utils/referral.utils';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
 
 type JobApplicationFormData = z.infer<typeof jobApplicationSchema>;
@@ -63,6 +64,8 @@ export function JobApplicationPage() {
       experience: '',
       address: '',
       role: job?.role || job?.jobTitle || '',
+      referralName: '',
+      referralId: '',
     },
   });
 
@@ -195,6 +198,16 @@ export function JobApplicationPage() {
 
       if (resumeFile) {
         formData.append('resume', resumeFile);
+      }
+
+      // Optional referral — sent as separate form parts (keys are case-sensitive),
+      // and only when the candidate actually entered a value. Captured at apply
+      // time only; the update endpoint ignores these fields.
+      if (!isEditMode) {
+        const referralName = data.referralName?.trim();
+        const referralId = data.referralId?.trim();
+        if (referralName) formData.append('referralName', referralName);
+        if (referralId) formData.append('referralId', referralId);
       }
 
       if (isEditMode) {
@@ -344,6 +357,45 @@ export function JobApplicationPage() {
               error={errors.role?.message}
               placeholder="Applied role"
             />
+
+            {/* Referral — editable on a new application; read-only when editing
+                (referral is captured at apply time only and never sent on update). */}
+            {!isEditMode ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                  label="Referral Name"
+                  helperText="Optional"
+                  placeholder="Who referred you?"
+                  error={errors.referralName?.message}
+                  {...register('referralName')}
+                />
+                <Input
+                  label="Referral ID"
+                  helperText="Optional"
+                  placeholder="Referral code or employee ID"
+                  error={errors.referralId?.message}
+                  {...register('referralId')}
+                />
+              </div>
+            ) : (
+              hasReferral(existingApplication?.referralName, existingApplication?.referralId) && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Input
+                    label="Referral Name"
+                    value={existingApplication?.referralName?.trim() || '—'}
+                    readOnly
+                    disabled
+                    helperText="Set at apply time — can't be changed"
+                  />
+                  <Input
+                    label="Referral ID"
+                    value={existingApplication?.referralId?.trim() || '—'}
+                    readOnly
+                    disabled
+                  />
+                </div>
+              )
+            )}
 
             {/* Resume Upload */}
             <div className="space-y-2">

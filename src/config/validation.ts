@@ -116,4 +116,7 @@ export const jobApplicationSchema = z.object({
   experience: z.string().min(1, 'Experience is required'),
   address: z.string().min(1, 'Address is required'),
   role: z.string().min(1, 'Role is required'),
+  // Optional referral — no validation; a candidate may leave neither, either, or both.
+  referralName: z.string().optional(),
+  referralId: z.string().optional(),
 });

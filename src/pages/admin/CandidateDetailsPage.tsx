@@ -37,6 +37,8 @@ import axios from 'axios';
 import { usePersistentState, writePersistentValue } from '@/hooks/usePersistentState';
 import { useToast } from '@/components/ui/Toast';
 import { ROUTES } from '@/config/routes';
+import { referralDisplay } from '@/utils/referral.utils';
+import { ReferralFields } from '@/components/application/ReferralFields';
 import type { JobPostDTO, JobApplicationDTO, JobApplicationStatus } from '@/types/job.types';
 
 // Assessments are assigned at the RECONFIRMED stage, just before the exam link is sent.
@@ -586,6 +588,7 @@ export function CandidateDetailsPage() {
                         <TableHead>Mobile</TableHead>
                         <TableHead>Experience</TableHead>
                         <TableHead>Role</TableHead>
+                        <TableHead>Referral</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Actions</TableHead>
                       </TableRow>
@@ -610,6 +613,7 @@ export function CandidateDetailsPage() {
                             <TableCell>{candidate.mobileNumber || '-'}</TableCell>
                             <TableCell>{candidate.experience}</TableCell>
                             <TableCell>{candidate.jobRole || '-'}</TableCell>
+                            <TableCell>{referralDisplay(candidate.referralName, candidate.referralId)}</TableCell>
                             <TableCell>
                               <Badge variant="info" size="sm">
                                 {STAGE_LABELS[candidate.status] ?? candidate.status}
@@ -751,6 +755,10 @@ export function CandidateDetailsPage() {
                     <p className="text-[var(--text)] font-medium">{selectedCandidate.jobRole || 'N/A'}</p>
                   </div>
                 </div>
+                <ReferralFields
+                  referralName={selectedCandidate.referralName}
+                  referralId={selectedCandidate.referralId}
+                />
                 <div className="flex items-center gap-2 text-sm col-span-full">
                   <MapPin size={16} className="text-[var(--primary)] flex-shrink-0" />
                   <div>

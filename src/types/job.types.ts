@@ -65,4 +65,7 @@ export interface JobApplicationDTO {
   jobTitle?: string;
   companyName?: string;
   applicationDeadline?: string;
+  /** Optional referral captured at apply time (either may be null). */
+  referralId?: string | null;
+  referralName?: string | null;
 }
