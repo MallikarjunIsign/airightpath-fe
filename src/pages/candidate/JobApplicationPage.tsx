@@ -16,7 +16,6 @@ import { ROUTES } from '@/config/routes';
 import { jobApplicationSchema } from '@/config/validation';
 import { validateResumeFile } from '@/utils/file.utils';
 import { digitsOnly } from '@/utils/input.utils';
-import { hasReferral } from '@/utils/referral.utils';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
 
 type JobApplicationFormData = z.infer<typeof jobApplicationSchema>;
@@ -378,23 +377,21 @@ export function JobApplicationPage() {
                 />
               </div>
             ) : (
-              hasReferral(existingApplication?.referralName, existingApplication?.referralId) && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <Input
-                    label="Referral Name"
-                    value={existingApplication?.referralName?.trim() || '—'}
-                    readOnly
-                    disabled
-                    helperText="Set at apply time — can't be changed"
-                  />
-                  <Input
-                    label="Referral ID"
-                    value={existingApplication?.referralId?.trim() || '—'}
-                    readOnly
-                    disabled
-                  />
-                </div>
-              )
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                  label="Referral Name"
+                  value={existingApplication?.referralName?.trim() || 'Not provided'}
+                  readOnly
+                  disabled
+                  helperText="Set at apply time — can't be changed"
+                />
+                <Input
+                  label="Referral ID"
+                  value={existingApplication?.referralId?.trim() || 'Not provided'}
+                  readOnly
+                  disabled
+                />
+              </div>
             )}
 
             {/* Resume Upload */}

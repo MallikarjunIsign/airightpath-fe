@@ -7,3 +7,15 @@ export function hasReferral(name?: string | null, id?: string | null): boolean {
 export function referralDisplay(name?: string | null, id?: string | null): string {
   return name?.trim() || id?.trim() || '—';
 }
+
+/** Human label for the admin referral status (defaults to Pending). */
+export function referralStatusLabel(status?: string | null): string {
+  switch ((status || 'PENDING').toUpperCase()) {
+    case 'VERIFIED':
+      return 'Verified';
+    case 'REJECTED':
+      return 'Rejected';
+    default:
+      return 'Pending';
+  }
+}

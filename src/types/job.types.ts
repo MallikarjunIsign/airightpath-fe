@@ -68,4 +68,6 @@ export interface JobApplicationDTO {
   /** Optional referral captured at apply time (either may be null). */
   referralId?: string | null;
   referralName?: string | null;
+  /** Admin validation of the referral: PENDING | VALIDATED | REJECTED (or null). */
+  referralStatus?: string | null;
 }

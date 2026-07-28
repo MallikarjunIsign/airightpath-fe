@@ -354,6 +354,7 @@ export function MyApplicationsPage() {
                 <ReferralFields
                   referralName={selectedApp.referralName}
                   referralId={selectedApp.referralId}
+                  alwaysShow
                 />
               </div>
             </div>

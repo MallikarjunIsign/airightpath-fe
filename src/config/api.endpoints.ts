@@ -38,6 +38,10 @@ export const ENDPOINTS = {
     SEND_EXAM_LINK: "/api/job-applications/send-exam-link",
     SEND_SUCCESS_MAIL: "/api/job-applications/send-success-mail",
     SEND_FAILURE_MAIL: "/api/job-applications/send-failure-mail",
+    // Manually shortlist candidates without running ATS screening.
+    SHORTLIST: "/api/job-applications/shortlist",
+    // Admin sets a candidate's referral status (query params: jobPrefix, email, referralStatus).
+    REFERRAL_STATUS: "/api/job-applications/referral-status",
   },
   ASSESSMENTS: {
     UPLOAD: "/api/upload",

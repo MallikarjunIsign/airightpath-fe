@@ -37,7 +37,7 @@ import axios from 'axios';
 import { usePersistentState, writePersistentValue } from '@/hooks/usePersistentState';
 import { useToast } from '@/components/ui/Toast';
 import { ROUTES } from '@/config/routes';
-import { referralDisplay } from '@/utils/referral.utils';
+import { referralDisplay, referralStatusLabel, hasReferral } from '@/utils/referral.utils';
 import { ReferralFields } from '@/components/application/ReferralFields';
 import type { JobPostDTO, JobApplicationDTO, JobApplicationStatus } from '@/types/job.types';
 
@@ -130,6 +130,10 @@ export function CandidateDetailsPage() {
 
   // Candidate detail modal
   const [selectedCandidate, setSelectedCandidate] = useState<JobApplicationDTO | null>(null);
+
+  // Manual shortlist / referral validation in-flight flags
+  const [shortlisting, setShortlisting] = useState(false);
+  const [validatingReferral, setValidatingReferral] = useState(false);
 
   // Resume viewer
   const [resumeView, setResumeView] = useState<{ url: string; name: string } | null>(null);
@@ -281,6 +285,83 @@ export function CandidateDetailsPage() {
     }
     writePersistentValue('ats:selectedPrefix', selectedPrefix);
     navigate(ROUTES.ADMIN.ATS);
+  }
+
+  // Manually shortlist candidates (Applied → Shortlisted) without ATS screening.
+  async function handleShortlist(emails: string[]) {
+    if (!selectedPrefix) {
+      showToast('Please select a job first', 'warning');
+      return;
+    }
+    if (emails.length === 0) {
+      showToast('Please select at least one candidate to shortlist', 'warning');
+      return;
+    }
+    setShortlisting(true);
+    try {
+      await jobApplicationService.shortlist({ jobPrefix: selectedPrefix, emails });
+
+      // The endpoint can partially succeed, so trust the read state rather than
+      // assuming all requested emails were shortlisted: after success a candidate
+      // flips to status SHORTLISTED. Re-read and count who actually moved.
+      const res = await jobApplicationService.getByPrefix(selectedPrefix);
+      const data = res.data ?? [];
+      setCandidates(data);
+
+      const requested = new Set(emails.map((e) => e.toLowerCase()));
+      const done = data.filter(
+        (c) => requested.has(getAppEmail(c).toLowerCase()) && c.status === 'SHORTLISTED',
+      ).length;
+      const failed = emails.length - done;
+
+      if (failed <= 0) {
+        showToast(`Shortlisted ${done} candidate${done === 1 ? '' : 's'}.`, 'success');
+      } else if (done === 0) {
+        showToast(
+          `Could not shortlist ${failed} candidate${failed === 1 ? '' : 's'}. Please try again.`,
+          'error',
+        );
+      } else {
+        showToast(
+          `Shortlisted ${done} of ${emails.length}; ${failed} could not be shortlisted.`,
+          'warning',
+        );
+      }
+
+      setSelectedEmails(new Set());
+      setSelectedCandidate(null);
+    } catch {
+      // Error toast auto-handled by interceptor
+    } finally {
+      setShortlisting(false);
+    }
+  }
+
+  // Admin sets a candidate's referral status (verify / reject).
+  async function handleSetReferralStatus(
+    candidate: JobApplicationDTO,
+    referralStatus: 'VERIFIED' | 'REJECTED',
+  ) {
+    const email = getAppEmail(candidate);
+    if (!selectedPrefix || !email) return;
+    setValidatingReferral(true);
+    try {
+      await jobApplicationService.setReferralStatus({
+        jobPrefix: selectedPrefix,
+        email,
+        referralStatus,
+      });
+      showToast(`Referral ${referralStatus === 'VERIFIED' ? 'verified' : 'rejected'}.`, 'success');
+      // Reflect immediately in the open modal and the list.
+      setSelectedCandidate((prev) => (prev ? { ...prev, referralStatus } : prev));
+      setCandidates((prev) =>
+        prev.map((c) => (getAppEmail(c) === email ? { ...c, referralStatus } : c)),
+      );
+    } catch {
+      // Error toast auto-handled by interceptor
+    } finally {
+      setValidatingReferral(false);
+    }
   }
 
   // Go to the Assign page with this job + the selected candidates pre-selected.
@@ -506,14 +587,25 @@ export function CandidateDetailsPage() {
             activeStage === ASSIGN_STAGE) && (
             <div className="flex flex-wrap gap-2">
               {activeStage === ('APPLIED' as JobApplicationStatus) && (
-                <Button
-                  variant="primary"
-                  size="sm"
-                  leftIcon={<FileText size={16} />}
-                  onClick={handleScreenAts}
-                >
-                  Screen with ATS
-                </Button>
+                <>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    leftIcon={<FileText size={16} />}
+                    onClick={handleScreenAts}
+                  >
+                    Screen with ATS
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    leftIcon={<CheckCircle size={16} />}
+                    isLoading={shortlisting}
+                    onClick={() => handleShortlist(Array.from(selectedEmails))}
+                  >
+                    Shortlist Selected
+                  </Button>
+                </>
               )}
               {activeStage === ASSIGN_STAGE && (
                 <Button
@@ -695,9 +787,20 @@ export function CandidateDetailsPage() {
           title="Candidate Details"
           size="lg"
           footer={
-            <Button variant="ghost" onClick={() => setSelectedCandidate(null)}>
-              Close
-            </Button>
+            <div className="flex w-full items-center justify-between gap-2">
+              <Button variant="ghost" onClick={() => setSelectedCandidate(null)}>
+                Close
+              </Button>
+              {selectedCandidate.status === 'APPLIED' && (
+                <Button
+                  leftIcon={<CheckCircle size={16} />}
+                  isLoading={shortlisting}
+                  onClick={() => handleShortlist([getAppEmail(selectedCandidate)])}
+                >
+                  Shortlist
+                </Button>
+              )}
+            </div>
           }
         >
           <div className="space-y-6">
@@ -769,6 +872,54 @@ export function CandidateDetailsPage() {
                 </div>
               </div>
             </div>
+
+            {/* Referral validation — only when the candidate was referred */}
+            {hasReferral(selectedCandidate.referralName, selectedCandidate.referralId) && (
+              <div>
+                <h4 className="text-sm font-semibold text-[var(--text)] mb-3">Referral</h4>
+                <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-[var(--textSecondary)]">Status:</span>
+                    <Badge
+                      variant={
+                        selectedCandidate.referralStatus?.toUpperCase() === 'VERIFIED'
+                          ? 'success'
+                          : selectedCandidate.referralStatus?.toUpperCase() === 'REJECTED'
+                            ? 'error'
+                            : 'warning'
+                      }
+                      size="sm"
+                    >
+                      {referralStatusLabel(selectedCandidate.referralStatus)}
+                    </Badge>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      leftIcon={<CheckCircle size={14} />}
+                      isLoading={validatingReferral}
+                      disabled={selectedCandidate.referralStatus?.toUpperCase() === 'VERIFIED'}
+                      onClick={() => handleSetReferralStatus(selectedCandidate, 'VERIFIED')}
+                    >
+                      Verify
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      leftIcon={<XCircle size={14} />}
+                      disabled={
+                        validatingReferral ||
+                        selectedCandidate.referralStatus?.toUpperCase() === 'REJECTED'
+                      }
+                      onClick={() => handleSetReferralStatus(selectedCandidate, 'REJECTED')}
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Application Status Details */}
             <div>
