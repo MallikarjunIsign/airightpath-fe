@@ -70,6 +70,15 @@ export function JobPostFormPage() {
 
   async function onSubmit(data: JobPostFormData) {
     if (submitting) return;
+    // Defense in depth: never let a past deadline reach the backend, even if the
+    // form's validity state slips (schema + min attribute already guard the UI).
+    const deadline = new Date(`${data.applicationDeadline}T00:00:00`);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (Number.isNaN(deadline.getTime()) || deadline.getTime() < today.getTime()) {
+      showToast('Application deadline cannot be in the past.', 'error');
+      return;
+    }
     setSubmitting(true);
     try {
       await jobService.createJob(data);

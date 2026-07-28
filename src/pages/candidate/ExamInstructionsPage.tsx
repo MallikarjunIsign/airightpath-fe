@@ -9,7 +9,6 @@ import {
   CheckCircle,
   Monitor,
   Clock,
-  Loader2,
 } from 'lucide-react';
 import { useToast } from '@/components/ui/Toast';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
@@ -61,7 +60,7 @@ export function ExamInstructionsPage() {
     }
   };
 
-  const handleStartExam = () => {
+  const handleStartExam = async () => {
     if (!agreed) {
       showToast('Please agree to the terms and conditions.', 'warning');
       return;
@@ -69,6 +68,15 @@ export function ExamInstructionsPage() {
     if (!cameraReady || !micReady) {
       showToast('Please enable camera and microphone before starting.', 'warning');
       return;
+    }
+
+    // Enter fullscreen here, inside the click gesture. The exam page's own init
+    // runs async after navigation and has no user activation, so requestFullscreen
+    // would be rejected there — fullscreen persists across the client-side nav.
+    try {
+      await document.documentElement.requestFullscreen();
+    } catch {
+      // Denied/unsupported — the exam page shows a "Return to Fullscreen" prompt.
     }
 
     // Stop the preview stream before navigating

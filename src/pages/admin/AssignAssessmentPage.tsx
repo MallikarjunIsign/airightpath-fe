@@ -14,6 +14,7 @@ import { assessmentService } from '@/services/assessment.service';
 import api from '@/services/api.service';
 import { ENDPOINTS } from '@/config/api.endpoints';
 import { ROUTES } from '@/config/routes';
+import { nowDateTimeLocal } from '@/utils/datetime.utils';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
 
 interface FileState {
@@ -37,6 +38,8 @@ export function AssignAssessmentPage() {
   const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set());
   const [startTime, setStartTime] = useState('');
   const [deadline, setDeadline] = useState('');
+  // Floor for the date-time pickers (computed once on mount).
+  const [minDateTime] = useState(nowDateTimeLocal);
 
   // Checkbox state for assessment types
   const [aptitudeChecked, setAptitudeChecked] = useState(false);
@@ -292,6 +295,20 @@ export function AssignAssessmentPage() {
     }
     if (!deadline) {
       showToast('Please set a deadline', 'warning');
+      return;
+    }
+    // Reject past date/time and an out-of-order window before saving.
+    const now = Date.now();
+    if (new Date(startTime).getTime() < now) {
+      showToast('Start time cannot be in the past.', 'warning');
+      return;
+    }
+    if (new Date(deadline).getTime() < now) {
+      showToast('Deadline cannot be in the past.', 'warning');
+      return;
+    }
+    if (new Date(deadline).getTime() <= new Date(startTime).getTime()) {
+      showToast('Deadline must be after the start time.', 'warning');
       return;
     }
 
@@ -573,12 +590,16 @@ export function AssignAssessmentPage() {
               <Input
                 label="Start Time"
                 type="datetime-local"
+                min={minDateTime}
+                helperText="Cannot be in the past"
                 value={startTime}
                 onChange={(e) => setStartTime(e.target.value)}
               />
               <Input
                 label="Deadline"
                 type="datetime-local"
+                min={startTime || minDateTime}
+                helperText="Must be after the start time"
                 value={deadline}
                 onChange={(e) => setDeadline(e.target.value)}
               />

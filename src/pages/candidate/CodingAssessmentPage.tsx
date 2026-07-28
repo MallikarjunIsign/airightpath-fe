@@ -231,18 +231,28 @@ export function CodingAssessmentPage() {
 
   const totalWarnings = tabWarnings + warningCount + fullscreenExitCount;
 
-  // Wires the camera stream into the preview and (re)starts face detection.
-  // Reused for the initial setup and the "Enable Camera & Retry" action.
+  // Acquires the camera (prompts for permission). Attaching the stream to the
+  // <video> + starting detection happens in the effect below, once the element
+  // is mounted — during `loading` the preview isn't rendered yet, so doing it
+  // here would silently no-op. Reused for the "Enable Camera & Retry" action.
   const setupCamera = useCallback(async () => {
-    const stream = await camera.start();
-    if (!stream || !videoRef.current) return;
-    videoRef.current.srcObject = stream;
+    await camera.start();
+  }, [camera]);
+
+  // Attach the live stream to the preview and start face detection once the
+  // <video> exists (after loading) and the camera is active.
+  useEffect(() => {
+    if (loading) return;
+    const video = videoRef.current;
+    const stream = camera.streamRef.current;
+    if (!video || !stream || video.srcObject === stream) return;
+    video.srcObject = stream;
     if (proctoring.eyeDetection.enabled) {
-      const begin = () => startDetection(videoRef.current!);
-      if (videoRef.current.readyState >= 1) begin();
-      else videoRef.current.onloadedmetadata = begin;
+      const begin = () => startDetection(video);
+      if (video.readyState >= 1) begin();
+      else video.addEventListener('loadedmetadata', begin, { once: true });
     }
-  }, [camera, startDetection, proctoring.eyeDetection.enabled]);
+  }, [loading, camera.status, camera.streamRef, proctoring.eyeDetection.enabled, startDetection]);
 
   // ── Monaco editor helpers ─────────────────────────────────────────
   const handleEditorMount: OnMount = (editor, monaco) => {
