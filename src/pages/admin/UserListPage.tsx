@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { userService } from '@/services/user.service';
 import { useToast } from '@/components/ui/Toast';
+import { MESSAGES } from '@/config/messages';
 import { usePersistentState } from '@/hooks/usePersistentState';
 import type { UsersDto } from '@/types/user.types';
 
@@ -55,10 +56,10 @@ export function UserListPage() {
     try {
       if (user.enabled) {
         await userService.deactivate(user.email);
-        showToast(`${user.firstName} ${user.lastName} deactivated`, 'success');
+        showToast(MESSAGES.admin.users.statusChanged(`${user.firstName} ${user.lastName}`, false), 'success');
       } else {
         await userService.activate(user.email);
-        showToast(`${user.firstName} ${user.lastName} activated`, 'success');
+        showToast(MESSAGES.admin.users.statusChanged(`${user.firstName} ${user.lastName}`, true), 'success');
       }
       // Update local state
       setUsers((prev) =>

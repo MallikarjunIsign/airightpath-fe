@@ -12,6 +12,7 @@ import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { ShareJobLink } from '@/components/admin/ShareJobLink';
+import { MESSAGES } from '@/config/messages';
 
 type JobPostFormData = z.infer<typeof jobPostSchema>;
 
@@ -76,13 +77,13 @@ export function JobPostFormPage() {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     if (Number.isNaN(deadline.getTime()) || deadline.getTime() < today.getTime()) {
-      showToast('Application deadline cannot be in the past.', 'error');
+      showToast(MESSAGES.admin.jobPost.deadlineInPast, 'error');
       return;
     }
     setSubmitting(true);
     try {
       await jobService.createJob(data);
-      showToast('Job posted successfully!', 'success');
+      showToast(MESSAGES.admin.jobPost.posted, 'success');
       setCreatedPrefix(data.jobPrefix);
       reset();
     } catch {

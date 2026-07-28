@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useToast } from '@/components/ui/Toast';
+import { MESSAGES } from '@/config/messages';
 import { authService } from '@/services/auth.service';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -51,7 +52,7 @@ export function ForgotPasswordPage() {
       });
       setContactValue(data.contact);
       setOtpMethod(data.otpMethod);
-      showToast(`OTP sent to your ${data.otpMethod}`, 'success');
+      showToast(MESSAGES.auth.otpSent(data.otpMethod), 'success');
       setStep('otp');
     } catch {
       // Error toast auto-handled by interceptor
@@ -60,7 +61,7 @@ export function ForgotPasswordPage() {
 
   const handleValidateOtp = async () => {
     if (!otp || otp.length < 4) {
-      showToast('Please enter a valid OTP', 'error');
+      showToast(MESSAGES.auth.otpInvalid, 'error');
       return;
     }
 
@@ -71,7 +72,7 @@ export function ForgotPasswordPage() {
         email: otpMethod === 'email' ? contactValue : null,
         mobile: otpMethod === 'mobile' ? contactValue : null,
       });
-      showToast('OTP verified successfully', 'success');
+      showToast(MESSAGES.auth.otpVerified, 'success');
 
       localStorage.setItem('rightpath_resetMethod', otpMethod);
       localStorage.setItem('rightpath_resetValue', contactValue);
@@ -91,7 +92,7 @@ export function ForgotPasswordPage() {
         : { mobile: contactValue, newPassword: data.newPassword };
 
       await authService.updatePassword(payload);
-      showToast('Password updated successfully', 'success');
+      showToast(MESSAGES.auth.passwordUpdated, 'success');
 
       localStorage.removeItem('rightpath_resetMethod');
       localStorage.removeItem('rightpath_resetValue');

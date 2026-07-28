@@ -36,6 +36,7 @@ import axios from 'axios';
 import { useToast } from '@/components/ui/Toast';
 import { usePersistentState } from '@/hooks/usePersistentState';
 import { ReferralFields } from '@/components/application/ReferralFields';
+import { MESSAGES } from '@/config/messages';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
 
 type FilterTab = 'all' | 'shortlisted' | 'rejected';
@@ -87,8 +88,8 @@ export function AtsScreeningPage() {
       const status = axios.isAxiosError(err) ? err.response?.status : undefined;
       showToast(
         status === 400 || status === 404
-          ? "This candidate's resume is not available."
-          : 'Unable to open the resume. Please try again.',
+          ? MESSAGES.admin.resume.unavailable
+          : MESSAGES.admin.resume.openFailed,
         'error',
       );
     } finally {
@@ -145,7 +146,7 @@ export function AtsScreeningPage() {
 
   async function handleScreenCandidates() {
     if (!selectedPrefix) {
-      showToast('Please select a job first', 'warning');
+      showToast(MESSAGES.admin.common.selectJobFirst, 'warning');
       return;
     }
 
@@ -162,10 +163,10 @@ export function AtsScreeningPage() {
       const rejected = data.filter((c) => c.status === 'REJECTED').length;
 
       if (data.length === 0) {
-        showToast('No applicants found for this job.', 'info');
+        showToast(MESSAGES.admin.ats.noApplicants, 'info');
       } else {
         showToast(
-          `Screening complete! ${shortlisted} shortlisted, ${rejected} rejected out of ${data.length} candidates.`,
+          MESSAGES.admin.ats.screeningComplete(shortlisted, rejected, data.length),
           'success'
         );
       }

@@ -5,6 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/Toast';
+import { MESSAGES } from '@/config/messages';
 import { authService } from '@/services/auth.service';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -36,7 +37,7 @@ export function ChangePasswordPage() {
 
   const onSubmit = async (data: ChangePasswordFormValues) => {
     if (!user?.email) {
-      showToast('Unable to identify your account. Please log in again.', 'error');
+      showToast(MESSAGES.auth.accountUnidentified, 'error');
       return;
     }
 
@@ -47,7 +48,7 @@ export function ChangePasswordPage() {
         newPassword: data.newPassword,
         confirmPassword: data.confirmPassword,
       });
-      showToast('Password changed successfully', 'success');
+      showToast(MESSAGES.auth.passwordChanged, 'success');
       reset();
     } catch {
       // Error toast auto-handled by interceptor

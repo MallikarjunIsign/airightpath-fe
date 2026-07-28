@@ -15,6 +15,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { ROUTES } from '@/config/routes';
 import { APP_CONFIG } from '@/config/app.config';
+import { MESSAGES } from '@/config/messages';
 import type { Assessment } from '@/types/assessment.types';
 
 export function ExamInstructionsPage() {
@@ -52,9 +53,9 @@ export function ExamInstructionsPage() {
 
       setCameraReady(true);
       setMicReady(true);
-      showToast('Camera and microphone access granted.', 'success');
+      showToast(MESSAGES.examSetup.permissionsGranted, 'success');
     } catch {
-      showToast('Failed to access camera/microphone. Please allow permissions.', 'error');
+      showToast(MESSAGES.examSetup.permissionsFailed, 'error');
     } finally {
       setPermissionLoading(false);
     }
@@ -62,11 +63,11 @@ export function ExamInstructionsPage() {
 
   const handleStartExam = async () => {
     if (!agreed) {
-      showToast('Please agree to the terms and conditions.', 'warning');
+      showToast(MESSAGES.examSetup.agreeRequired, 'warning');
       return;
     }
     if (!cameraReady || !micReady) {
-      showToast('Please enable camera and microphone before starting.', 'warning');
+      showToast(MESSAGES.examSetup.enableDevicesRequired, 'warning');
       return;
     }
 

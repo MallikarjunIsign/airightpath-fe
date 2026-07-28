@@ -16,6 +16,7 @@ import { Avatar } from '@/components/ui/Avatar';
 import { Modal } from '@/components/ui/Modal';
 import { mobileSchema } from '@/config/validation';
 import { ROUTES } from '@/config/routes';
+import { MESSAGES } from '@/config/messages';
 import { digitsOnly } from '@/utils/input.utils';
 import type { UsersDto } from '@/types/user.types';
 
@@ -92,7 +93,7 @@ export function ProfilePage() {
         mobileNumber: data.mobileNumber,
         alternativeMobileNumber: data.alternativeMobileNumber || undefined,
       });
-      showToast('Profile updated successfully.', 'success');
+      showToast(MESSAGES.profile.updated, 'success');
     } catch {
       // Error toast auto-handled by interceptor
     } finally {
@@ -106,11 +107,11 @@ export function ProfilePage() {
 
     const validTypes = ['image/jpeg', 'image/png', 'image/gif'];
     if (!validTypes.includes(file.type)) {
-      showToast('Only JPEG, PNG, and GIF files are allowed.', 'error');
+      showToast(MESSAGES.profile.imageTypeInvalid, 'error');
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
-      showToast('Image size must be less than 5MB.', 'error');
+      showToast(MESSAGES.profile.imageTooLarge, 'error');
       return;
     }
 
@@ -118,7 +119,7 @@ export function ProfilePage() {
     try {
       await userService.uploadProfileImage(user.email, file);
       await refreshImage();
-      showToast('Profile photo updated successfully.', 'success');
+      showToast(MESSAGES.profile.photoUpdated, 'success');
     } catch {
       // Error toast auto-handled by interceptor
     } finally {

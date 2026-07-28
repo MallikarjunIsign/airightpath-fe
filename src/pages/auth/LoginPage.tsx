@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/Toast';
+import { MESSAGES } from '@/config/messages';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Logo } from '@/components/ui/Logo';
@@ -39,7 +40,7 @@ export function LoginPage() {
   const onSubmit = async (data: LoginFormValues) => {
     try {
       const { roles: loadedRoles } = await login({ email: data.email, password: data.password });
-      showToast('Successfully logged in', 'success');
+      showToast(MESSAGES.auth.loginSuccess, 'success');
 
       if (from) {
         navigate(from, { replace: true });

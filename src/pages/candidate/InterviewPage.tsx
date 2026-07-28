@@ -22,12 +22,12 @@ import { aiService } from '@/services/ai.service';
 import { interviewWsService } from '@/services/interview-ws.service';
 import { AIAvatar } from '@/components/interview/AIAvatar';
 import { CodingEditor } from '@/components/interview/CodingEditor';
-import { CodeBlock } from '@/components/interview/CodeBlock';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { APP_CONFIG } from '@/config/app.config';
 import { ROUTES } from '@/config/routes';
+import { MESSAGES } from '@/config/messages';
 import { formatTimer } from '@/utils/format.utils';
 import { interviewService } from '@/services/interview.service';
 import type { InterviewSchedule } from '@/types/interview.types';
@@ -68,10 +68,10 @@ export function InterviewPage() {
     isPlaying: voiceInterview.isPlaying,
     isCodingQuestion: voiceInterview.isCodingQuestion,
     onTimeout: () => {
-      showToast('Please click the microphone to start answering.', 'warning');
+      showToast(MESSAGES.interview.micToStart, 'warning');
     },
     onMaxSkips: () => {
-      showToast('Interview ending due to consecutive unanswered questions.', 'error');
+      showToast(MESSAGES.interview.endingConsecutiveUnanswered, 'error');
       runPostCompletionFlowRef.current(false);
     },
   });
@@ -108,7 +108,7 @@ export function InterviewPage() {
     initialSeconds: APP_CONFIG.INTERVIEW_TIMER_MINUTES * 60,
     autoStart: false,
     onExpire: () => {
-      showToast('Interview time is up. Ending interview.', 'warning');
+      showToast(MESSAGES.interview.timeUp, 'warning');
       runPostCompletionFlowRef.current(false);
     },
   });
@@ -124,7 +124,7 @@ export function InterviewPage() {
     timeslice: APP_CONFIG.VIDEO_CHUNK_SECONDS * 1000,
     onScreenStop: () => {
       setScreenPermission('denied');
-      showToast('Screen sharing stopped. This has been logged.', 'warning');
+      showToast(MESSAGES.interview.screenShareStopped, 'warning');
       voiceInterview.sendProctoringEvent('screen_share_stopped', 'Candidate stopped screen sharing');
     },
   });
@@ -132,7 +132,7 @@ export function InterviewPage() {
   // Fullscreen
   const { isFullscreen, enterFullscreen, fullscreenExitCount } = useFullscreen({
     onExitAttempt: (count) => {
-      showToast(`Fullscreen exit detected (${count}). Please return to fullscreen.`, 'warning');
+      showToast(MESSAGES.interview.fullscreenExit(count), 'warning');
       voiceInterview.sendProctoringEvent('fullscreen_exit', `Exit count: ${count}`);
     },
   });
@@ -152,15 +152,15 @@ export function InterviewPage() {
     lookingDownThreshold: APP_CONFIG.FACE_LOOKING_DOWN_THRESHOLD,
     lookingAwayConsecutiveFrames: APP_CONFIG.FACE_LOOKING_AWAY_CONSECUTIVE_FRAMES,
     onNoFace: () => {
-      showToast('Face not detected. Please stay in front of the camera.', 'warning');
+      showToast(MESSAGES.interview.faceNotDetected, 'warning');
       voiceInterview.sendProctoringEvent('no_face', 'No face detected');
     },
     onMultipleFaces: (count) => {
-      showToast(`Multiple faces detected (${count}). Only the candidate should be visible.`, 'warning');
+      showToast(MESSAGES.interview.multipleFaces(count), 'warning');
       voiceInterview.sendProctoringEvent('multiple_faces', `Detected ${count} faces`);
     },
     onLookingAway: (direction) => {
-      showToast(`Looking away detected (${direction}). Please look at the screen.`, 'warning');
+      showToast(MESSAGES.interview.lookingAway(direction), 'warning');
       voiceInterview.sendProctoringEvent('looking_away', `Looking ${direction}`);
     },
   });
@@ -171,9 +171,9 @@ export function InterviewPage() {
   useEffect(() => {
     const prev = prevDevToolsRef.current;
     if (devToolsCount > prev) {
-      showToast('Developer tools detected. Please close them.', 'warning');
+      showToast(MESSAGES.interview.devtoolsDetected, 'warning');
       if (!voiceInterview.isWsConnected) {
-        showToast('Connection lost, devtools event will be sent when reconnected.', 'info');
+        showToast(MESSAGES.interview.devtoolsQueued, 'info');
       }
       voiceInterview.sendProctoringEvent('devtools', 'DevTools detected');
     }
@@ -246,7 +246,7 @@ export function InterviewPage() {
   // WebSocket error callback
   useEffect(() => {
     const cb = (err: string) => {
-      showToast(`WebSocket error: ${err}`, 'error');
+      showToast(MESSAGES.interview.wsError(String(err)), 'error');
     };
     interviewWsService.setErrorCallback(cb);
     return () => interviewWsService.setErrorCallback(null);
@@ -319,10 +319,10 @@ export function InterviewPage() {
     clearInactivityTimers();
     inactivityWarningRef.current = window.setTimeout(() => {
       inactivityWarningShownRef.current = true;
-      showToast('You have been inactive. Please respond soon or the interview will end automatically.', 'warning');
+      showToast(MESSAGES.interview.inactivityWarning, 'warning');
     }, APP_CONFIG.INTERVIEW_INACTIVITY_WARNING_SECONDS * 1000);
     inactivityTimeoutRef.current = window.setTimeout(() => {
-      showToast('Interview ending due to inactivity.', 'error');
+      showToast(MESSAGES.interview.endingInactivity, 'error');
       runPostCompletionFlowRef.current(false);
     }, APP_CONFIG.INTERVIEW_INACTIVITY_TIMEOUT_SECONDS * 1000);
   }, [clearInactivityTimers, showToast]);
@@ -346,7 +346,7 @@ export function InterviewPage() {
         setAnswerSecondsLeft((prev) => {
           if (prev <= 1) {
             if (answerTimerRef.current) clearInterval(answerTimerRef.current);
-            showToast('Answer time limit reached. Submitting your answer.', 'warning');
+            showToast(MESSAGES.interview.answerTimeLimit, 'warning');
             submitAnswerRef.current();
             return 0;
           }
@@ -368,7 +368,7 @@ export function InterviewPage() {
   useEffect(() => {
     if (voiceInterview.state !== 'pre-start' && voiceInterview.state !== 'completed' &&
       totalWarnings >= APP_CONFIG.INTERVIEW_MAX_PROCTORING_WARNINGS) {
-      showToast('Maximum proctoring warnings reached. Ending interview.', 'error');
+      showToast(MESSAGES.interview.maxWarnings, 'error');
       runPostCompletionFlow(false);
     }
   }, [totalWarnings, voiceInterview.state, runPostCompletionFlow]);
@@ -376,7 +376,7 @@ export function InterviewPage() {
   // Compile handler
   const handleCompile = async () => {
     if (!voiceInterview.codeContent.trim()) {
-      showToast('Please write some code first', 'warning');
+      showToast(MESSAGES.interview.writeCodeFirst, 'warning');
       return;
     }
     setCompiling(true);
@@ -529,10 +529,10 @@ export function InterviewPage() {
     };
     const handleVerified = () => {
       setMobileVerified(true);
-      showToast('Mobile verification successful!', 'success');
+      showToast(MESSAGES.interview.mobileVerified, 'success');
     };
     const handleWarning = (warning: { type: string; reason: string }) => {
-      showToast(`Proctoring Warning: ${warning.reason}`, 'error');
+      showToast(MESSAGES.interview.proctoringWarning(warning.reason), 'error');
       voiceInterview.sendProctoringEvent('mobile_malpractice', warning.reason);
     };
 
@@ -596,7 +596,7 @@ export function InterviewPage() {
     // If mobile is not verified, we proceed anyway if the user clicks "Skip & Begin"
     if (!mobileVerified) {
       setMobileVerified(true);
-      showToast('Proceeding without room verification...', 'info');
+      showToast(MESSAGES.interview.proceedingWithoutRoom, 'info');
     }
 
     if (wsConnected) {
@@ -620,7 +620,7 @@ export function InterviewPage() {
           startDetection(videoRef.current);
         }
       } catch {
-        showToast('Could not start video recording.', 'warning');
+        showToast(MESSAGES.interview.videoRecordFailed, 'warning');
       }
       try {
         await startScreenRecording();
@@ -1022,7 +1022,7 @@ export function InterviewPage() {
               <div className="flex items-center justify-center gap-4">
                 {voiceInterview.state === 'active' && (
                   <>
-                    <button onClick={() => { if (!voiceInterview.isWsConnected) showToast('Still connecting...', 'info'); else voiceInterview.startAnswering(); }} disabled={!voiceInterview.isWsConnected || voiceInterview.isPlaying} className="w-16 h-16 rounded-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white flex items-center justify-center transition-colors shadow-lg hover:shadow-xl"><Mic size={28} /></button>
+                    <button onClick={() => { if (!voiceInterview.isWsConnected) showToast(MESSAGES.interview.stillConnecting, 'info'); else voiceInterview.startAnswering(); }} disabled={!voiceInterview.isWsConnected || voiceInterview.isPlaying} className="w-16 h-16 rounded-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white flex items-center justify-center transition-colors shadow-lg hover:shadow-xl"><Mic size={28} /></button>
                     <button onClick={voiceInterview.repeatQuestion} className="w-10 h-10 rounded-full bg-[var(--surface1)] hover:bg-[var(--border)] text-[var(--textSecondary)] flex items-center justify-center transition-colors"><Volume2 size={18} /></button>
                   </>
                 )}

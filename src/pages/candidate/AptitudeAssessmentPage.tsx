@@ -26,6 +26,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { APP_CONFIG } from '@/config/app.config';
 import { PROCTORING_CONFIG } from '@/config/proctoring.config';
+import { MESSAGES } from '@/config/messages';
 import { ROUTES } from '@/config/routes';
 import { formatTimer } from '@/utils/format.utils';
 import type { Assessment, Question, RawQuestion } from '@/types/assessment.types';
@@ -101,7 +102,7 @@ export function AptitudeAssessmentPage() {
   // Fullscreen with exit tracking
   const { isFullscreen, enterFullscreen, exitFullscreen, fullscreenExitCount } = useFullscreen({
     onExitAttempt: (count) => {
-      showToast(`Warning: Fullscreen exited! (${count})`, 'warning');
+      showToast(MESSAGES.proctoring.fullscreenExited(count), 'warning');
     },
   });
 
@@ -116,7 +117,7 @@ export function AptitudeAssessmentPage() {
           handleAutoSubmit('Too many tab switches.');
         } else {
           const counter = max > 0 ? `${next}/${max}` : `${next}`;
-          showToast(`Warning: Tab switch detected! (${counter})`, 'warning');
+          showToast(MESSAGES.proctoring.tabSwitch(counter), 'warning');
         }
         return next;
       });
@@ -131,11 +132,11 @@ export function AptitudeAssessmentPage() {
           ? proctoring.eyeDetection.maxBeforeAutoSubmit
           : Number.POSITIVE_INFINITY,
       onMaxWarnings: () => handleAutoSubmit('Too many face/eye warnings.'),
-      onNoFace: () => showToast('Warning: Your face is not detected!', 'warning'),
+      onNoFace: () => showToast(MESSAGES.proctoring.faceNotDetected, 'warning'),
       onMultipleFaces: (count) =>
-        showToast(`Warning: Multiple faces detected (${count})!`, 'warning'),
+        showToast(MESSAGES.proctoring.multipleFaces(count), 'warning'),
       onLookingAway: (direction) =>
-        showToast(`Warning: Please keep looking at the screen (${direction}).`, 'warning'),
+        showToast(MESSAGES.proctoring.lookingAway(direction), 'warning'),
     });
 
   // Consolidated warning count (display only; auto-submit is per-category above)
@@ -200,7 +201,7 @@ export function AptitudeAssessmentPage() {
         jobPrefix: assessment.jobPrefix,
       });
 
-      showToast('Exam submitted successfully!', 'success');
+      showToast(MESSAGES.exam.aptitudeSubmitted, 'success');
       await exitFullscreen();
       navigate(ROUTES.CANDIDATE.RESULTS);
     } catch {
@@ -215,7 +216,7 @@ export function AptitudeAssessmentPage() {
   const handleAutoSubmit = useCallback(
     (reason: string) => {
       if (isSubmittingRef.current) return;
-      showToast(`Auto-submitting: ${reason}`, 'error');
+      showToast(MESSAGES.proctoring.autoSubmitting(reason), 'error');
       handleSubmit();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -361,11 +362,7 @@ export function AptitudeAssessmentPage() {
               <p className="text-[var(--textSecondary)] mb-6">
                 {camera.message} Your exam cannot continue until camera access is enabled.
               </p>
-              <Button
-                onClick={setupCamera}
-                isLoading={camera.status === 'requesting'}
-                leftIcon={<Camera size={16} />}
-              >
+              <Button onClick={setupCamera} leftIcon={<Camera size={16} />}>
                 Enable Camera &amp; Retry
               </Button>
             </div>

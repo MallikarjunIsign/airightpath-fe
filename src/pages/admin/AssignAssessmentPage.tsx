@@ -14,6 +14,7 @@ import { assessmentService } from '@/services/assessment.service';
 import { promptService } from '@/services/prompt.service';
 import { ROUTES } from '@/config/routes';
 import { nowDateTimeLocal } from '@/utils/datetime.utils';
+import { MESSAGES } from '@/config/messages';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
 
 interface FileState {
@@ -123,7 +124,7 @@ export function AssignAssessmentPage() {
   // Go to the Prompts screen (with this job selected) to reuse/create/edit a prompt.
   function goToPromptScreen() {
     if (!selectedPrefix) {
-      showToast('Please select a job first', 'warning');
+      showToast(MESSAGES.admin.common.selectJobFirst, 'warning');
       return;
     }
     navigate(ROUTES.ADMIN.PROMPTS, { state: { jobPrefix: selectedPrefix } });
@@ -197,7 +198,7 @@ export function AssignAssessmentPage() {
 
   async function handleGenerateAptitude() {
     if (!selectedPrefix) {
-      showToast('Please select a job first', 'warning');
+      showToast(MESSAGES.admin.common.selectJobFirst, 'warning');
       return;
     }
     setGeneratingAptitude(true);
@@ -209,7 +210,7 @@ export function AssignAssessmentPage() {
         type: 'application/json',
       });
       setAptitudeFile({ file, source: 'ai' });
-      showToast('Aptitude questions generated successfully!', 'success');
+      showToast(MESSAGES.admin.assign.aptitudeGenerated, 'success');
     } catch {
       // Error toast auto-handled by interceptor. If the prompt isn't configured,
       // the admin can click "Create Prompt" to set it up on the Prompts screen.
@@ -220,7 +221,7 @@ export function AssignAssessmentPage() {
 
   async function handleGenerateCoding() {
     if (!selectedPrefix) {
-      showToast('Please select a job first', 'warning');
+      showToast(MESSAGES.admin.common.selectJobFirst, 'warning');
       return;
     }
     setGeneratingCoding(true);
@@ -232,7 +233,7 @@ export function AssignAssessmentPage() {
         type: 'application/json',
       });
       setCodingFile({ file, source: 'ai' });
-      showToast('Coding questions generated successfully!', 'success');
+      showToast(MESSAGES.admin.assign.codingGenerated, 'success');
     } catch {
       // Error toast auto-handled by interceptor.
     } finally {
@@ -267,45 +268,45 @@ export function AssignAssessmentPage() {
 
   async function handleSubmit() {
     if (!selectedPrefix) {
-      showToast('Please select a job', 'warning');
+      showToast(MESSAGES.admin.common.selectJob, 'warning');
       return;
     }
     if (!aptitudeChecked && !codingChecked) {
-      showToast('Please select at least one assessment type', 'warning');
+      showToast(MESSAGES.admin.assign.selectAssessmentType, 'warning');
       return;
     }
     if (aptitudeChecked && !aptitudeFile.file) {
-      showToast('Please upload or generate an aptitude question paper', 'warning');
+      showToast(MESSAGES.admin.assign.aptitudePaperRequired, 'warning');
       return;
     }
     if (codingChecked && !codingFile.file) {
-      showToast('Please upload or generate a coding question paper', 'warning');
+      showToast(MESSAGES.admin.assign.codingPaperRequired, 'warning');
       return;
     }
     if (selectedEmails.size === 0) {
-      showToast('Please select at least one candidate', 'warning');
+      showToast(MESSAGES.admin.common.selectCandidate, 'warning');
       return;
     }
     if (!startTime) {
-      showToast('Please set a start time', 'warning');
+      showToast(MESSAGES.admin.assign.startTimeRequired, 'warning');
       return;
     }
     if (!deadline) {
-      showToast('Please set a deadline', 'warning');
+      showToast(MESSAGES.admin.assign.deadlineRequired, 'warning');
       return;
     }
     // Reject past date/time and an out-of-order window before saving.
     const now = Date.now();
     if (new Date(startTime).getTime() < now) {
-      showToast('Start time cannot be in the past.', 'warning');
+      showToast(MESSAGES.admin.assign.startInPast, 'warning');
       return;
     }
     if (new Date(deadline).getTime() < now) {
-      showToast('Deadline cannot be in the past.', 'warning');
+      showToast(MESSAGES.admin.assign.deadlineInPast, 'warning');
       return;
     }
     if (new Date(deadline).getTime() <= new Date(startTime).getTime()) {
-      showToast('Deadline must be after the start time.', 'warning');
+      showToast(MESSAGES.admin.assign.deadlineBeforeStart, 'warning');
       return;
     }
 
@@ -326,7 +327,7 @@ export function AssignAssessmentPage() {
       }
 
       await assessmentService.assignMultipart(formData);
-      showToast('Assessment assigned successfully!', 'success');
+      showToast(MESSAGES.admin.assign.assigned, 'success');
 
       // Reset form
       setSelectedEmails(new Set());

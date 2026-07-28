@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { ROUTES } from '@/config/routes';
 import { jobApplicationSchema } from '@/config/validation';
+import { MESSAGES } from '@/config/messages';
 import { validateResumeFile } from '@/utils/file.utils';
 import { digitsOnly } from '@/utils/input.utils';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
@@ -170,12 +171,12 @@ export function JobApplicationPage() {
 
   const onSubmit = async (data: JobApplicationFormData) => {
     if (!job?.jobPrefix) {
-      showToast('No job selected. Please go back and select a job.', 'error');
+      showToast(MESSAGES.application.noJobSelected, 'error');
       return;
     }
 
     if (!isEditMode && !resumeFile) {
-      showToast('Please upload your resume.', 'warning');
+      showToast(MESSAGES.application.resumeRequired, 'warning');
       return;
     }
 
@@ -211,10 +212,10 @@ export function JobApplicationPage() {
 
       if (isEditMode) {
         await jobApplicationService.update(formData);
-        showToast('Application updated successfully.', 'success');
+        showToast(MESSAGES.application.updated, 'success');
       } else {
         await jobApplicationService.apply(formData);
-        showToast('Application submitted successfully.', 'success');
+        showToast(MESSAGES.application.submitted, 'success');
       }
 
       navigate(ROUTES.CANDIDATE.APPLICATIONS);

@@ -38,6 +38,7 @@ import { usePersistentState, writePersistentValue } from '@/hooks/usePersistentS
 import { useToast } from '@/components/ui/Toast';
 import { ROUTES } from '@/config/routes';
 import { referralDisplay, referralStatusLabel, hasReferral } from '@/utils/referral.utils';
+import { MESSAGES } from '@/config/messages';
 import { ReferralFields } from '@/components/application/ReferralFields';
 import type { JobPostDTO, JobApplicationDTO, JobApplicationStatus } from '@/types/job.types';
 
@@ -231,7 +232,7 @@ export function CandidateDetailsPage() {
 
   function openActionModal(action: BulkAction) {
     if (selectedEmails.size === 0) {
-      showToast('Please select at least one candidate', 'warning');
+      showToast(MESSAGES.admin.common.selectCandidate, 'warning');
       return;
     }
     setModalAction(action);
@@ -251,8 +252,8 @@ export function CandidateDetailsPage() {
       const status = axios.isAxiosError(err) ? err.response?.status : undefined;
       showToast(
         status === 400 || status === 404
-          ? "This candidate's resume is not available."
-          : 'Unable to open the resume. Please try again.',
+          ? MESSAGES.admin.resume.unavailable
+          : MESSAGES.admin.resume.openFailed,
         'error',
       );
     } finally {
@@ -280,7 +281,7 @@ export function CandidateDetailsPage() {
   // Applied candidates are screened via ATS to become shortlisted.
   function handleScreenAts() {
     if (!selectedPrefix) {
-      showToast('Please select a job first', 'warning');
+      showToast(MESSAGES.admin.common.selectJobFirst, 'warning');
       return;
     }
     writePersistentValue('ats:selectedPrefix', selectedPrefix);
@@ -290,11 +291,11 @@ export function CandidateDetailsPage() {
   // Manually shortlist candidates (Applied → Shortlisted) without ATS screening.
   async function handleShortlist(emails: string[]) {
     if (!selectedPrefix) {
-      showToast('Please select a job first', 'warning');
+      showToast(MESSAGES.admin.common.selectJobFirst, 'warning');
       return;
     }
     if (emails.length === 0) {
-      showToast('Please select at least one candidate to shortlist', 'warning');
+      showToast(MESSAGES.admin.candidates.selectToShortlist, 'warning');
       return;
     }
     setShortlisting(true);
@@ -315,15 +316,12 @@ export function CandidateDetailsPage() {
       const failed = emails.length - done;
 
       if (failed <= 0) {
-        showToast(`Shortlisted ${done} candidate${done === 1 ? '' : 's'}.`, 'success');
+        showToast(MESSAGES.admin.candidates.shortlisted(done), 'success');
       } else if (done === 0) {
-        showToast(
-          `Could not shortlist ${failed} candidate${failed === 1 ? '' : 's'}. Please try again.`,
-          'error',
-        );
+        showToast(MESSAGES.admin.candidates.shortlistFailed(failed), 'error');
       } else {
         showToast(
-          `Shortlisted ${done} of ${emails.length}; ${failed} could not be shortlisted.`,
+          MESSAGES.admin.candidates.shortlistPartial(done, emails.length, failed),
           'warning',
         );
       }
@@ -351,7 +349,7 @@ export function CandidateDetailsPage() {
         email,
         referralStatus,
       });
-      showToast(`Referral ${referralStatus === 'VERIFIED' ? 'verified' : 'rejected'}.`, 'success');
+      showToast(MESSAGES.admin.candidates.referralSet(referralStatus === 'VERIFIED'), 'success');
       // Reflect immediately in the open modal and the list.
       setSelectedCandidate((prev) => (prev ? { ...prev, referralStatus } : prev));
       setCandidates((prev) =>
@@ -367,7 +365,7 @@ export function CandidateDetailsPage() {
   // Go to the Assign page with this job + the selected candidates pre-selected.
   function handleAssignAssessment() {
     if (selectedEmails.size === 0) {
-      showToast('Please select at least one candidate', 'warning');
+      showToast(MESSAGES.admin.common.selectCandidate, 'warning');
       return;
     }
     navigate(ROUTES.ADMIN.ASSESSMENTS_ASSIGN, {
@@ -380,7 +378,7 @@ export function CandidateDetailsPage() {
 
     // Require dateTime for ack mail (email contains exam schedule)
     if (modalAction === 'ack' && !modalDateTime) {
-      showToast('Date & Time is required for acknowledgement mail', 'warning');
+      showToast(MESSAGES.admin.candidates.ackDateTimeRequired, 'warning');
       return;
     }
 
@@ -407,8 +405,7 @@ export function CandidateDetailsPage() {
         const missing = checks.filter((c) => !c.hasExam).map((c) => c.email);
         if (missing.length > 0) {
           showToast(
-            `No exam assigned for ${missing.length} candidate(s): ${missing.join(', ')}. ` +
-              'Assign an assessment first (Assign) before sending the exam link.',
+            MESSAGES.admin.candidates.noExamForCandidates(missing.length, missing.join(', ')),
             'error'
           );
           setSending(false);
@@ -457,7 +454,7 @@ export function CandidateDetailsPage() {
           await jobApplicationService.sendFailureMail(payload);
           break;
       }
-      showToast(`${BULK_ACTION_CONFIG[modalAction].label} sent successfully!`, 'success');
+      showToast(MESSAGES.admin.candidates.actionSent(BULK_ACTION_CONFIG[modalAction].label), 'success');
       setModalAction(null);
       setSelectedEmails(new Set());
       fetchCandidates();

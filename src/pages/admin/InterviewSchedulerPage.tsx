@@ -9,6 +9,7 @@ import { useToast } from '@/components/ui/Toast';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
 import { interviewService } from '@/services/interview.service';
+import { MESSAGES } from '@/config/messages';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
 
 export function InterviewSchedulerPage() {
@@ -89,15 +90,15 @@ export function InterviewSchedulerPage() {
 
   async function handleSubmit() {
     if (!selectedPrefix) {
-      showToast('Please select a job', 'warning');
+      showToast(MESSAGES.admin.common.selectJob, 'warning');
       return;
     }
     if (selectedEmails.size === 0) {
-      showToast('Please select at least one candidate', 'warning');
+      showToast(MESSAGES.admin.common.selectCandidate, 'warning');
       return;
     }
     if (!deadlineTime) {
-      showToast('Please set a deadline time', 'warning');
+      showToast(MESSAGES.admin.interviewScheduler.deadlineTimeRequired, 'warning');
       return;
     }
 
@@ -111,10 +112,7 @@ export function InterviewSchedulerPage() {
         questionsFromDate: questionsFromDate || undefined,
         questionsToDate: questionsToDate || undefined,
       });
-      showToast(
-        `Interview${selectedEmails.size > 1 ? 's' : ''} scheduled for ${selectedEmails.size} candidate${selectedEmails.size > 1 ? 's' : ''}!`,
-        'success'
-      );
+      showToast(MESSAGES.admin.interviewScheduler.scheduled(selectedEmails.size), 'success');
       setSelectedEmails(new Set());
       setDeadlineTime('');
       setQuestionsFromDate('');

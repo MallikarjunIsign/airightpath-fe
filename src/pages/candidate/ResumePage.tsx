@@ -15,6 +15,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import { validateResumeFile } from '@/utils/file.utils';
+import { MESSAGES } from '@/config/messages';
 import type { JobPostDTO } from '@/types/job.types';
 
 export function ResumePage() {
@@ -84,13 +85,13 @@ export function ResumePage() {
 
   const handleUpload = async () => {
     if (!file || !selectedJob) {
-      showToast('Please select a job and a file to upload.', 'warning');
+      showToast(MESSAGES.resume.selectJobAndFile, 'warning');
       return;
     }
     setUploading(true);
     try {
       await resumeService.upload(selectedJob, file);
-      showToast('Resume uploaded successfully.', 'success');
+      showToast(MESSAGES.resume.uploaded, 'success');
       setFile(null);
     } catch {
       // Error toast auto-handled by interceptor
@@ -101,7 +102,7 @@ export function ResumePage() {
 
   const handleUpdate = async () => {
     if (!file) {
-      showToast('Please select a file to update.', 'warning');
+      showToast(MESSAGES.resume.selectFileToUpdate, 'warning');
       return;
     }
     setUpdating(true);
@@ -110,7 +111,7 @@ export function ResumePage() {
       formData.append('file', file);
       if (user?.email) formData.append('email', user.email);
       await resumeService.update(formData);
-      showToast('Resume updated successfully.', 'success');
+      showToast(MESSAGES.resume.updated, 'success');
       setFile(null);
     } catch {
       // Error toast auto-handled by interceptor

@@ -9,6 +9,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { atsService, type BatchScreenResult } from '@/services/ats.service';
+import { MESSAGES } from '@/config/messages';
 
 export function AtsBatchPage() {
   const { showToast } = useToast();
@@ -20,11 +21,11 @@ export function AtsBatchPage() {
 
   async function handleSubmit() {
     if (files.length === 0) {
-      showToast('Please upload at least one resume', 'warning');
+      showToast(MESSAGES.admin.atsBatch.resumeRequired, 'warning');
       return;
     }
     if (!jobDescription.trim()) {
-      showToast('Please enter a job description', 'warning');
+      showToast(MESSAGES.admin.atsBatch.jobDescriptionRequired, 'warning');
       return;
     }
 
@@ -39,7 +40,7 @@ export function AtsBatchPage() {
 
       const sorted = [...(res.data ?? [])].sort((a, b) => b.score - a.score);
       setResults(sorted);
-      showToast(`Screened ${sorted.length} resumes successfully!`, 'success');
+      showToast(MESSAGES.admin.atsBatch.screened(sorted.length), 'success');
     } catch {
       // Error toast auto-handled by interceptor
     } finally {

@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/Toast';
+import { MESSAGES } from '@/config/messages';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Logo } from '@/components/ui/Logo';
@@ -48,7 +49,7 @@ export function RegisterPage() {
         mobileNumber: data.mobileNumber,
         password: data.password,
       });
-      showToast('Account created successfully! Please sign in.', 'success');
+      showToast(MESSAGES.auth.registerSuccess, 'success');
       navigate(ROUTES.PUBLIC.LOGIN, { replace: true });
     } catch {
       // Error toast auto-handled by interceptor

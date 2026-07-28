@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/Badge';
 import { useToast } from '@/components/ui/Toast';
 import { jobService } from '@/services/job.service';
 import { promptService } from '@/services/prompt.service';
+import { MESSAGES } from '@/config/messages';
 import type { JobPostDTO } from '@/types/job.types';
 import type { EvaluationCategory } from '@/types/interview.types';
 
@@ -292,11 +293,11 @@ export function JobPromptPage() {
 
       const source = jobs.find((j) => j.jobPrefix === sourcePrefix);
       showToast(
-        `Copied prompts from ${source ? source.jobTitle : sourcePrefix}. Review and Save to apply.`,
+        MESSAGES.admin.prompts.reuseCopied(source ? source.jobTitle : sourcePrefix),
         'info'
       );
     } catch {
-      showToast('Failed to load prompts to reuse.', 'error');
+      showToast(MESSAGES.admin.prompts.loadReuseFailed, 'error');
     } finally {
       setLoadingPrompt(false);
     }
@@ -304,7 +305,7 @@ export function JobPromptPage() {
 
   async function handleSave() {
     if (!selectedPrefix) {
-      showToast('Please select a job', 'warning');
+      showToast(MESSAGES.admin.common.selectJob, 'warning');
       return;
     }
 
@@ -313,7 +314,7 @@ export function JobPromptPage() {
 
     const content = promptContents[activeTab] ?? '';
     if (!content.trim()) {
-      showToast('Prompt content cannot be empty', 'warning');
+      showToast(MESSAGES.admin.prompts.contentEmpty, 'warning');
       return;
     }
 
@@ -325,7 +326,7 @@ export function JobPromptPage() {
         promptStage: tab.promptStage,
         prompt: content,
       });
-      showToast(`${tab.label} prompt saved successfully!`, 'success');
+      showToast(MESSAGES.admin.prompts.promptSaved(tab.label), 'success');
       setExistingPromptKeys((prev) => new Set([...prev, activeTab]));
     } catch {
       // Error toast auto-handled by interceptor
@@ -336,29 +337,29 @@ export function JobPromptPage() {
 
   async function handleSaveInterview() {
     if (!selectedPrefix) {
-      showToast('Please select a job', 'warning');
+      showToast(MESSAGES.admin.common.selectJob, 'warning');
       return;
     }
 
     const startPrompt = promptContents['interview-start'] ?? '';
     if (!startPrompt.trim()) {
-      showToast('Interview prompt cannot be empty', 'warning');
+      showToast(MESSAGES.admin.prompts.interviewPromptEmpty, 'warning');
       return;
     }
 
     if (!evaluationInstructions.trim()) {
-      showToast('Evaluation prompt cannot be empty', 'warning');
+      showToast(MESSAGES.admin.prompts.evaluationPromptEmpty, 'warning');
       return;
     }
 
     const catTotal = categories.reduce((sum, c) => sum + c.weight, 0);
     if (catTotal !== 100) {
-      showToast(`Category weights must total 100% (currently ${catTotal}%)`, 'warning');
+      showToast(MESSAGES.admin.prompts.weightsMustTotal(catTotal), 'warning');
       return;
     }
 
     if (categories.some((c) => !c.categoryName.trim())) {
-      showToast('All categories must have a name', 'warning');
+      showToast(MESSAGES.admin.prompts.categoryNameRequired, 'warning');
       return;
     }
 
@@ -392,16 +393,16 @@ export function JobPromptPage() {
         .filter(Boolean);
 
       if (failed.length === 0) {
-        showToast('Interview prompt saved successfully!', 'success');
+        showToast(MESSAGES.admin.prompts.interviewSaved, 'success');
         setExistingPromptKeys((prev) => new Set([...prev, 'interview-start']));
       } else if (failed.length === labels.length) {
-        showToast('Failed to save interview prompt. Please try again.', 'error');
+        showToast(MESSAGES.admin.prompts.interviewSaveFailed, 'error');
       } else {
-        showToast(`Partially saved. Failed: ${failed.join(', ')}`, 'warning');
+        showToast(MESSAGES.admin.prompts.partiallySaved(failed.join(', ')), 'warning');
         setExistingPromptKeys((prev) => new Set([...prev, 'interview-start']));
       }
     } catch {
-      showToast('An unexpected error occurred. Please try again.', 'error');
+      showToast(MESSAGES.admin.prompts.unexpectedError, 'error');
     } finally {
       setSavingInterview(false);
     }
