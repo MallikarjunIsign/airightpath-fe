@@ -11,8 +11,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
 import { assessmentService } from '@/services/assessment.service';
-import api from '@/services/api.service';
-import { ENDPOINTS } from '@/config/api.endpoints';
+import { promptService } from '@/services/prompt.service';
 import { ROUTES } from '@/config/routes';
 import { nowDateTimeLocal } from '@/utils/datetime.utils';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
@@ -94,9 +93,7 @@ export function AssignAssessmentPage() {
       return;
     }
     try {
-      const res = await api.get(ENDPOINTS.PROMPTS.GET_BY_JOB(prefix), {
-        _skipErrorToast: true,
-      } as never);
+      const res = await promptService.getByJob(prefix, { silent: true });
       // Tolerate both a raw array and an { data: [...] } envelope; normalize case.
       const body = res.data as unknown;
       const list: Array<{ promptType?: string }> = Array.isArray(body)

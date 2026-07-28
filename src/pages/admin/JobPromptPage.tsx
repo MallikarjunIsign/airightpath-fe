@@ -8,19 +8,10 @@ import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import { Badge } from '@/components/ui/Badge';
 import { useToast } from '@/components/ui/Toast';
-import api from '@/services/api.service';
-import { ENDPOINTS } from '@/config/api.endpoints';
 import { jobService } from '@/services/job.service';
+import { promptService } from '@/services/prompt.service';
 import type { JobPostDTO } from '@/types/job.types';
 import type { EvaluationCategory } from '@/types/interview.types';
-
-interface PromptRecord {
-  id: number;
-  jobPrefix: string;
-  promptType: string;
-  promptStage: string;
-  prompt: string;
-}
 
 function promptTypeLabels(prompts: { promptType: string }[]): string[] {
   const labels = new Set<string>();
@@ -161,10 +152,7 @@ export function JobPromptPage() {
       const entries = await Promise.all(
         jobs.map(async (job) => {
           try {
-            const res = await api.get<PromptRecord[]>(
-              ENDPOINTS.PROMPTS.GET_BY_JOB(job.jobPrefix),
-              { _skipErrorToast: true } as never
-            );
+            const res = await promptService.getByJob(job.jobPrefix, { silent: true });
             return [job.jobPrefix, promptTypeLabels(res.data ?? [])] as const;
           } catch {
             return [job.jobPrefix, [] as string[]] as const;
@@ -200,9 +188,7 @@ export function JobPromptPage() {
     if (!selectedPrefix) return;
     setLoadingPrompt(true);
     try {
-      const res = await api.get<{ id: number; jobPrefix: string; promptType: string; promptStage: string; prompt: string }[]>(
-        ENDPOINTS.PROMPTS.GET_BY_JOB(selectedPrefix)
-      );
+      const res = await promptService.getByJob(selectedPrefix);
       const prompts = res.data ?? [];
       const contents: Record<string, string> = {};
       for (const tab of PROMPT_TABS) {
@@ -235,9 +221,7 @@ export function JobPromptPage() {
     if (!selectedPrefix) return;
     setLoadingCategories(true);
     try {
-      const res = await api.get<EvaluationCategory[]>(
-        ENDPOINTS.PROMPTS.GET_EVALUATION_CATEGORIES(selectedPrefix)
-      );
+      const res = await promptService.getEvaluationCategories(selectedPrefix);
       const data = res.data ?? [];
       if (data.length > 0) {
         setCategories(data.map(({ categoryName, weight, description, id }) => ({
@@ -282,10 +266,7 @@ export function JobPromptPage() {
     if (!sourcePrefix) return;
     setLoadingPrompt(true);
     try {
-      const res = await api.get<PromptRecord[]>(
-        ENDPOINTS.PROMPTS.GET_BY_JOB(sourcePrefix),
-        { _skipErrorToast: true } as never
-      );
+      const res = await promptService.getByJob(sourcePrefix, { silent: true });
       const prompts = res.data ?? [];
       const contents: Record<string, string> = {};
       for (const tab of PROMPT_TABS) {
@@ -300,10 +281,7 @@ export function JobPromptPage() {
       setEvaluationInstructions(summaryMatch?.prompt ?? '');
 
       try {
-        const catRes = await api.get<EvaluationCategory[]>(
-          ENDPOINTS.PROMPTS.GET_EVALUATION_CATEGORIES(sourcePrefix),
-          { _skipErrorToast: true } as never
-        );
+        const catRes = await promptService.getEvaluationCategories(sourcePrefix, { silent: true });
         const cats = catRes.data ?? [];
         if (cats.length > 0) {
           setCategories(cats.map(({ categoryName, weight, description }) => ({ categoryName, weight, description })));
@@ -341,7 +319,7 @@ export function JobPromptPage() {
 
     setSaving(true);
     try {
-      await api.post(ENDPOINTS.PROMPTS.SAVE, {
+      await promptService.save({
         jobPrefix: selectedPrefix,
         promptType: tab.promptType,
         promptStage: tab.promptStage,
@@ -387,19 +365,19 @@ export function JobPromptPage() {
     setSavingInterview(true);
     try {
       const results = await Promise.allSettled([
-        api.post(ENDPOINTS.PROMPTS.SAVE, {
+        promptService.save({
           jobPrefix: selectedPrefix,
           promptType: 'INTERVIEW',
           promptStage: 'START',
           prompt: startPrompt,
         }),
-        api.post(ENDPOINTS.PROMPTS.SAVE, {
+        promptService.save({
           jobPrefix: selectedPrefix,
           promptType: 'INTERVIEW',
           promptStage: 'SUMMARY',
           prompt: evaluationInstructions,
         }),
-        api.post(ENDPOINTS.PROMPTS.SAVE_EVALUATION_CATEGORIES, {
+        promptService.saveEvaluationCategories({
           jobPrefix: selectedPrefix,
           categories: categories.map((c) => ({
             ...c,
