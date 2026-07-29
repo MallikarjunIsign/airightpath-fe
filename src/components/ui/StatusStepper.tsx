@@ -56,7 +56,6 @@ export function StatusStepper({
   ...props
 }: StatusStepperProps) {
   const currentIndex = getStepIndex(currentStatus);
-  const isTerminal = currentStatus === 'SELECTED' || currentStatus === 'REJECTED';
 
   const allSteps: (StepConfig & { isTerminal: boolean })[] = [
     ...WORKFLOW_STEPS.map((s) => ({ ...s, isTerminal: false })),

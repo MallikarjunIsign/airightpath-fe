@@ -28,9 +28,6 @@ export function AdminDashboardPage() {
 
   const totalJobs = jobs.length;
   const totalOpenings = jobs.reduce((sum, j) => sum + (j.numberOfOpenings ?? 0), 0);
-  const activeJobs = jobs.filter(
-    (j) => new Date(j.applicationDeadline) >= new Date()
-  ).length;
 
   const stats = [
     {

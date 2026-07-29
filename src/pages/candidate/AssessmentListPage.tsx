@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ClipboardCheck, Play, Loader2, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { assessmentService } from '@/services/assessment.service';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { ROUTES } from '@/config/routes';

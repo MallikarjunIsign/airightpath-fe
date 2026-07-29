@@ -24,7 +24,7 @@ export function ResultDetailPage() {
 
   const stateResult = (location.state as { result?: Result })?.result;
 
-  const [result, setResult] = useState<Result | null>(stateResult ?? null);
+  const [result] = useState<Result | null>(stateResult ?? null);
   const [details, setDetails] = useState<ResultDetail[]>([]);
   const [loading, setLoading] = useState(!stateResult);
 

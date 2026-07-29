@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { ArrowRight, Briefcase, Users, Award, Shield, CheckCircle, Zap, Target } from 'lucide-react';
+import { ArrowRight, Briefcase, Users, Award, Shield, Zap } from 'lucide-react';
 import { ROUTES } from '@/config/routes';
 import { Button } from '@/components/ui/Button';
 import { Logo } from '@/components/ui/Logo';

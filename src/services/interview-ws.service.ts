@@ -31,11 +31,7 @@ const getWsBaseUrl = () => {
 
 const WS_BASE_URL = getWsBaseUrl();
 
-type StompMessage = {
-  destination: string;
-  body: any;
-};
-
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type SubscriptionCallback = (message: any) => void;
 
 class InterviewWsService {

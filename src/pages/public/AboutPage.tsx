@@ -75,7 +75,7 @@ export function AboutPage() {
         <div>
           <h2 className="text-2xl font-semibold text-[var(--text)] font-heading mb-6">Our Values</h2>
           <div className="grid sm:grid-cols-2 gap-6">
-            {values.map((v, i) => (
+            {values.map((v) => (
               <div
                 key={v.title}
                 className="bg-[var(--cardBg)] border border-[var(--cardBorder)] rounded-xl p-6 shadow-card hover:shadow-card-hover hover:-translate-y-0.5 transition-all duration-300"
