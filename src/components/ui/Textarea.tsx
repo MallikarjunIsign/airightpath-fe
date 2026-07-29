@@ -6,10 +6,12 @@ interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
   helperText?: string;
   maxLength?: number;
   showCharCount?: boolean;
+  /** Allow the user to drag-resize the textarea. Defaults to true. */
+  resizable?: boolean;
 }
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
-  ({ label, error, helperText, maxLength, showCharCount = false, required, className = '', onChange, ...props }, ref) => {
+  ({ label, error, helperText, maxLength, showCharCount = false, resizable = true, required, className = '', onChange, ...props }, ref) => {
     const [charCount, setCharCount] = useState(0);
 
     const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -32,7 +34,8 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
           aria-invalid={!!error}
           onChange={handleChange}
           className={`
-            w-full px-4 py-3 rounded-xl resize-y min-h-[100px]
+            w-full px-4 py-3 rounded-xl min-h-[100px]
+            ${resizable ? 'resize-y' : 'resize-none'}
             bg-[var(--inputBg)]
             border border-[var(--inputBorder)]
             text-[var(--text)]

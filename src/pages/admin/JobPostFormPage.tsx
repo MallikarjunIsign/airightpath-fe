@@ -179,6 +179,7 @@ export function JobPostFormPage() {
             <Textarea
               label="Job Description"
               required
+              resizable={false}
               placeholder="Provide a detailed job description..."
               maxLength={3000}
               showCharCount

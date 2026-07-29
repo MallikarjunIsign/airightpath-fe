@@ -6,6 +6,8 @@ import {
   RefreshCw,
   Loader2,
   X,
+  Download,
+  ExternalLink,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/Toast';
@@ -14,6 +16,7 @@ import { jobService } from '@/services/job.service';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
+import { Modal } from '@/components/ui/Modal';
 import { validateResumeFile } from '@/utils/file.utils';
 import { MESSAGES } from '@/config/messages';
 import type { JobPostDTO } from '@/types/job.types';
@@ -30,6 +33,15 @@ export function ResumePage() {
   const [viewing, setViewing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [dragActive, setDragActive] = useState(false);
+  // Resume preview (object URL for the fetched blob).
+  const [resumeUrl, setResumeUrl] = useState<string | null>(null);
+
+  // Revoke the object URL when the preview closes / on unmount.
+  useEffect(() => {
+    return () => {
+      if (resumeUrl) URL.revokeObjectURL(resumeUrl);
+    };
+  }, [resumeUrl]);
 
   useEffect(() => {
     async function fetchJobs() {
@@ -125,14 +137,31 @@ export function ResumePage() {
     setViewing(true);
     try {
       const res = await resumeService.view(user.email);
-      const blob = res.data;
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
+      // Open in an in-page modal instead of window.open(): a popup opened after
+      // an await loses the user-gesture context and is blocked by the browser.
+      setResumeUrl(URL.createObjectURL(res.data));
     } catch {
       // Error toast auto-handled by interceptor
     } finally {
       setViewing(false);
     }
+  };
+
+  const closeResume = () => {
+    setResumeUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
+  };
+
+  const downloadResume = () => {
+    if (!resumeUrl) return;
+    const a = document.createElement('a');
+    a.href = resumeUrl;
+    a.download = `${user?.email ?? 'resume'}-resume`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   };
 
   if (loading) {
@@ -253,6 +282,39 @@ export function ResumePage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Resume preview */}
+      {resumeUrl && (
+        <Modal
+          isOpen={!!resumeUrl}
+          onClose={closeResume}
+          title="Your Resume"
+          size="lg"
+          footer={
+            <>
+              <Button variant="ghost" onClick={closeResume}>
+                Close
+              </Button>
+              <Button
+                variant="outline"
+                leftIcon={<ExternalLink size={16} />}
+                onClick={() => window.open(resumeUrl, '_blank', 'noopener,noreferrer')}
+              >
+                Open in new tab
+              </Button>
+              <Button leftIcon={<Download size={16} />} onClick={downloadResume}>
+                Download
+              </Button>
+            </>
+          }
+        >
+          <iframe
+            src={resumeUrl}
+            title="Resume"
+            className="w-full h-[70vh] rounded-lg border border-[var(--border)]"
+          />
+        </Modal>
+      )}
     </div>
   );
 }
