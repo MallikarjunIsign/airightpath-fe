@@ -10,12 +10,7 @@ import {
   CheckCircle,
   AlertTriangle,
   ChevronRight,
-  Eye,
   FileText,
-  Phone,
-  MapPin,
-  Briefcase,
-  Clock,
   ClipboardList,
   Download,
   ExternalLink,
@@ -23,11 +18,11 @@ import {
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
-import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
 import { CandidateTable } from '@/components/admin/CandidateTable';
+import { CandidateDetailModal } from '@/components/admin/CandidateDetailModal';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
@@ -37,10 +32,8 @@ import axios from 'axios';
 import { usePersistentState, writePersistentValue } from '@/hooks/usePersistentState';
 import { useToast } from '@/components/ui/Toast';
 import { ROUTES } from '@/config/routes';
-import { referralStatusLabel, hasReferral } from '@/utils/referral.utils';
 import { getAppEmail } from '@/utils/application.utils';
 import { MESSAGES } from '@/config/messages';
-import { ReferralFields } from '@/components/application/ReferralFields';
 import type { JobPostDTO, JobApplicationDTO, JobApplicationStatus } from '@/types/job.types';
 
 // Assessments are assigned at the RECONFIRMED stage, just before the exam link is sent.
@@ -715,249 +708,17 @@ export function CandidateDetailsPage() {
 
       {/* Candidate Detail Modal */}
       {selectedCandidate && (
-        <Modal
-          isOpen={!!selectedCandidate}
+        <CandidateDetailModal
+          candidate={selectedCandidate}
+          statusLabels={STAGE_LABELS}
           onClose={() => setSelectedCandidate(null)}
-          title="Candidate Details"
-          size="lg"
-          footer={
-            <div className="flex w-full items-center justify-between gap-2">
-              <Button variant="ghost" onClick={() => setSelectedCandidate(null)}>
-                Close
-              </Button>
-              {selectedCandidate.status === 'APPLIED' && (
-                <Button
-                  leftIcon={<CheckCircle size={16} />}
-                  isLoading={shortlisting}
-                  onClick={() => handleShortlist([getAppEmail(selectedCandidate)])}
-                >
-                  Shortlist
-                </Button>
-              )}
-            </div>
-          }
-        >
-          <div className="space-y-6">
-            {/* Header */}
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-xl font-bold text-[var(--text)]">
-                  {selectedCandidate.firstName} {selectedCandidate.lastName}
-                </h3>
-                <p className="text-sm text-[var(--textSecondary)] mt-0.5">
-                  {getAppEmail(selectedCandidate)}
-                </p>
-              </div>
-              <Badge
-                variant={
-                  selectedCandidate.status === 'APPLIED' ? 'info' :
-                  selectedCandidate.status === 'SHORTLISTED' ? 'success' :
-                  selectedCandidate.status === 'REJECTED' ? 'error' : 'primary'
-                }
-                size="sm"
-              >
-                {STAGE_LABELS[selectedCandidate.status] ?? selectedCandidate.status}
-              </Badge>
-            </div>
-
-            {/* Personal Info */}
-            <div>
-              <h4 className="text-sm font-semibold text-[var(--text)] mb-3">Personal Information</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="flex items-center gap-2 text-sm">
-                  <Mail size={16} className="text-[var(--primary)] flex-shrink-0" />
-                  <div>
-                    <p className="text-[var(--textTertiary)] text-xs">Email</p>
-                    <p className="text-[var(--text)] font-medium">{getAppEmail(selectedCandidate)}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  <Phone size={16} className="text-[var(--primary)] flex-shrink-0" />
-                  <div>
-                    <p className="text-[var(--textTertiary)] text-xs">Mobile</p>
-                    <p className="text-[var(--text)] font-medium">{selectedCandidate.mobileNumber || 'N/A'}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  <Clock size={16} className="text-[var(--primary)] flex-shrink-0" />
-                  <div>
-                    <p className="text-[var(--textTertiary)] text-xs">Experience</p>
-                    <p className="text-[var(--text)] font-medium">{selectedCandidate.experience}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  <Briefcase size={16} className="text-[var(--primary)] flex-shrink-0" />
-                  <div>
-                    <p className="text-[var(--textTertiary)] text-xs">Applied Role</p>
-                    <p className="text-[var(--text)] font-medium">{selectedCandidate.jobRole || 'N/A'}</p>
-                  </div>
-                </div>
-                <ReferralFields
-                  referralName={selectedCandidate.referralName}
-                  referralId={selectedCandidate.referralId}
-                  alwaysShow
-                />
-                <div className="flex items-center gap-2 text-sm col-span-full">
-                  <MapPin size={16} className="text-[var(--primary)] flex-shrink-0" />
-                  <div>
-                    <p className="text-[var(--textTertiary)] text-xs">Address</p>
-                    <p className="text-[var(--text)] font-medium">{selectedCandidate.address}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Referral validation — only when the candidate was referred */}
-            {hasReferral(selectedCandidate.referralName, selectedCandidate.referralId) && (
-              <div>
-                <h4 className="text-sm font-semibold text-[var(--text)] mb-3">Referral</h4>
-                <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-[var(--textSecondary)]">Status:</span>
-                    <Badge
-                      variant={
-                        selectedCandidate.referralStatus?.toUpperCase() === 'VERIFIED'
-                          ? 'success'
-                          : selectedCandidate.referralStatus?.toUpperCase() === 'REJECTED'
-                            ? 'error'
-                            : 'warning'
-                      }
-                      size="sm"
-                    >
-                      {referralStatusLabel(selectedCandidate.referralStatus)}
-                    </Badge>
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      leftIcon={<CheckCircle size={14} />}
-                      isLoading={validatingReferral}
-                      disabled={selectedCandidate.referralStatus?.toUpperCase() === 'VERIFIED'}
-                      onClick={() => handleSetReferralStatus(selectedCandidate, 'VERIFIED')}
-                    >
-                      Verify
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      leftIcon={<XCircle size={14} />}
-                      disabled={
-                        validatingReferral ||
-                        selectedCandidate.referralStatus?.toUpperCase() === 'REJECTED'
-                      }
-                      onClick={() => handleSetReferralStatus(selectedCandidate, 'REJECTED')}
-                    >
-                      Reject
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Application Status Details */}
-            <div>
-              <h4 className="text-sm font-semibold text-[var(--text)] mb-3">Application Status</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="flex items-center justify-between p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
-                  <span className="text-sm text-[var(--textSecondary)]">Status</span>
-                  <Badge variant="info" size="sm">
-                    {STAGE_LABELS[selectedCandidate.status] ?? selectedCandidate.status}
-                  </Badge>
-                </div>
-                {selectedCandidate.confirmationStatus && (
-                  <div className="flex items-center justify-between p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
-                    <span className="text-sm text-[var(--textSecondary)]">Confirmation</span>
-                    <span className="text-sm font-medium text-[var(--text)]">{selectedCandidate.confirmationStatus}</span>
-                  </div>
-                )}
-                {selectedCandidate.acknowledgedStatus && (
-                  <div className="flex items-center justify-between p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
-                    <span className="text-sm text-[var(--textSecondary)]">Acknowledged</span>
-                    <span className="text-sm font-medium text-[var(--text)]">{selectedCandidate.acknowledgedStatus}</span>
-                  </div>
-                )}
-                {selectedCandidate.reconfirmationStatus && (
-                  <div className="flex items-center justify-between p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
-                    <span className="text-sm text-[var(--textSecondary)]">Reconfirmation</span>
-                    <span className="text-sm font-medium text-[var(--text)]">{selectedCandidate.reconfirmationStatus}</span>
-                  </div>
-                )}
-                {selectedCandidate.examLinkStatus && (
-                  <div className="flex items-center justify-between p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
-                    <span className="text-sm text-[var(--textSecondary)]">Exam Link</span>
-                    <span className="text-sm font-medium text-[var(--text)]">{selectedCandidate.examLinkStatus}</span>
-                  </div>
-                )}
-                {selectedCandidate.writtenTestStatus && (
-                  <div className="flex items-center justify-between p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
-                    <span className="text-sm text-[var(--textSecondary)]">Written Test</span>
-                    <span className="text-sm font-medium text-[var(--text)]">{selectedCandidate.writtenTestStatus}</span>
-                  </div>
-                )}
-                {selectedCandidate.interview && (
-                  <div className="flex items-center justify-between p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
-                    <span className="text-sm text-[var(--textSecondary)]">Interview</span>
-                    <span className="text-sm font-medium text-[var(--text)]">{selectedCandidate.interview}</span>
-                  </div>
-                )}
-                {selectedCandidate.rejectionStatus && (
-                  <div className="flex items-center justify-between p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
-                    <span className="text-sm text-red-600 dark:text-red-400">Rejection</span>
-                    <span className="text-sm font-medium text-red-600 dark:text-red-400">{selectedCandidate.rejectionStatus}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Resume */}
-            {selectedCandidate.resumeFileName && (
-              <button
-                type="button"
-                onClick={() => openResume(selectedCandidate)}
-                disabled={resumeLoading}
-                className="w-full flex items-center gap-3 p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)] hover:border-[var(--primary)] hover:bg-[var(--primary)]/[0.04] transition-colors text-left disabled:opacity-60"
-              >
-                <FileText size={20} className="text-[var(--primary)] flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-[var(--text)]">Resume</p>
-                  <p className="text-xs text-[var(--textSecondary)] truncate">{selectedCandidate.resumeFileName}</p>
-                </div>
-                {resumeLoading ? (
-                  <Loader2 size={16} className="animate-spin text-[var(--primary)] flex-shrink-0" />
-                ) : (
-                  <span className="text-xs text-[var(--primary)] font-medium flex items-center gap-1 flex-shrink-0">
-                    <Eye size={14} /> View
-                  </span>
-                )}
-              </button>
-            )}
-
-            {/* Match Percent */}
-            {selectedCandidate.matchPercent !== undefined && selectedCandidate.matchPercent > 0 && (
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-[var(--text)]">ATS Match Score</p>
-                  <div className="mt-1 h-2 rounded-full bg-[var(--border)] overflow-hidden">
-                    <div
-                      className={`h-full rounded-full ${
-                        selectedCandidate.matchPercent >= 80 ? 'bg-green-500' :
-                        selectedCandidate.matchPercent >= 60 ? 'bg-amber-500' : 'bg-red-500'
-                      }`}
-                      style={{ width: `${Math.min(selectedCandidate.matchPercent, 100)}%` }}
-                    />
-                  </div>
-                </div>
-                <span className={`text-lg font-bold ${
-                  selectedCandidate.matchPercent >= 80 ? 'text-green-500' :
-                  selectedCandidate.matchPercent >= 60 ? 'text-amber-500' : 'text-red-500'
-                }`}>
-                  {selectedCandidate.matchPercent.toFixed(1)}%
-                </span>
-              </div>
-            )}
-          </div>
-        </Modal>
+          onShortlist={handleShortlist}
+          shortlisting={shortlisting}
+          onSetReferralStatus={handleSetReferralStatus}
+          validatingReferral={validatingReferral}
+          onViewResume={openResume}
+          resumeLoading={resumeLoading}
+        />
       )}
 
       {/* Resume viewer */}
