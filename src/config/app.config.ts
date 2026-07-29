@@ -2,6 +2,8 @@ export const APP_CONFIG = {
   HTTP_TIMEOUT_MS: 30000,
   AI_GENERATION_TIMEOUT_MS: 330000,
   ASSIGN_TIMEOUT_MS: 120000,
+  // Compilation is terminated after this long; the run request waits up to here.
+  COMPILE_TIMEOUT_MS: 120000,
   TOKEN_EXPIRY_SKEW_SECONDS: 30,
   MAX_FILE_SIZE_MB: 2,
   MAX_FILE_SIZE_BYTES: 2 * 1024 * 1024,

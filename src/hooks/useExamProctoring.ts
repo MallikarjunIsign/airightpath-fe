@@ -66,6 +66,7 @@ export function useExamProctoring({ loading, onAutoSubmit }: UseExamProctoringOp
       config.eyeDetection.maxBeforeAutoSubmit > 0
         ? config.eyeDetection.maxBeforeAutoSubmit
         : Number.POSITIVE_INFINITY,
+    checkIntervalMs: config.eyeDetection.checkIntervalMs,
     onMaxWarnings: () => onAutoSubmitRef.current('Too many face/eye warnings.'),
     onNoFace: () => showToast(MESSAGES.proctoring.faceNotDetected, 'warning'),
     onMultipleFaces: (count) => showToast(MESSAGES.proctoring.multipleFaces(count), 'warning'),

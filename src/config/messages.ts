@@ -37,6 +37,8 @@ export const MESSAGES = {
     codingSubmitted: 'Coding exam submitted successfully!',
     questionSaved: (n: number) => `Question ${n} saved!`,
     questionSubmitted: (n: number) => `Question ${n} submitted!`,
+    compileTimeout: 'Compilation timed out after 120 seconds. Please simplify your code and try again.',
+    compileFailed: 'Could not run your code. Please try again.',
   },
 
   // Exam instructions / system-check page.

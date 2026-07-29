@@ -1,10 +1,16 @@
 import api from './api.service';
 import { ENDPOINTS } from '@/config/api.endpoints';
+import { APP_CONFIG } from '@/config/app.config';
 import type { CodeSubmissionRequest, CodeSubmissionResponse } from '@/types/compiler.types';
 
 export const compilerService = {
-  runCode(data: CodeSubmissionRequest) {
-    return api.post<CodeSubmissionResponse>(ENDPOINTS.COMPILER.RUN, data);
+  // Waits up to the compile timeout (matches the backend's execution limit) so a
+  // long-running compilation isn't aborted early by the default HTTP timeout.
+  runCode(data: CodeSubmissionRequest, config?: Record<string, unknown>) {
+    return api.post<CodeSubmissionResponse>(ENDPOINTS.COMPILER.RUN, data, {
+      timeout: APP_CONFIG.COMPILE_TIMEOUT_MS,
+      ...config,
+    } as never);
   },
 
   saveUnattempted(data: { assessmentId: number; candidateEmail: string }) {

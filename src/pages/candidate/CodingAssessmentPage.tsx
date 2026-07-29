@@ -29,6 +29,7 @@ import { assessmentService } from '@/services/assessment.service';
 import { compilerService } from '@/services/compiler.service';
 import { useTimer } from '@/hooks/useTimer';
 import { useExamProctoring } from '@/hooks/useExamProctoring';
+import axios from 'axios';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Select } from '@/components/ui/Select';
@@ -460,21 +461,29 @@ export function CodingAssessmentPage() {
     setActiveOutputTab('output');
     try {
       const hasTests = (currentQ?.testCases?.length ?? 0) > 0;
-      const res = await compilerService.runCode({
-        language,
-        script: code,
-        ...(hasTests
-          ? { testCases: currentQ!.testCases }
-          : { customInput: customInput || currentQ?.sampleInput || '' }),
-        assessmentId: assessment?.id,
-        questionId: currentQ?.id,
-        userEmail: user?.email ?? undefined,
-        jobPrefix: assessment?.jobPrefix,
-        createdAt: new Date().toISOString(),
-      });
+      const res = await compilerService.runCode(
+        {
+          language,
+          script: code,
+          ...(hasTests
+            ? { testCases: currentQ!.testCases }
+            : { customInput: customInput || currentQ?.sampleInput || '' }),
+          assessmentId: assessment?.id,
+          questionId: currentQ?.id,
+          userEmail: user?.email ?? undefined,
+          jobPrefix: assessment?.jobPrefix,
+          createdAt: new Date().toISOString(),
+        },
+        { _skipErrorToast: true },
+      );
       processCompilerResponse(res.data);
-    } catch {
-      // Error toast auto-handled
+    } catch (err) {
+      // A client-side timeout (compilation ran past the 120s limit) surfaces as a
+      // Timeout in the output panel; other failures show a generic run error.
+      const timedOut = axios.isAxiosError(err) && err.code === 'ECONNABORTED';
+      const message = timedOut ? MESSAGES.exam.compileTimeout : MESSAGES.exam.compileFailed;
+      setCurrentError({ type: timedOut ? 'Timeout' : 'Error', message, fullTrace: message });
+      showToast(message, timedOut ? 'warning' : 'error');
     } finally {
       setRunning(false);
     }
