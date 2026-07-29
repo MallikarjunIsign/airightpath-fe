@@ -7,12 +7,9 @@ import {
   Users,
   CheckCircle,
   XCircle,
-  ArrowUpDown,
   BarChart3,
-  Eye,
   MapPin,
   Clock,
-  FileText,
   TrendingUp,
   Search,
   Download,
@@ -24,7 +21,6 @@ import { Select } from '@/components/ui/Select';
 import { Badge } from '@/components/ui/Badge';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
@@ -33,8 +29,8 @@ import axios from 'axios';
 import { useToast } from '@/components/ui/Toast';
 import { usePersistentState } from '@/hooks/usePersistentState';
 import { AtsCandidateDetailModal } from '@/components/admin/AtsCandidateDetailModal';
+import { AtsResultsTable } from '@/components/admin/AtsResultsTable';
 import { getAppEmail } from '@/utils/application.utils';
-import { getScoreColor, getScoreBg } from '@/utils/score.utils';
 import { MESSAGES } from '@/config/messages';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
 
@@ -467,132 +463,12 @@ export function AtsScreeningPage() {
                   }
                 />
               ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Rank</TableHead>
-                        <TableHead>
-                          <button
-                            className="flex items-center gap-1 hover:text-[var(--text)] transition-colors"
-                            onClick={() => toggleSort('firstName')}
-                          >
-                            Name
-                            <ArrowUpDown size={14} className={sortField === 'firstName' ? 'text-[var(--primary)]' : ''} />
-                          </button>
-                        </TableHead>
-                        <TableHead>Email</TableHead>
-                        <TableHead>
-                          <button
-                            className="flex items-center gap-1 hover:text-[var(--text)] transition-colors"
-                            onClick={() => toggleSort('experience')}
-                          >
-                            Experience
-                            <ArrowUpDown size={14} className={sortField === 'experience' ? 'text-[var(--primary)]' : ''} />
-                          </button>
-                        </TableHead>
-                        <TableHead>Role</TableHead>
-                        <TableHead>Resume</TableHead>
-                        <TableHead>
-                          <button
-                            className="flex items-center gap-1 hover:text-[var(--text)] transition-colors"
-                            onClick={() => toggleSort('matchPercent')}
-                          >
-                            ATS Score
-                            <ArrowUpDown size={14} className={sortField === 'matchPercent' ? 'text-[var(--primary)]' : ''} />
-                          </button>
-                        </TableHead>
-                        <TableHead>Scan</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredCandidates.map((candidate, idx) => {
-                        const score = candidate.matchPercent ?? 0;
-                        // Prefer the genuine shortlistStatus column; fall back to status.
-                        const isShortlisted = candidate.shortlistStatus
-                          ? !/not/i.test(candidate.shortlistStatus)
-                          : candidate.status === 'SHORTLISTED';
-                        const shortlistLabel =
-                          candidate.shortlistStatus ?? (isShortlisted ? 'Shortlisted' : 'Rejected');
-                        const scanDone = candidate.atsScanStatus
-                          ? /complet/i.test(candidate.atsScanStatus)
-                          : undefined;
-
-                        return (
-                          <TableRow key={candidate.id ?? getAppEmail(candidate)}>
-                            <TableCell>
-                              <span className="text-sm font-bold text-[var(--text)]">#{idx + 1}</span>
-                            </TableCell>
-                            <TableCell className="font-medium">
-                              {candidate.firstName} {candidate.lastName}
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              {getAppEmail(candidate)}
-                            </TableCell>
-                            <TableCell>{candidate.experience}</TableCell>
-                            <TableCell>{candidate.jobRole || '-'}</TableCell>
-                            <TableCell>
-                              {candidate.resumeFileName ? (
-                                <span className="flex items-center gap-1 text-sm text-[var(--textSecondary)]">
-                                  <FileText size={14} />
-                                  <span className="truncate max-w-[120px]">{candidate.resumeFileName}</span>
-                                </span>
-                              ) : (
-                                <span className="text-sm text-[var(--textTertiary)]">-</span>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                {/* Score bar */}
-                                <div className="w-16 h-2 rounded-full bg-[var(--border)] overflow-hidden">
-                                  <div
-                                    className={`h-full rounded-full ${getScoreBg(score)}`}
-                                    style={{ width: `${Math.min(score, 100)}%` }}
-                                  />
-                                </div>
-                                <span className={`text-sm font-bold ${getScoreColor(score)}`}>
-                                  {score.toFixed(1)}%
-                                </span>
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              {candidate.atsScanStatus ? (
-                                <Badge variant={scanDone ? 'info' : 'warning'} size="sm">
-                                  {candidate.atsScanStatus}
-                                </Badge>
-                              ) : (
-                                <span className="text-sm text-[var(--textTertiary)]">-</span>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <Badge
-                                variant={isShortlisted ? 'success' : 'error'}
-                                size="sm"
-                              >
-                                <span className="flex items-center gap-1">
-                                  {isShortlisted ? <CheckCircle size={12} /> : <XCircle size={12} />}
-                                  {shortlistLabel}
-                                </span>
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setSelectedCandidate(candidate)}
-                                leftIcon={<Eye size={14} />}
-                              >
-                                View
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
+                <AtsResultsTable
+                  candidates={filteredCandidates}
+                  sortField={sortField}
+                  onSort={toggleSort}
+                  onView={setSelectedCandidate}
+                />
               )}
             </CardContent>
           </Card>
