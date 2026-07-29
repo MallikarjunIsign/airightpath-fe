@@ -34,6 +34,14 @@ import type { InterviewSchedule } from '@/types/interview.types';
 
 type PostCompletionStep = 'ending' | 'uploading-screen' | 'done' | null;
 
+/** Status icon for a device/permission check (granted / denied / checking / pending). */
+function PermissionIcon({ status }: Readonly<{ status: string }>) {
+  if (status === 'granted') return <CheckCircle size={16} className="text-emerald-500" />;
+  if (status === 'denied') return <XCircle size={16} className="text-red-500" />;
+  if (status === 'checking') return <Loader2 size={16} className="animate-spin text-gray-400" />;
+  return <Circle size={16} className="text-amber-500" />;
+}
+
 export function InterviewPage() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -648,13 +656,6 @@ export function InterviewPage() {
     if (stepIdx === currentIdx) return 'active';
     return 'pending';
   };
-  const PermissionIcon = ({ status }: { status: string }) => {
-    if (status === 'granted') return <CheckCircle size={16} className="text-emerald-500" />;
-    if (status === 'denied') return <XCircle size={16} className="text-red-500" />;
-    if (status === 'checking') return <Loader2 size={16} className="animate-spin text-gray-400" />;
-    return <Circle size={16} className="text-amber-500" />;
-  };
-
   if (loadingInterview) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
