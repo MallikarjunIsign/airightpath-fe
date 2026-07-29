@@ -17,6 +17,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   STORAGE_ERROR: 'There was a problem saving your file. Please try again.',
   INVALID_OTP: 'That code is invalid or has expired. Please request a new one.',
   // Resources
+  RESOURCE_NOT_FOUND: "The requested item couldn't be found. It may have been removed.",
   JOB_NOT_FOUND: "That job posting couldn't be found. It may have been removed.",
   ASSESSMENT_NOT_FOUND: 'Assessment not found. Please check and try again.',
   ASSESSMENT_EXPIRED: 'This assessment has expired and is no longer available.',

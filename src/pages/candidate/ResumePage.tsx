@@ -19,6 +19,7 @@ import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/ui/Modal';
 import { validateResumeFile } from '@/utils/file.utils';
 import { MESSAGES } from '@/config/messages';
+import axios from 'axios';
 import type { JobPostDTO } from '@/types/job.types';
 
 export function ResumePage() {
@@ -102,11 +103,16 @@ export function ResumePage() {
     }
     setUploading(true);
     try {
-      await resumeService.upload(selectedJob, file);
+      await resumeService.upload(selectedJob, file, { _skipErrorToast: true });
       showToast(MESSAGES.resume.uploaded, 'success');
       setFile(null);
-    } catch {
-      // Error toast auto-handled by interceptor
+    } catch (err) {
+      // 404 = the candidate hasn't applied to the selected job (no application to attach to).
+      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+      showToast(
+        status === 404 ? MESSAGES.resume.noApplicationForJob : MESSAGES.resume.actionFailed,
+        'error',
+      );
     } finally {
       setUploading(false);
     }
@@ -122,11 +128,15 @@ export function ResumePage() {
       const formData = new FormData();
       formData.append('file', file);
       if (user?.email) formData.append('email', user.email);
-      await resumeService.update(formData);
+      await resumeService.update(formData, { _skipErrorToast: true });
       showToast(MESSAGES.resume.updated, 'success');
       setFile(null);
-    } catch {
-      // Error toast auto-handled by interceptor
+    } catch (err) {
+      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+      showToast(
+        status === 404 ? MESSAGES.resume.noneFound : MESSAGES.resume.actionFailed,
+        'error',
+      );
     } finally {
       setUpdating(false);
     }
@@ -136,12 +146,16 @@ export function ResumePage() {
     if (!user?.email) return;
     setViewing(true);
     try {
-      const res = await resumeService.view(user.email);
+      const res = await resumeService.view(user.email, { _skipErrorToast: true });
       // Open in an in-page modal instead of window.open(): a popup opened after
       // an await loses the user-gesture context and is blocked by the browser.
       setResumeUrl(URL.createObjectURL(res.data));
-    } catch {
-      // Error toast auto-handled by interceptor
+    } catch (err) {
+      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+      showToast(
+        status === 404 || status === 400 ? MESSAGES.resume.noneFound : MESSAGES.resume.actionFailed,
+        'error',
+      );
     } finally {
       setViewing(false);
     }

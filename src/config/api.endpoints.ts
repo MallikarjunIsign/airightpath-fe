@@ -94,7 +94,6 @@ export const ENDPOINTS = {
     UPLOAD: "/api/upload-resume",
     UPDATE: "/api/update-resume",
     VIEW: (email: string) => `/api/view-resume/${encodeURIComponent(email)}`,
-    VIEW_ALL: "/api/view-all-resumes",
     UPLOAD_MULTIPLE: "/api/upload-resumes",
   },
   ATS: {

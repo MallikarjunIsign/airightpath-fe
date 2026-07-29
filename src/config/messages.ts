@@ -66,6 +66,9 @@ export const MESSAGES = {
     uploaded: 'Resume uploaded successfully.',
     selectFileToUpdate: 'Please select a file to update.',
     updated: 'Resume updated successfully.',
+    noneFound: 'No resume found yet. Apply to a job with your resume first.',
+    noApplicationForJob: "You haven't applied to this job yet. Apply first, then upload your resume.",
+    actionFailed: 'Something went wrong with your resume. Please try again.',
   },
 
   result: {
