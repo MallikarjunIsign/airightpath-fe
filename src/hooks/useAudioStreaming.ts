@@ -39,7 +39,12 @@ export function useAudioStreaming(scheduleId: number | null) {
         const destination = `/app/interview/${scheduleId}/audio-chunk`;
 
         const token = getAccessToken();
-        const payload: any = {
+        const payload: {
+          audio: string;
+          chunkIndex: number;
+          token?: string;
+          accessToken?: string;
+        } = {
           audio: base64,
           chunkIndex: chunkIndexRef.current,
         };

@@ -387,6 +387,7 @@ export function InterviewPage() {
       });
       const output = res.data.output || res.data.error;
       setCompileOutput(output);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       setCompileOutput('Compilation failed: ' + (err.response?.data?.message || err.message));
     } finally {

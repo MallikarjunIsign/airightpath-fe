@@ -397,6 +397,7 @@ export function useVoiceInterview() {
         }
 
         setState("active");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
         console.error("Failed to start interview:", err);
         setError(
@@ -588,6 +589,7 @@ export function useVoiceInterview() {
           setEvaluation(result);
           return result;
         }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
         if (err.response?.status !== 404) {
           console.error(

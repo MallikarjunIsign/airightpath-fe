@@ -149,7 +149,7 @@ class InterviewWsService {
     this.subscriptions.clear();
   }
 
-  send(destination: string, body: any, headers: Record<string, string> = {}) {
+  send(destination: string, body: unknown, headers: Record<string, string> = {}) {
     if (!this.client || !this.client.connected) {
       console.error("WebSocket not connected");
       return;

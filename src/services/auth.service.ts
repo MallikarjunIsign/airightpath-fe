@@ -25,7 +25,7 @@ export const authService = {
   refresh() {
     return api.post<ApiResponse<AccessTokenData>>(ENDPOINTS.AUTH.REFRESH, {}, {
       _skipErrorToast: true,
-    } as any);
+    } as never);
   },
 
   logout() {
@@ -35,7 +35,7 @@ export const authService = {
   me() {
     return api.get<ApiResponse<MeResponse>>(ENDPOINTS.AUTH.ME, {
       _skipErrorToast: true,
-    } as any);
+    } as never);
   },
 
   generateOtp(data: GenerateOtpRequest) {
