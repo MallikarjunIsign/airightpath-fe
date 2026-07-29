@@ -9,8 +9,6 @@ import {
   Loader2,
   EyeOff,
   Camera,
-  Maximize,
-  ShieldAlert,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/Toast';
@@ -27,6 +25,7 @@ import { Modal } from '@/components/ui/Modal';
 import { APP_CONFIG } from '@/config/app.config';
 import { PROCTORING_CONFIG } from '@/config/proctoring.config';
 import { MESSAGES } from '@/config/messages';
+import { CameraRequiredOverlay, FullscreenRequiredOverlay } from '@/components/exam/ExamOverlays';
 import { ROUTES } from '@/config/routes';
 import { formatTimer } from '@/utils/format.utils';
 import type { Assessment, Question, RawQuestion } from '@/types/assessment.types';
@@ -355,34 +354,12 @@ export function AptitudeAssessmentPage() {
         (camera.status === 'denied' ||
           camera.status === 'unavailable' ||
           camera.status === 'error') && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 backdrop-blur-sm">
-            <div className="text-center p-8 rounded-2xl bg-[var(--cardBg)] border border-[var(--border)] max-w-md mx-4 shadow-2xl">
-              <Camera className="w-16 h-16 text-red-500 mx-auto mb-4" />
-              <h2 className="text-xl font-bold text-[var(--text)] mb-2">Camera Required</h2>
-              <p className="text-[var(--textSecondary)] mb-6">
-                {camera.message} Your exam cannot continue until camera access is enabled.
-              </p>
-              <Button onClick={setupCamera} leftIcon={<Camera size={16} />}>
-                Enable Camera &amp; Retry
-              </Button>
-            </div>
-          </div>
+          <CameraRequiredOverlay message={camera.message} onRetry={setupCamera} />
         )}
 
       {/* Fullscreen Exit Overlay */}
       {proctoring.fullscreen.enabled && !isFullscreen && !loading && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-          <div className="text-center p-8 rounded-2xl bg-[var(--cardBg)] border border-[var(--border)] max-w-md mx-4 shadow-2xl">
-            <ShieldAlert className="w-16 h-16 text-amber-500 mx-auto mb-4" />
-            <h2 className="text-xl font-bold text-[var(--text)] mb-2">Fullscreen Required</h2>
-            <p className="text-[var(--textSecondary)] mb-6">
-              You must remain in fullscreen mode during the exam. Exiting fullscreen is recorded as a warning.
-            </p>
-            <Button onClick={enterFullscreen} leftIcon={<Maximize size={16} />}>
-              Return to Fullscreen
-            </Button>
-          </div>
-        </div>
+        <FullscreenRequiredOverlay onReturn={enterFullscreen} />
       )}
 
       {/* Top Bar */}
