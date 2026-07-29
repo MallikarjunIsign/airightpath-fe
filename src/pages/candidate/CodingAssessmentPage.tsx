@@ -28,10 +28,7 @@ import { useToast } from '@/components/ui/Toast';
 import { assessmentService } from '@/services/assessment.service';
 import { compilerService } from '@/services/compiler.service';
 import { useTimer } from '@/hooks/useTimer';
-import { useFullscreen } from '@/hooks/useFullscreen';
-import { usePageVisibility } from '@/hooks/usePageVisibility';
-import { useFaceDetection } from '@/hooks/useFaceDetection';
-import { useExamCamera } from '@/hooks/useExamCamera';
+import { useExamProctoring } from '@/hooks/useExamProctoring';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Select } from '@/components/ui/Select';
@@ -143,7 +140,6 @@ export function CodingAssessmentPage() {
   const [running, setRunning] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
-  const [tabWarnings, setTabWarnings] = useState(0);
   const [outputHeight, setOutputHeight] = useState(256);
   const [savingQuestion, setSavingQuestion] = useState(false);
   const [submittingQuestion, setSubmittingQuestion] = useState(false);
@@ -162,13 +158,7 @@ export function CodingAssessmentPage() {
   // Refs
   const isSubmittingRef = useRef(false);
   const initRef = useRef(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  // Proctoring only starts counting once the exam is fully initialised, so the
-  // initial camera/fullscreen permission prompts don't register as violations.
-  const proctoringActiveRef = useRef(false);
-
   const proctoring = PROCTORING_CONFIG;
-  const camera = useExamCamera();
   const isDraggingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -184,75 +174,35 @@ export function CodingAssessmentPage() {
   langPerQuestionRef.current = langPerQuestion;
   questionStatusRef.current = questionStatus;
 
+  // ── Proctoring (fullscreen, tab, face/eye, camera) ───────────────────
+  const autoSubmitRef = useRef<(reason: string) => void>(() => {});
+  const proctor = useExamProctoring({
+    loading,
+    onAutoSubmit: (reason) => autoSubmitRef.current(reason),
+  });
+  const {
+    videoRef,
+    camera,
+    isFullscreen,
+    enterFullscreen,
+    exitFullscreen,
+    tabWarnings,
+    warningCount,
+    fullscreenExitCount,
+    totalWarnings,
+    faceDetected,
+    setupCamera,
+    stopDetection,
+    begin: beginProctoring,
+    markActive,
+  } = proctor;
+
   // ── Timer ──────────────────────────────────────────────────────────
   const { secondsLeft, start: startTimer } = useTimer({
     initialSeconds: APP_CONFIG.EXAM_TIMER_MINUTES * 60,
     autoStart: false,
     onExpire: () => handleAutoSubmit('Time is up!'),
   });
-
-  // ── Proctoring hooks ──────────────────────────────────────────────
-  const { isFullscreen, enterFullscreen, exitFullscreen, fullscreenExitCount } = useFullscreen({
-    onExitAttempt: (count) => {
-      showToast(MESSAGES.proctoring.fullscreenExited(count), 'warning');
-    },
-  });
-
-  usePageVisibility({
-    onHidden: () => {
-      if (!proctoring.tabSwitch.enabled || !proctoringActiveRef.current) return;
-      setTabWarnings((prev) => {
-        const next = prev + 1;
-        const max = proctoring.tabSwitch.maxBeforeAutoSubmit;
-        if (max > 0 && next >= max) {
-          handleAutoSubmit('Too many tab switches.');
-        } else {
-          const counter = max > 0 ? `${next}/${max}` : `${next}`;
-          showToast(MESSAGES.proctoring.tabSwitch(counter), 'warning');
-        }
-        return next;
-      });
-    },
-  });
-
-  const { loadModels, startDetection, stopDetection, warningCount, faceDetected } =
-    useFaceDetection({
-      maxWarnings:
-        proctoring.eyeDetection.maxBeforeAutoSubmit > 0
-          ? proctoring.eyeDetection.maxBeforeAutoSubmit
-          : Number.POSITIVE_INFINITY,
-      onMaxWarnings: () => handleAutoSubmit('Too many face/eye warnings.'),
-      onNoFace: () => showToast(MESSAGES.proctoring.faceNotDetected, 'warning'),
-      onMultipleFaces: (count) =>
-        showToast(MESSAGES.proctoring.multipleFaces(count), 'warning'),
-      onLookingAway: (direction) =>
-        showToast(MESSAGES.proctoring.lookingAway(direction), 'warning'),
-    });
-
-  const totalWarnings = tabWarnings + warningCount + fullscreenExitCount;
-
-  // Acquires the camera (prompts for permission). Attaching the stream to the
-  // <video> + starting detection happens in the effect below, once the element
-  // is mounted — during `loading` the preview isn't rendered yet, so doing it
-  // here would silently no-op. Reused for the "Enable Camera & Retry" action.
-  const setupCamera = useCallback(async () => {
-    await camera.start();
-  }, [camera]);
-
-  // Attach the live stream to the preview and start face detection once the
-  // <video> exists (after loading) and the camera is active.
-  useEffect(() => {
-    if (loading) return;
-    const video = videoRef.current;
-    const stream = camera.streamRef.current;
-    if (!video || !stream || video.srcObject === stream) return;
-    video.srcObject = stream;
-    if (proctoring.eyeDetection.enabled) {
-      const begin = () => startDetection(video);
-      if (video.readyState >= 1) begin();
-      else video.addEventListener('loadedmetadata', begin, { once: true });
-    }
-  }, [loading, camera.status, camera.streamRef, proctoring.eyeDetection.enabled, startDetection]);
 
   // ── Monaco editor helpers ─────────────────────────────────────────
   const handleEditorMount: OnMount = (editor, monaco) => {
@@ -383,6 +333,11 @@ export function CodingAssessmentPage() {
     [handleSubmitExam]
   );
 
+  // Keep the proctoring hook's auto-submit pointing at the latest handler.
+  useEffect(() => {
+    autoSubmitRef.current = handleAutoSubmit;
+  });
+
   // ── Initialize exam ───────────────────────────────────────────────
   useEffect(() => {
     async function initExam() {
@@ -410,19 +365,8 @@ export function CodingAssessmentPage() {
         normalized.forEach((q) => { initialStatuses[q.id] = 'not_started'; });
         setQuestionStatus(initialStatuses);
 
-        if (proctoring.fullscreen.enabled) {
-          await enterFullscreen();
-        }
-
-        // Load face-detection models first so detection can start as soon as the
-        // camera is live (skipped entirely when eye detection is disabled).
-        if (proctoring.eyeDetection.enabled) {
-          await loadModels();
-        }
-
-        // Request the camera and wire up the preview + detection. On failure the
-        // camera hook exposes a status the UI renders a blocking overlay from.
-        await setupCamera();
+        // Proctoring init: fullscreen → face models → camera (config-driven).
+        await beginProctoring();
 
         if (user?.email) {
           await assessmentService.markAttended({
@@ -432,7 +376,7 @@ export function CodingAssessmentPage() {
         }
 
         // Proctoring counters go live only now — after all permission prompts.
-        proctoringActiveRef.current = true;
+        markActive();
         startTimer();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load coding questions.');
@@ -441,14 +385,6 @@ export function CodingAssessmentPage() {
       }
     }
     initExam();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      stopDetection();
-      camera.stop();
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
