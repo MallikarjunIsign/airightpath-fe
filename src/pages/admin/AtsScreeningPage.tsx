@@ -36,6 +36,7 @@ import axios from 'axios';
 import { useToast } from '@/components/ui/Toast';
 import { usePersistentState } from '@/hooks/usePersistentState';
 import { ReferralFields } from '@/components/application/ReferralFields';
+import { getAppEmail } from '@/utils/application.utils';
 import { MESSAGES } from '@/config/messages';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
 
@@ -249,10 +250,6 @@ export function AtsScreeningPage() {
     if (score >= 80) return 'bg-[var(--success)]';
     if (score >= 60) return 'bg-[var(--warning)]';
     return 'bg-[var(--error)]';
-  }
-
-  function getAppEmail(app: JobApplicationDTO): string {
-    return app.email || app.userEmail || '';
   }
 
   const jobOptions = [

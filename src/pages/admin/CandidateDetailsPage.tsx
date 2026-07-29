@@ -27,7 +27,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
+import { CandidateTable } from '@/components/admin/CandidateTable';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
@@ -37,7 +37,8 @@ import axios from 'axios';
 import { usePersistentState, writePersistentValue } from '@/hooks/usePersistentState';
 import { useToast } from '@/components/ui/Toast';
 import { ROUTES } from '@/config/routes';
-import { referralDisplay, referralStatusLabel, hasReferral } from '@/utils/referral.utils';
+import { referralStatusLabel, hasReferral } from '@/utils/referral.utils';
+import { getAppEmail } from '@/utils/application.utils';
 import { MESSAGES } from '@/config/messages';
 import { ReferralFields } from '@/components/application/ReferralFields';
 import type { JobPostDTO, JobApplicationDTO, JobApplicationStatus } from '@/types/job.types';
@@ -105,11 +106,6 @@ const STAGE_ACTIONS: Record<string, BulkAction[]> = {
   INTERVIEW_COMPLETED: ['success', 'rejection'],
   SELECTED: [],
 };
-
-// Helper to get email from application (handles both email and userEmail fields)
-function getAppEmail(app: JobApplicationDTO): string {
-  return app.email || app.userEmail || '';
-}
 
 export function CandidateDetailsPage() {
   const { showToast } = useToast();
@@ -657,73 +653,14 @@ export function CandidateDetailsPage() {
                   description={`No candidates found in the "${STAGE_LABELS[activeStage]}" stage for this job.`}
                 />
               ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>
-                          <input
-                            type="checkbox"
-                            checked={
-                              selectedEmails.size === filteredCandidates.length &&
-                              filteredCandidates.length > 0
-                            }
-                            onChange={toggleAll}
-                            className="w-4 h-4 rounded border-[var(--inputBorder)] text-[var(--primary)] focus:ring-[var(--inputFocus)]"
-                          />
-                        </TableHead>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Email</TableHead>
-                        <TableHead>Mobile</TableHead>
-                        <TableHead>Experience</TableHead>
-                        <TableHead>Role</TableHead>
-                        <TableHead>Referral</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredCandidates.map((candidate) => {
-                        const email = getAppEmail(candidate);
-                        return (
-                          <TableRow key={candidate.id ?? email}>
-                            <TableCell>
-                              <input
-                                type="checkbox"
-                                checked={selectedEmails.has(email)}
-                                onChange={() => toggleEmail(email)}
-                                className="w-4 h-4 rounded border-[var(--inputBorder)] text-[var(--primary)] focus:ring-[var(--inputFocus)]"
-                              />
-                            </TableCell>
-                            <TableCell className="font-medium">
-                              {candidate.firstName} {candidate.lastName}
-                            </TableCell>
-                            <TableCell>{email}</TableCell>
-                            <TableCell>{candidate.mobileNumber || '-'}</TableCell>
-                            <TableCell>{candidate.experience}</TableCell>
-                            <TableCell>{candidate.jobRole || '-'}</TableCell>
-                            <TableCell>{referralDisplay(candidate.referralName, candidate.referralId)}</TableCell>
-                            <TableCell>
-                              <Badge variant="info" size="sm">
-                                {STAGE_LABELS[candidate.status] ?? candidate.status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setSelectedCandidate(candidate)}
-                                leftIcon={<Eye size={14} />}
-                              >
-                                View
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
+                <CandidateTable
+                  candidates={filteredCandidates}
+                  selectedEmails={selectedEmails}
+                  onToggleEmail={toggleEmail}
+                  onToggleAll={toggleAll}
+                  onView={setSelectedCandidate}
+                  statusLabels={STAGE_LABELS}
+                />
               )}
             </CardContent>
           </Card>
