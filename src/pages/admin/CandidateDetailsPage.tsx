@@ -19,10 +19,9 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/ui/Modal';
-import { Input } from '@/components/ui/Input';
-import { Textarea } from '@/components/ui/Textarea';
 import { CandidateTable } from '@/components/admin/CandidateTable';
 import { CandidateDetailModal } from '@/components/admin/CandidateDetailModal';
+import { BulkActionModal } from '@/components/admin/BulkActionModal';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
@@ -662,48 +661,19 @@ export function CandidateDetailsPage() {
 
       {/* Bulk Action Modal */}
       {modalAction && (
-        <Modal
-          isOpen={!!modalAction}
-          onClose={() => setModalAction(null)}
+        <BulkActionModal
           title={BULK_ACTION_CONFIG[modalAction].label}
-          size="md"
-          footer={
-            <>
-              <Button variant="ghost" onClick={() => setModalAction(null)} disabled={sending}>
-                Cancel
-              </Button>
-              <Button onClick={handleSendAction} isLoading={sending}>
-                Send
-              </Button>
-            </>
-          }
-        >
-          <div className="space-y-4">
-            <p className="text-sm text-[var(--textSecondary)]">
-              Sending to <strong>{selectedEmails.size}</strong> candidate
-              {selectedEmails.size !== 1 ? 's' : ''}.
-            </p>
-
-            {BULK_ACTION_CONFIG[modalAction].hasDateTime && (
-              <Input
-                label={modalAction === 'ack' ? 'Date & Time *' : 'Date & Time'}
-                type="datetime-local"
-                value={modalDateTime}
-                onChange={(e) => setModalDateTime(e.target.value)}
-                required={modalAction === 'ack'}
-              />
-            )}
-
-            <Textarea
-              label="Message Content (optional)"
-              placeholder="Enter custom message content..."
-              value={modalContent}
-              onChange={(e) => setModalContent(e.target.value)}
-              maxLength={2000}
-              showCharCount
-            />
-          </div>
-        </Modal>
+          hasDateTime={BULK_ACTION_CONFIG[modalAction].hasDateTime}
+          dateTimeRequired={modalAction === 'ack'}
+          recipientCount={selectedEmails.size}
+          sending={sending}
+          dateTime={modalDateTime}
+          onDateTimeChange={setModalDateTime}
+          content={modalContent}
+          onContentChange={setModalContent}
+          onClose={() => setModalAction(null)}
+          onSend={handleSendAction}
+        />
       )}
 
       {/* Candidate Detail Modal */}
