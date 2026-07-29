@@ -28,6 +28,7 @@ import { CodeBlock } from '@/components/interview/CodeBlock';
 import { jobService } from '@/services/job.service';
 import { interviewService, type VoiceConversationEntryDTO } from '@/services/interview.service';
 import { aiService } from '@/services/ai.service';
+import { usePersistentState } from '@/hooks/usePersistentState';
 import type { JobPostDTO } from '@/types/job.types';
 import type { InterviewSchedule, VoiceEvaluationResult, ProctoringEvent, InterviewStats, CompletionReason } from '@/types/interview.types';
 
@@ -90,7 +91,7 @@ function formatDuration(startedAt?: string, endedAt?: string): string {
 
 export function InterviewResultsPage() {
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
-  const [selectedPrefix, setSelectedPrefix] = useState('');
+  const [selectedPrefix, setSelectedPrefix] = usePersistentState('interviewResults:selectedPrefix', '');
   const [interviews, setInterviews] = useState<InterviewSchedule[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [loadingResults, setLoadingResults] = useState(false);

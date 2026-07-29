@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
 import { authService } from '@/services/auth.service';
-import { setAccessToken, getAccessToken, clearTokens, authChannel } from '@/services/api.service';
+import { setAccessToken, getAccessToken, clearTokens, broadcastAuthChange, authChannel } from '@/services/api.service';
 import { isJwtExpired } from '@/utils/jwt.utils';
 import type { RoleName } from '@/config/roles';
 import type { PermissionName } from '@/config/permissions';
@@ -20,7 +20,11 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 function normalizeRole(role: string): RoleName {
-  return role.replace(/^ROLE_/, '') as RoleName;
+  return role
+    .replace(/^ROLE_/i, '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, '_') as RoleName;
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -80,7 +84,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [loadMe]);
 
-  // Bootstrap on mount
+  // Bootstrap on mount — acquire the access token (via refresh) and load the
+  // user BEFORE any protected page renders, so pages never fire token-less
+  // requests that would 401-storm and trip refresh-token reuse detection.
   useEffect(() => {
     bootstrapSession();
   }, [bootstrapSession]);
@@ -95,7 +101,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setRoles([]);
         setPermissions([]);
       } else if (e.data?.type === 'login') {
-        bootstrapSession();
+        // Another tab logged in. Only adopt the shared (refresh-cookie) session
+        // if this tab has no token yet — prevents redundant bootstraps. Because
+        // setAccessToken no longer re-broadcasts, this cannot feed back into a loop.
+        if (!getAccessToken()) {
+          bootstrapSession();
+        }
       }
     };
 
@@ -123,6 +134,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const normalizedRoles = loginData.roles.map(normalizeRole);
       setRoles(normalizedRoles);
       setPermissions(loginData.permissions as PermissionName[]);
+      // Signal other tabs exactly once for this user-initiated login.
+      broadcastAuthChange('login');
       return { roles: normalizedRoles };
     },
     []
@@ -142,6 +155,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setRoles([]);
       setPermissions([]);
       clearTokens();
+      // Signal other tabs to tear down their session as well.
+      broadcastAuthChange('logout');
     }
   }, []);
 

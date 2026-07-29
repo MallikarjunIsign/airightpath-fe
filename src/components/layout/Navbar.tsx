@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import {
   Bell,
   Moon,
@@ -8,32 +8,17 @@ import {
   Search,
   LogOut,
   Settings,
-  ChevronRight,
+  Menu,
 } from 'lucide-react';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfileImage } from '@/contexts/ProfileImageContext';
+import { useSidebar } from '@/contexts/SidebarContext';
 import { useRbac } from '@/hooks/useRbac';
 import { ROUTES } from '@/config/routes';
 import { formatName } from '@/utils/format.utils';
 import { Avatar } from '../ui/Avatar';
 import { Badge } from '../ui/Badge';
-
-// ---------------------------------------------------------------------------
-// Breadcrumb builder from pathname
-// ---------------------------------------------------------------------------
-function useBreadcrumbs() {
-  const location = useLocation();
-  const segments = location.pathname.split('/').filter(Boolean);
-
-  return segments.map((segment, i) => ({
-    label: segment
-      .replace(/-/g, ' ')
-      .replace(/\b\w/g, (c) => c.toUpperCase()),
-    path: '/' + segments.slice(0, i + 1).join('/'),
-    isLast: i === segments.length - 1,
-  }));
-}
 
 // ---------------------------------------------------------------------------
 // Navbar Component — Floating, borderless, semi-transparent
@@ -46,9 +31,9 @@ export function Navbar() {
   const { mode, setMode, isDark } = useTheme();
   const { user, logout } = useAuth();
   const { imageUrl } = useProfileImage();
+  const { toggleMobile } = useSidebar();
   const { roles, hasAnyRole } = useRbac();
   const navigate = useNavigate();
-  const breadcrumbs = useBreadcrumbs();
 
   const profileRef = useRef<HTMLDivElement>(null);
   const themeRef = useRef<HTMLDivElement>(null);
@@ -110,36 +95,21 @@ export function Navbar() {
         left: 'var(--sidebar-width, 240px)',
       }}
     >
-      <div className="h-full px-6 flex items-center justify-between gap-4">
-        {/* ----------------------------------------------------------------
-            Left: Breadcrumbs — lightweight path trail
-            ---------------------------------------------------------------- */}
-        <div className="flex items-center gap-1.5 min-w-0 text-[0.8125rem]">
-          {breadcrumbs.map((crumb, i) => (
-            <span key={crumb.path} className="flex items-center gap-1.5 min-w-0">
-              {i > 0 && (
-                <ChevronRight size={14} className="text-[var(--textQuaternary,var(--textTertiary))] flex-shrink-0 opacity-60" />
-              )}
-              <span
-                className={`
-                  truncate transition-colors duration-150
-                  ${crumb.isLast
-                    ? 'text-[var(--text)] font-semibold'
-                    : 'text-[var(--textTertiary)] hover:text-[var(--textSecondary)] cursor-pointer'
-                  }
-                `}
-                onClick={() => !crumb.isLast && navigate(crumb.path)}
-              >
-                {crumb.label}
-              </span>
-            </span>
-          ))}
-        </div>
+      <div className="h-full px-4 sm:px-6 flex items-center gap-2">
+        {/* Mobile: open the sidebar drawer */}
+        <button
+          onClick={toggleMobile}
+          className="navbar-action-btn md:hidden"
+          title="Open menu"
+          aria-label="Open menu"
+        >
+          <Menu size={20} />
+        </button>
 
         {/* ----------------------------------------------------------------
             Right: Actions — ghost buttons with micro-interactions
             ---------------------------------------------------------------- */}
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-0.5 ml-auto">
           {/* Search trigger */}
           <button
             className="navbar-action-btn"

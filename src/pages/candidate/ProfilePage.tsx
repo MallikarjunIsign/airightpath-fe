@@ -1,17 +1,23 @@
 import { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Camera, Loader2, Save } from 'lucide-react';
+import { Camera, Loader2, Lock, Save } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfileImage } from '@/contexts/ProfileImageContext';
 import { useToast } from '@/components/ui/Toast';
+import { useRbac } from '@/hooks/useRbac';
 import { userService } from '@/services/user.service';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Avatar } from '@/components/ui/Avatar';
+import { Modal } from '@/components/ui/Modal';
 import { mobileSchema } from '@/config/validation';
+import { ROUTES } from '@/config/routes';
+import { MESSAGES } from '@/config/messages';
+import { digitsOnly } from '@/utils/input.utils';
 import type { UsersDto } from '@/types/user.types';
 
 const profileSchema = z.object({
@@ -21,7 +27,7 @@ const profileSchema = z.object({
   mobileNumber: mobileSchema,
   alternativeMobileNumber: z
     .string()
-    .regex(/^[0-9]{10}$/, 'Please enter a valid 10-digit mobile number')
+    .regex(/^[6-9]\d{9}$/, 'Enter a valid 10-digit mobile number starting with 6-9')
     .or(z.literal(''))
     .optional(),
 });
@@ -32,16 +38,23 @@ export function ProfilePage() {
   const { user } = useAuth();
   const { imageUrl, refreshImage } = useProfileImage();
   const { showToast } = useToast();
+  const { hasAnyRole } = useRbac();
+  const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [showImageViewer, setShowImageViewer] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const changePasswordPath = hasAnyRole(['ADMIN', 'SUPER_ADMIN'])
+    ? ROUTES.ADMIN.CHANGE_PASSWORD
+    : ROUTES.CANDIDATE.CHANGE_PASSWORD;
 
   const {
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors },
   } = useForm<ProfileFormData>({
     resolver: zodResolver(profileSchema),
@@ -80,7 +93,7 @@ export function ProfilePage() {
         mobileNumber: data.mobileNumber,
         alternativeMobileNumber: data.alternativeMobileNumber || undefined,
       });
-      showToast('Profile updated successfully.', 'success');
+      showToast(MESSAGES.profile.updated, 'success');
     } catch {
       // Error toast auto-handled by interceptor
     } finally {
@@ -94,11 +107,11 @@ export function ProfilePage() {
 
     const validTypes = ['image/jpeg', 'image/png', 'image/gif'];
     if (!validTypes.includes(file.type)) {
-      showToast('Only JPEG, PNG, and GIF files are allowed.', 'error');
+      showToast(MESSAGES.profile.imageTypeInvalid, 'error');
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
-      showToast('Image size must be less than 5MB.', 'error');
+      showToast(MESSAGES.profile.imageTooLarge, 'error');
       return;
     }
 
@@ -106,7 +119,7 @@ export function ProfilePage() {
     try {
       await userService.uploadProfileImage(user.email, file);
       await refreshImage();
-      showToast('Profile photo updated successfully.', 'success');
+      showToast(MESSAGES.profile.photoUpdated, 'success');
     } catch {
       // Error toast auto-handled by interceptor
     } finally {
@@ -134,13 +147,21 @@ export function ProfilePage() {
         <CardContent>
           <div className="flex items-center gap-6">
             <div className="relative">
-              <Avatar
-                src={imageUrl}
-                firstName={user?.firstName}
-                lastName={user?.lastName}
-                size="xl"
-                className="w-24 h-24 text-2xl border-2 border-[var(--border)]"
-              />
+              <button
+                type="button"
+                onClick={() => imageUrl && setShowImageViewer(true)}
+                disabled={!imageUrl}
+                title={imageUrl ? 'View profile photo' : undefined}
+                className={`rounded-full ${imageUrl ? 'cursor-zoom-in' : 'cursor-default'}`}
+              >
+                <Avatar
+                  src={imageUrl}
+                  firstName={user?.firstName}
+                  lastName={user?.lastName}
+                  size="xl"
+                  className="w-24 h-24 text-2xl border-2 border-[var(--border)]"
+                />
+              </button>
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -201,15 +222,35 @@ export function ProfilePage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
                 label="Mobile Number"
-                {...register('mobileNumber')}
-                error={errors.mobileNumber?.message}
+                type="tel"
+                inputMode="numeric"
+                maxLength={10}
+                autoComplete="tel"
                 placeholder="Enter 10-digit mobile number"
+                error={errors.mobileNumber?.message}
+                {...register('mobileNumber')}
+                onChange={(e) =>
+                  setValue('mobileNumber', digitsOnly(e.target.value), {
+                    shouldValidate: true,
+                    shouldDirty: true,
+                  })
+                }
               />
               <Input
                 label="Alternative Mobile Number"
-                {...register('alternativeMobileNumber')}
-                error={errors.alternativeMobileNumber?.message}
+                type="tel"
+                inputMode="numeric"
+                maxLength={10}
+                autoComplete="tel"
                 placeholder="Optional"
+                error={errors.alternativeMobileNumber?.message}
+                {...register('alternativeMobileNumber')}
+                onChange={(e) =>
+                  setValue('alternativeMobileNumber', digitsOnly(e.target.value), {
+                    shouldValidate: true,
+                    shouldDirty: true,
+                  })
+                }
               />
             </div>
 
@@ -221,6 +262,49 @@ export function ProfilePage() {
           </form>
         </CardContent>
       </Card>
+
+      {/* Security / Change Password */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Security</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-medium text-[var(--text)]">Password</p>
+              <p className="text-sm text-[var(--textSecondary)]">
+                Update your password to keep your account secure.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              leftIcon={<Lock size={18} />}
+              onClick={() => navigate(changePasswordPath)}
+            >
+              Change password
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Profile image viewer */}
+      {imageUrl && (
+        <Modal
+          isOpen={showImageViewer}
+          onClose={() => setShowImageViewer(false)}
+          title="Profile Photo"
+          size="lg"
+        >
+          <div className="flex items-center justify-center">
+            <img
+              src={imageUrl}
+              alt="Profile"
+              className="max-h-[70vh] w-auto rounded-xl object-contain"
+            />
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

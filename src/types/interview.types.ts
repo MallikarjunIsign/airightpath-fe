@@ -21,6 +21,15 @@ export interface EvaluationCategory {
   description?: string;
 }
 
+/** A stored prompt for a job (aptitude/coding/interview stages). */
+export interface PromptRecord {
+  id: number;
+  jobPrefix: string;
+  promptType: string;
+  promptStage: string;
+  prompt: string;
+}
+
 export interface EvaluationScore {
   categoryName: string;
   score: number;
@@ -79,6 +88,7 @@ export interface StartInterviewRequest {
   email: string;
   jobPrefix: string;
   resumeSummary?: string;
+  mobileToken?: string;
 }
 
 export interface StartInterviewResponse {

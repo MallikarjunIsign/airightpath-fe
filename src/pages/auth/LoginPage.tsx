@@ -6,8 +6,10 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/Toast';
+import { MESSAGES } from '@/config/messages';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
+import { Logo } from '@/components/ui/Logo';
 import { ROUTES } from '@/config/routes';
 import { loginSchema } from '@/config/validation';
 
@@ -28,6 +30,7 @@ export function LoginPage() {
     formState: { errors, isSubmitting },
   } = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
+    mode: 'onTouched',
     defaultValues: {
       email: '',
       password: '',
@@ -37,7 +40,7 @@ export function LoginPage() {
   const onSubmit = async (data: LoginFormValues) => {
     try {
       const { roles: loadedRoles } = await login({ email: data.email, password: data.password });
-      showToast('Successfully logged in', 'success');
+      showToast(MESSAGES.auth.loginSuccess, 'success');
 
       if (from) {
         navigate(from, { replace: true });
@@ -67,11 +70,8 @@ export function LoginPage() {
         <div className="absolute inset-0 opacity-30" style={{ background: 'radial-gradient(circle at 30% 40%, rgba(59, 130, 246, 0.3), transparent 60%), radial-gradient(circle at 70% 80%, rgba(6, 182, 212, 0.2), transparent 50%)' }} />
         <div className="relative z-10 flex flex-col justify-between p-12 w-full">
           <div>
-            <div className="flex items-center gap-3 mb-16">
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold gradient-brand shadow-lg">
-                RP
-              </div>
-              <span className="text-white font-bold text-xl font-heading">RightPath</span>
+            <div className="flex items-center mb-16">
+              <Logo className="h-10 w-auto bg-white rounded-xl px-3 py-2 shadow-lg" />
             </div>
             <h1 className="text-4xl font-bold text-white mb-4 font-heading leading-tight">
               Find the Right Path<br />to Your Career
@@ -111,10 +111,8 @@ export function LoginPage() {
       <div className="flex-1 flex items-center justify-center bg-[var(--background)] px-6 py-12">
         <div className="w-full max-w-md animate-fade-in-up">
           {/* Mobile logo */}
-          <div className="lg:hidden text-center mb-8">
-            <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl gradient-brand shadow-lg mb-4">
-              <span className="text-white text-xl font-bold">RP</span>
-            </div>
+          <div className="lg:hidden flex justify-center mb-8">
+            <Logo className="h-10 w-auto" />
           </div>
 
           <div className="mb-8">
@@ -123,10 +121,11 @@ export function LoginPage() {
           </div>
 
           <div className="bg-[var(--cardBg)] border border-[var(--cardBorder)] rounded-xl p-8 shadow-card">
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+            <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-5">
               <Input
                 type="email"
                 label="Email"
+                required
                 placeholder="you@example.com"
                 leftIcon={<Mail size={18} />}
                 error={errors.email?.message}
@@ -137,6 +136,7 @@ export function LoginPage() {
                 <Input
                   type={showPassword ? 'text' : 'password'}
                   label="Password"
+                  required
                   placeholder="Enter your password"
                   leftIcon={<Lock size={18} />}
                   rightIcon={

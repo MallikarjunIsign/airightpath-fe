@@ -9,7 +9,7 @@ interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
 }
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
-  ({ label, error, helperText, maxLength, showCharCount = false, className = '', onChange, ...props }, ref) => {
+  ({ label, error, helperText, maxLength, showCharCount = false, required, className = '', onChange, ...props }, ref) => {
     const [charCount, setCharCount] = useState(0);
 
     const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -22,11 +22,14 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         {label && (
           <label className="block text-sm font-medium text-[var(--text)] mb-2">
             {label}
+            {required && <span className="text-[var(--error)] ml-0.5">*</span>}
           </label>
         )}
         <textarea
           ref={ref}
           maxLength={maxLength}
+          aria-required={required}
+          aria-invalid={!!error}
           onChange={handleChange}
           className={`
             w-full px-4 py-3 rounded-xl resize-y min-h-[100px]

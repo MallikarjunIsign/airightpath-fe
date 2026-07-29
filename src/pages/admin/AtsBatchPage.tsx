@@ -8,16 +8,8 @@ import { FileUpload } from '@/components/ui/FileUpload';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
-import api from '@/services/api.service';
-import { ENDPOINTS } from '@/config/api.endpoints';
-
-interface BatchResult {
-  fileName?: string;
-  candidateName?: string;
-  email?: string;
-  score: number;
-  [key: string]: unknown;
-}
+import { atsService, type BatchScreenResult } from '@/services/ats.service';
+import { MESSAGES } from '@/config/messages';
 
 export function AtsBatchPage() {
   const { showToast } = useToast();
@@ -25,15 +17,15 @@ export function AtsBatchPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [jobDescription, setJobDescription] = useState('');
   const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState<BatchResult[]>([]);
+  const [results, setResults] = useState<BatchScreenResult[]>([]);
 
   async function handleSubmit() {
     if (files.length === 0) {
-      showToast('Please upload at least one resume', 'warning');
+      showToast(MESSAGES.admin.atsBatch.resumeRequired, 'warning');
       return;
     }
     if (!jobDescription.trim()) {
-      showToast('Please enter a job description', 'warning');
+      showToast(MESSAGES.admin.atsBatch.jobDescriptionRequired, 'warning');
       return;
     }
 
@@ -41,16 +33,14 @@ export function AtsBatchPage() {
     setResults([]);
     try {
       const formData = new FormData();
-      files.forEach((file) => formData.append('files', file));
+      files.forEach((file) => formData.append('resumes', file));
       formData.append('jobDescription', jobDescription.trim());
 
-      const res = await api.post<BatchResult[]>(ENDPOINTS.ATS.SCREEN_BATCH, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const res = await atsService.screenBatch(formData);
 
       const sorted = [...(res.data ?? [])].sort((a, b) => b.score - a.score);
       setResults(sorted);
-      showToast(`Screened ${sorted.length} resumes successfully!`, 'success');
+      showToast(MESSAGES.admin.atsBatch.screened(sorted.length), 'success');
     } catch {
       // Error toast auto-handled by interceptor
     } finally {

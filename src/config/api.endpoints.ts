@@ -38,6 +38,10 @@ export const ENDPOINTS = {
     SEND_EXAM_LINK: "/api/job-applications/send-exam-link",
     SEND_SUCCESS_MAIL: "/api/job-applications/send-success-mail",
     SEND_FAILURE_MAIL: "/api/job-applications/send-failure-mail",
+    // Manually shortlist candidates without running ATS screening.
+    SHORTLIST: "/api/job-applications/shortlist",
+    // Admin sets a candidate's referral status (query params: jobPrefix, email, referralStatus).
+    REFERRAL_STATUS: "/api/job-applications/referral-status",
   },
   ASSESSMENTS: {
     UPLOAD: "/api/upload",
@@ -89,13 +93,13 @@ export const ENDPOINTS = {
   RESUME: {
     UPLOAD: "/api/upload-resume",
     UPDATE: "/api/update-resume",
-    VIEW: (email: string) => `/api/view-resume/${email}`,
+    VIEW: (email: string) => `/api/view-resume/${encodeURIComponent(email)}`,
     VIEW_ALL: "/api/view-all-resumes",
     UPLOAD_MULTIPLE: "/api/upload-resumes",
   },
   ATS: {
     SCREEN_SINGLE: "/api/ats/screen",
-    SCREEN_BATCH: "/api/ats/screen-batch",
+    SCREEN_BATCH: "/api/upload-multiple-resumes",
   },
   PROMPTS: {
     GET_BY_JOB: (prefix: string) => `/api/prompts/${prefix}`,

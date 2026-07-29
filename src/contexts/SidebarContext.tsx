@@ -1,20 +1,31 @@
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
 
 interface SidebarContextType {
+  /** Desktop: icon-only (true) vs full-width (false). */
   collapsed: boolean;
   setCollapsed: (collapsed: boolean) => void;
   toggle: () => void;
+  /** Mobile: off-canvas drawer open/closed. */
+  mobileOpen: boolean;
+  openMobile: () => void;
+  closeMobile: () => void;
+  toggleMobile: () => void;
+  /** True on small screens (< md). */
+  isMobile: boolean;
 }
 
 const SidebarContext = createContext<SidebarContextType | undefined>(undefined);
 
 const STORAGE_KEY = 'sidebar-collapsed';
+const MOBILE_QUERY = '(max-width: 767px)';
 
 export function SidebarProvider({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsedState] = useState(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
     return stored === 'true';
   });
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia(MOBILE_QUERY).matches);
 
   const setCollapsed = useCallback((value: boolean) => {
     setCollapsedState(value);
@@ -25,29 +36,37 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
     setCollapsed(!collapsed);
   }, [collapsed, setCollapsed]);
 
-  // Set the CSS variable on the root so Layout, Navbar, and Content can all read it
+  const openMobile = useCallback(() => setMobileOpen(true), []);
+  const closeMobile = useCallback(() => setMobileOpen(false), []);
+  const toggleMobile = useCallback(() => setMobileOpen((v) => !v), []);
+
+  // Track viewport + expose --sidebar-width (0 on mobile since the drawer overlays).
   useEffect(() => {
-    const width = collapsed ? '72px' : '240px';
-    document.documentElement.style.setProperty('--sidebar-width', width);
+    const mq = window.matchMedia(MOBILE_QUERY);
+    const apply = () => {
+      const mobile = mq.matches;
+      setIsMobile(mobile);
+      const desktopWidth = collapsed ? '72px' : '240px';
+      document.documentElement.style.setProperty('--sidebar-width', mobile ? '0px' : desktopWidth);
+      if (!mobile) setMobileOpen(false); // leaving mobile → ensure drawer is closed
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
   }, [collapsed]);
 
-  // Also handle mobile: sidebar width = 0
+  // Lock body scroll while the mobile drawer is open.
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 767px)');
-    const handler = (e: MediaQueryListEvent | MediaQueryList) => {
-      if (e.matches) {
-        document.documentElement.style.setProperty('--sidebar-width', '0px');
-      } else {
-        document.documentElement.style.setProperty('--sidebar-width', collapsed ? '72px' : '240px');
-      }
+    document.body.style.overflow = mobileOpen ? 'hidden' : '';
+    return () => {
+      document.body.style.overflow = '';
     };
-    handler(mq);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
-  }, [collapsed]);
+  }, [mobileOpen]);
 
   return (
-    <SidebarContext.Provider value={{ collapsed, setCollapsed, toggle }}>
+    <SidebarContext.Provider
+      value={{ collapsed, setCollapsed, toggle, mobileOpen, openMobile, closeMobile, toggleMobile, isMobile }}
+    >
       {children}
     </SidebarContext.Provider>
   );

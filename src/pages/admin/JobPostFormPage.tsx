@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Loader2, Send, Briefcase } from 'lucide-react';
+import { Send, Briefcase, CheckCircle } from 'lucide-react';
 import { jobPostSchema } from '@/config/validation';
 import { jobService } from '@/services/job.service';
 import { useToast } from '@/components/ui/Toast';
@@ -11,6 +11,8 @@ import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { ShareJobLink } from '@/components/admin/ShareJobLink';
+import { MESSAGES } from '@/config/messages';
 
 type JobPostFormData = z.infer<typeof jobPostSchema>;
 
@@ -22,17 +24,32 @@ const JOB_TYPE_OPTIONS = [
   { value: 'Internship', label: 'Internship' },
 ];
 
+/** Today's local date as `YYYY-MM-DD` for a date input `min`. */
+function localDateToday(): string {
+  const now = new Date();
+  const offsetMs = now.getTimezoneOffset() * 60000;
+  return new Date(now.getTime() - offsetMs).toISOString().slice(0, 10);
+}
+
+// Keystrokes that would produce a non-integer opening count.
+const BLOCKED_NUMBER_KEYS = new Set(['.', ',', 'e', 'E', '+', '-']);
+
 export function JobPostFormPage() {
   const { showToast } = useToast();
   const [submitting, setSubmitting] = useState(false);
+  // Job prefix of the most recently created job — drives the share-link panel.
+  const [createdPrefix, setCreatedPrefix] = useState<string | null>(null);
+  // Computed once on mount so the deadline floor doesn't drift each render.
+  const [minDeadline] = useState(localDateToday);
 
   const {
     register,
     handleSubmit,
     reset,
-    formState: { errors },
+    formState: { errors, isValid },
   } = useForm<JobPostFormData>({
     resolver: zodResolver(jobPostSchema),
+    mode: 'onChange',
     defaultValues: {
       jobPrefix: '',
       jobTitle: '',
@@ -53,13 +70,24 @@ export function JobPostFormPage() {
   });
 
   async function onSubmit(data: JobPostFormData) {
+    if (submitting) return;
+    // Defense in depth: never let a past deadline reach the backend, even if the
+    // form's validity state slips (schema + min attribute already guard the UI).
+    const deadline = new Date(`${data.applicationDeadline}T00:00:00`);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (Number.isNaN(deadline.getTime()) || deadline.getTime() < today.getTime()) {
+      showToast(MESSAGES.admin.jobPost.deadlineInPast, 'error');
+      return;
+    }
     setSubmitting(true);
     try {
       await jobService.createJob(data);
-      showToast('Job posted successfully!', 'success');
+      showToast(MESSAGES.admin.jobPost.posted, 'success');
+      setCreatedPrefix(data.jobPrefix);
       reset();
     } catch {
-      // Error toast auto-handled by interceptor
+      // Error toast (with the server's specific message) auto-handled by the API interceptor.
     } finally {
       setSubmitting(false);
     }
@@ -74,6 +102,34 @@ export function JobPostFormPage() {
         </p>
       </div>
 
+      {createdPrefix && (
+        <Card>
+          <CardContent>
+            <div className="flex items-start gap-3 pt-5">
+              <CheckCircle size={22} className="mt-0.5 flex-shrink-0 text-green-500" />
+              <div className="min-w-0 flex-1 space-y-3">
+                <div>
+                  <p className="font-semibold text-[var(--text)]">
+                    Job <span className="text-[var(--primary)]">{createdPrefix}</span> created
+                  </p>
+                  <p className="text-sm text-[var(--textSecondary)]">
+                    Share this link so candidates can apply directly.
+                  </p>
+                </div>
+                <ShareJobLink jobPrefix={createdPrefix} />
+                <button
+                  type="button"
+                  onClick={() => setCreatedPrefix(null)}
+                  className="text-sm font-medium text-[var(--primary)] hover:underline"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
@@ -87,12 +143,14 @@ export function JobPostFormPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
                 label="Job Prefix"
+                required
                 placeholder="e.g. DEV-2024-001"
                 error={errors.jobPrefix?.message}
                 {...register('jobPrefix')}
               />
               <Input
                 label="Job Title"
+                required
                 placeholder="e.g. Senior Software Engineer"
                 error={errors.jobTitle?.message}
                 {...register('jobTitle')}
@@ -103,12 +161,14 @@ export function JobPostFormPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
                 label="Company Name"
+                required
                 placeholder="e.g. Acme Corp"
                 error={errors.companyName?.message}
                 {...register('companyName')}
               />
               <Input
                 label="Location"
+                required
                 placeholder="e.g. Hyderabad, India"
                 error={errors.location?.message}
                 {...register('location')}
@@ -118,6 +178,7 @@ export function JobPostFormPage() {
             {/* Job Description */}
             <Textarea
               label="Job Description"
+              required
               placeholder="Provide a detailed job description..."
               maxLength={3000}
               showCharCount
@@ -129,12 +190,14 @@ export function JobPostFormPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
                 label="Skills"
+                required
                 placeholder="e.g. React, Node.js, TypeScript"
                 error={errors.keySkills?.message}
                 {...register('keySkills')}
               />
               <Input
                 label="Experience"
+                required
                 placeholder="e.g. 3-5 years"
                 error={errors.experience?.message}
                 {...register('experience')}
@@ -145,6 +208,7 @@ export function JobPostFormPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
                 label="Education"
+                required
                 placeholder="e.g. B.Tech in CS"
                 error={errors.education?.message}
                 {...register('education')}
@@ -152,6 +216,7 @@ export function JobPostFormPage() {
               <Input
                 label="Salary"
                 placeholder="e.g. 10-15 LPA"
+                helperText="Optional"
                 error={errors.salaryRange?.message}
                 {...register('salaryRange')}
               />
@@ -161,6 +226,7 @@ export function JobPostFormPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Select
                 label="Job Type"
+                required
                 options={JOB_TYPE_OPTIONS}
                 error={errors.jobType?.message}
                 {...register('jobType')}
@@ -168,6 +234,7 @@ export function JobPostFormPage() {
               <Input
                 label="Industry"
                 placeholder="e.g. Information Technology"
+                helperText="Optional"
                 error={errors.industry?.message}
                 {...register('industry')}
               />
@@ -178,12 +245,14 @@ export function JobPostFormPage() {
               <Input
                 label="Department"
                 placeholder="e.g. Engineering"
+                helperText="Optional"
                 error={errors.department?.message}
                 {...register('department')}
               />
               <Input
                 label="Role"
                 placeholder="e.g. Backend Developer"
+                helperText="Optional"
                 error={errors.role?.message}
                 {...register('role')}
               />
@@ -193,37 +262,57 @@ export function JobPostFormPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
                 label="Number of Openings"
+                required
                 type="number"
                 min={1}
+                step={1}
+                inputMode="numeric"
+                placeholder="e.g. 3"
+                helperText="Whole numbers only"
+                onKeyDown={(e) => {
+                  if (BLOCKED_NUMBER_KEYS.has(e.key)) e.preventDefault();
+                }}
                 error={errors.numberOfOpenings?.message}
                 {...register('numberOfOpenings', { valueAsNumber: true })}
               />
               <Input
                 label="Application Deadline"
+                required
                 type="date"
+                min={minDeadline}
+                helperText="Today or later"
                 error={errors.applicationDeadline?.message}
                 {...register('applicationDeadline')}
               />
             </div>
 
             {/* Submit */}
-            <div className="flex justify-end pt-4 border-t border-[var(--border)]">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => reset()}
-                className="mr-3"
-                disabled={submitting}
-              >
-                Reset
-              </Button>
-              <Button
-                type="submit"
-                isLoading={submitting}
-                leftIcon={!submitting ? <Send size={16} /> : undefined}
-              >
-                Post Job
-              </Button>
+            <div className="flex flex-col items-end gap-2 pt-4 border-t border-[var(--border)]">
+              {!isValid && (
+                <p className="text-sm text-[var(--textSecondary)]">
+                  Fill in all required fields (<span className="text-[var(--error)]">*</span>) to
+                  enable posting.
+                </p>
+              )}
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => reset()}
+                  className="mr-3"
+                  disabled={submitting}
+                >
+                  Reset
+                </Button>
+                <Button
+                  type="submit"
+                  isLoading={submitting}
+                  disabled={!isValid || submitting}
+                  leftIcon={!submitting ? <Send size={16} /> : undefined}
+                >
+                  Post Job
+                </Button>
+              </div>
             </div>
           </form>
         </CardContent>

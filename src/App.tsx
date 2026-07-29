@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRbac } from '@/hooks/useRbac';
-import { Layout, PublicLayout } from '@/components/layout/Layout';
+import { Layout } from '@/components/layout/Layout';
 import { ExamLayout } from '@/components/layout/ExamLayout';
 import { InterviewLayout } from '@/components/layout/InterviewLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
@@ -16,6 +16,7 @@ import { ChangePasswordPage } from '@/pages/auth/ChangePasswordPage';
 
 // Admin pages
 import { AdminDashboardPage } from '@/pages/admin/AdminDashboardPage';
+import { AdminJobsPage } from '@/pages/admin/AdminJobsPage';
 import { JobPostFormPage } from '@/pages/admin/JobPostFormPage';
 import { CandidateDetailsPage } from '@/pages/admin/CandidateDetailsPage';
 import { UserListPage } from '@/pages/admin/UserListPage';
@@ -45,7 +46,7 @@ import { InterviewPage } from '@/pages/candidate/InterviewPage';
 import { InterviewSummaryPage } from '@/pages/candidate/InterviewSummaryPage';
 import { ResultsListPage } from '@/pages/candidate/ResultsListPage';
 import { ResultDetailPage } from '@/pages/candidate/ResultDetailPage';
-
+import MobileConnect from './pages/candidate/MobileConnect';
 // Public pages
 import { HomePage } from '@/pages/public/HomePage';
 import { AboutPage } from '@/pages/public/AboutPage';
@@ -71,7 +72,7 @@ function App() {
       <Route path={ROUTES.PUBLIC.HOME} element={<HomePage />} />
       <Route path={ROUTES.PUBLIC.ABOUT} element={<AboutPage />} />
       <Route path={ROUTES.PUBLIC.CONTACT} element={<ContactPage />} />
-
+      <Route path="/mobile-connect" element={<MobileConnect />} />
       {/* Auth routes (redirect if already authenticated) */}
       <Route
         path={ROUTES.PUBLIC.LOGIN}
@@ -95,6 +96,7 @@ function App() {
       >
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<AdminDashboardPage />} />
+        <Route path="jobs" element={<AdminJobsPage />} />
         <Route path="jobs/create" element={<JobPostFormPage />} />
         <Route path="candidates" element={<CandidateDetailsPage />} />
         <Route path="users" element={<UserListPage />} />
@@ -109,6 +111,7 @@ function App() {
         <Route path="prompts" element={<JobPromptPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="change-password" element={<ChangePasswordPage />} />
+
       </Route>
 
       {/* Exam routes (no sidebar/navbar — lockdown mode) */}
@@ -154,6 +157,8 @@ function App() {
         <Route path="events" element={<EventsPage />} />
         <Route path="applications" element={<MyApplicationsPage />} />
         <Route path="apply" element={<JobApplicationPage />} />
+        {/* Shareable per-job apply link (loads the job by prefix from the URL) */}
+        <Route path="apply/:jobPrefix" element={<JobApplicationPage />} />
         <Route path="assessments" element={<AssessmentListPage />} />
         <Route path="instructions" element={<ExamInstructionsPage />} />
         <Route path="interviews" element={<InterviewListPage />} />

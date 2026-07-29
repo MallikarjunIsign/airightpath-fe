@@ -14,6 +14,7 @@ import {
   Phone,
   Mail,
   Tag,
+  UserPlus,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { jobApplicationService } from '@/services/job-application.service';
@@ -24,7 +25,10 @@ import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { ROUTES } from '@/config/routes';
 import { formatDate } from '@/utils/format.utils';
-import type { JobApplicationDTO, JobApplicationStatus } from '@/types/job.types';
+import { usePersistentState } from '@/hooks/usePersistentState';
+import { hasReferral } from '@/utils/referral.utils';
+import { ReferralFields } from '@/components/application/ReferralFields';
+import type { JobApplicationDTO } from '@/types/job.types';
 
 const STATUS_CONFIG: Record<
   string,
@@ -54,8 +58,8 @@ export function MyApplicationsPage() {
 
   const [applications, setApplications] = useState<JobApplicationDTO[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
+  const [searchQuery, setSearchQuery] = usePersistentState('myApplications:searchQuery', '');
+  const [filterStatus, setFilterStatus] = usePersistentState('myApplications:filterStatus', '');
   const [selectedApp, setSelectedApp] = useState<JobApplicationDTO | null>(null);
 
   useEffect(() => {
@@ -222,6 +226,14 @@ export function MyApplicationsPage() {
                         <span className="truncate">Resume: {app.resumeFileName}</span>
                       </div>
                     )}
+                    {hasReferral(app.referralName, app.referralId) && (
+                      <div className="flex items-center gap-2 text-sm text-[var(--textSecondary)]">
+                        <UserPlus size={14} className="flex-shrink-0" />
+                        <span className="truncate">
+                          Referral: {app.referralName?.trim() || app.referralId?.trim()}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Action Buttons */}
@@ -339,6 +351,11 @@ export function MyApplicationsPage() {
                     <p className="text-[var(--text)] font-medium">{selectedApp.jobRole}</p>
                   </div>
                 </div>
+                <ReferralFields
+                  referralName={selectedApp.referralName}
+                  referralId={selectedApp.referralId}
+                  alwaysShow
+                />
               </div>
             </div>
 

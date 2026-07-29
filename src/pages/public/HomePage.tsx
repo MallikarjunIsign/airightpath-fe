@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, Briefcase, Users, Award, Shield, CheckCircle, Zap, Target } from 'lucide-react';
 import { ROUTES } from '@/config/routes';
 import { Button } from '@/components/ui/Button';
+import { Logo } from '@/components/ui/Logo';
 
 export function HomePage() {
   const features = [
@@ -30,11 +31,8 @@ export function HomePage() {
       {/* Navbar */}
       <header className="fixed top-0 left-0 right-0 h-16 bg-[var(--navbarBg)]/80 backdrop-blur-md border-b border-[var(--navbarBorder)] z-30">
         <div className="h-full px-6 flex items-center justify-between max-w-7xl mx-auto">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-sm gradient-brand shadow-sm">
-              RP
-            </div>
-            <span className="font-bold text-lg font-heading gradient-text">RightPath</span>
+          <div className="flex items-center">
+            <Logo className="h-8 w-auto" />
           </div>
           <div className="flex items-center gap-4">
             <Link to={ROUTES.PUBLIC.ABOUT} className="text-sm text-[var(--textSecondary)] hover:text-[var(--text)] transition-colors hidden sm:block">

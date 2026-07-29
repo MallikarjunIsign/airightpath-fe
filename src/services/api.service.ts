@@ -1,9 +1,9 @@
-import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
-import { ENV } from '@/config/env';
-import { ENDPOINTS } from '@/config/api.endpoints';
-import { getErrorMessage } from '@/config/error-messages';
-import { dispatchErrorToast } from '@/config/toast-events';
-import type { ApiErrorEnvelope } from '@/types/api.types';
+import axios, { AxiosError, InternalAxiosRequestConfig } from "axios";
+import { ENV } from "@/config/env";
+import { ENDPOINTS } from "@/config/api.endpoints";
+import { getErrorMessage } from "@/config/error-messages";
+import { dispatchErrorToast } from "@/config/toast-events";
+import type { ApiErrorEnvelope } from "@/types/api.types";
 
 // ── In-memory token store ────────────────────────────────────────────
 let accessToken: string | null = null;
@@ -11,7 +11,7 @@ let accessToken: string | null = null;
 // BroadcastChannel for cross-tab auth sync (replaces localStorage events)
 let authChannel: BroadcastChannel | null = null;
 try {
-  authChannel = new BroadcastChannel('rightpath_auth');
+  authChannel = new BroadcastChannel("rightpath_auth");
 } catch {
   // BroadcastChannel not supported — cross-tab sync disabled
 }
@@ -23,28 +23,27 @@ export function getAccessToken(): string | null {
 }
 
 export function setAccessToken(token: string | null): void {
-  const prev = accessToken;
+  // Pure store. Deliberately does NOT broadcast: silent token rotation
+  // (e.g. via /refresh) must not signal other tabs, or the receiving tab's
+  // bootstrap → refresh → setAccessToken path would re-broadcast and create a
+  // cross-tab feedback loop. Use broadcastAuthChange() for user-initiated auth.
   accessToken = token;
-  // Only broadcast when value actually changes to avoid cross-tab ping-pong
-  if (prev !== token) {
-    try {
-      authChannel?.postMessage({ type: token ? 'login' : 'logout' });
-    } catch {
-      // Silently ignore
-    }
-  }
 }
 
 export function clearTokens(): void {
-  const had = accessToken !== null;
+  // Pure store — see setAccessToken. Broadcast logout explicitly via
+  // broadcastAuthChange('logout') only for genuine session-end transitions.
   accessToken = null;
-  // Only broadcast if there was a token to clear
-  if (had) {
-    try {
-      authChannel?.postMessage({ type: 'logout' });
-    } catch {
-      // Silently ignore
-    }
+}
+
+// Explicitly notify other tabs about a user-initiated auth change (login on
+// success, logout, or a dead session). Kept separate from token storage so
+// silent rotations never trigger cross-tab work.
+export function broadcastAuthChange(type: "login" | "logout"): void {
+  try {
+    authChannel?.postMessage({ type });
+  } catch {
+    // Silently ignore — cross-tab sync is best-effort
   }
 }
 
@@ -53,7 +52,7 @@ const api = axios.create({
   baseURL: ENV.API_BASE_URL,
   withCredentials: true,
   timeout: 30000,
-  headers: { 'Content-Type': 'application/json' },
+  headers: { "Content-Type": "application/json" },
 });
 
 // ── Endpoints that skip the auth header ──────────────────────────────
@@ -102,8 +101,28 @@ function processQueue(error: unknown, token: string | null): void {
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError<ApiErrorEnvelope>) => {
-    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+    const originalRequest = error.config as InternalAxiosRequestConfig & {
+      _retry?: boolean;
+    };
     const status = error.response?.status;
+
+    // ── Normalize Blob error bodies ──────────────────────────────────
+    // Requests with responseType: 'blob' (e.g. resume/file downloads) also
+    // receive their *error* body as a Blob, so error.response.data has no
+    // readable `code`/`message`. Parse it back to JSON (or text) here so the
+    // real server error surfaces instead of a generic "Bad Request".
+    if (error.response?.data instanceof Blob) {
+      try {
+        const text = await error.response.data.text();
+        try {
+          error.response.data = JSON.parse(text);
+        } catch {
+          error.response.data = { message: text } as ApiErrorEnvelope;
+        }
+      } catch {
+        // Blob unreadable — leave as-is and fall through to generic handling
+      }
+    }
 
     // ── 401 handling for non-public paths: attempt silent refresh ─────
     if (
@@ -112,8 +131,13 @@ api.interceptors.response.use(
       !originalRequest._retry &&
       !isPublicPath(originalRequest.url)
     ) {
-      const errorCode = (error.response?.data as ApiErrorEnvelope | undefined)?.code;
-      if (!errorCode || errorCode === 'AUTH_INVALID_TOKEN' || errorCode === 'AUTH_UNAUTHORIZED') {
+      const errorCode = (error.response?.data as ApiErrorEnvelope | undefined)
+        ?.code;
+      if (
+        !errorCode ||
+        errorCode === "AUTH_INVALID_TOKEN" ||
+        errorCode === "AUTH_UNAUTHORIZED"
+      ) {
         if (isRefreshing) {
           return new Promise<string>((resolve, reject) => {
             failedQueue.push({ resolve, reject });
@@ -130,7 +154,7 @@ api.interceptors.response.use(
           const response = await axios.post(
             `${ENV.API_BASE_URL}${ENDPOINTS.AUTH.REFRESH}`,
             {},
-            { withCredentials: true }
+            { withCredentials: true },
           );
           const newToken = response.data?.data?.accessToken;
           if (newToken) {
@@ -139,12 +163,13 @@ api.interceptors.response.use(
             processQueue(null, newToken);
             return api(originalRequest);
           }
-          throw new Error('No token in refresh response');
+          throw new Error("No token in refresh response");
         } catch (refreshError) {
           processQueue(refreshError, null);
           clearTokens();
-          dispatchErrorToast(getErrorMessage('AUTH_INVALID_REFRESH'));
-          window.dispatchEvent(new CustomEvent('auth:forceLogout'));
+          broadcastAuthChange("logout");
+          dispatchErrorToast(getErrorMessage("AUTH_INVALID_REFRESH"));
+          window.dispatchEvent(new CustomEvent("auth:forceLogout"));
           return Promise.reject(refreshError);
         } finally {
           isRefreshing = false;
@@ -154,20 +179,29 @@ api.interceptors.response.use(
 
     // ── Auto-toast for all other errors ──────────────────────────────
     if (!originalRequest?._skipErrorToast) {
-      if (status && status >= 500) {
-        dispatchErrorToast(getErrorMessage('INTERNAL_ERROR'));
+      const data = error.response?.data as ApiErrorEnvelope | undefined;
+      const hasStructuredError =
+        !!data?.code || typeof data?.message === "string";
+      if (hasStructuredError) {
+        // Prefer the server's specific error (mapped if known) even for 5xx, so
+        // failures like AI_SERVICE_ERROR aren't masked by a generic message.
+        dispatchErrorToast(extractApiError(error).message);
+      } else if (status && status >= 500) {
+        dispatchErrorToast(getErrorMessage("INTERNAL_ERROR"));
       } else {
-        const { message } = extractApiError(error);
-        dispatchErrorToast(message);
+        dispatchErrorToast(extractApiError(error).message);
       }
     }
 
     return Promise.reject(error);
-  }
+  },
 );
 
 // ── Error extraction helper ──────────────────────────────────────────
-export function extractApiError(error: unknown): { code: string; message: string } {
+export function extractApiError(error: unknown): {
+  code: string;
+  message: string;
+} {
   if (axios.isAxiosError(error)) {
     const data = error.response?.data as ApiErrorEnvelope | undefined;
     // V2 format: flat object with code field
@@ -178,17 +212,23 @@ export function extractApiError(error: unknown): { code: string; message: string
       };
     }
     // Legacy format: { message, timestamp } — no code
-    if (data && typeof (data as Record<string, unknown>).message === 'string') {
+    if (data && typeof (data as Record<string, unknown>).message === "string") {
       return {
         code: `HTTP_${error.response?.status}`,
         message: (data as Record<string, unknown>).message as string,
       };
     }
-    if (error.code === 'ECONNABORTED') {
-      return { code: 'TIMEOUT_ERROR', message: getErrorMessage('TIMEOUT_ERROR') };
+    if (error.code === "ECONNABORTED") {
+      return {
+        code: "TIMEOUT_ERROR",
+        message: getErrorMessage("TIMEOUT_ERROR"),
+      };
     }
     if (!error.response) {
-      return { code: 'NETWORK_ERROR', message: getErrorMessage('NETWORK_ERROR') };
+      return {
+        code: "NETWORK_ERROR",
+        message: getErrorMessage("NETWORK_ERROR"),
+      };
     }
     return {
       code: `HTTP_${error.response.status}`,
@@ -196,7 +236,7 @@ export function extractApiError(error: unknown): { code: string; message: string
     };
   }
   return {
-    code: 'UNKNOWN',
+    code: "UNKNOWN",
     message: error instanceof Error ? error.message : getErrorMessage(),
   };
 }

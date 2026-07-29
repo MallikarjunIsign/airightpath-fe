@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -7,13 +7,16 @@ import { Send, Upload, FileText, X, Loader2, AlertTriangle, CheckCircle } from '
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/Toast';
 import { jobApplicationService } from '@/services/job-application.service';
+import { jobService } from '@/services/job.service';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { ROUTES } from '@/config/routes';
 import { jobApplicationSchema } from '@/config/validation';
+import { MESSAGES } from '@/config/messages';
 import { validateResumeFile } from '@/utils/file.utils';
+import { digitsOnly } from '@/utils/input.utils';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
 
 type JobApplicationFormData = z.infer<typeof jobApplicationSchema>;
@@ -24,12 +27,19 @@ export function JobApplicationPage() {
   const { user } = useAuth();
   const { showToast } = useToast();
 
+  const { jobPrefix: paramPrefix } = useParams<{ jobPrefix: string }>();
+
   const locationState = location.state as {
     job?: JobPostDTO;
     existingApplication?: JobApplicationDTO;
   } | null;
-  const job = locationState?.job;
   const passedApplication = locationState?.existingApplication;
+
+  // Job comes either from in-app navigation state or, for a shared link, is
+  // resolved from the :jobPrefix URL param.
+  const [job, setJob] = useState<JobPostDTO | null>(locationState?.job ?? null);
+  const [resolvingJob, setResolvingJob] = useState(!locationState?.job && !!paramPrefix);
+  const [jobNotFound, setJobNotFound] = useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -42,6 +52,7 @@ export function JobApplicationPage() {
     register,
     handleSubmit,
     reset,
+    setValue,
     formState: { errors },
   } = useForm<JobApplicationFormData>({
     resolver: zodResolver(jobApplicationSchema),
@@ -53,8 +64,41 @@ export function JobApplicationPage() {
       experience: '',
       address: '',
       role: job?.role || job?.jobTitle || '',
+      referralName: '',
+      referralId: '',
     },
   });
+
+  // Resolve the job from the URL param for shared apply links (no nav state).
+  useEffect(() => {
+    let cancelled = false;
+    async function resolveJob() {
+      if (job || !paramPrefix) return;
+      setResolvingJob(true);
+      setJobNotFound(false);
+      try {
+        const res = await jobService.getAllJobs();
+        const match = res.data?.find((j) => j.jobPrefix === paramPrefix);
+        if (cancelled) return;
+        if (match) {
+          setJob(match);
+          // Prefill the role for a fresh application (edit mode overrides later).
+          setValue('role', match.role || match.jobTitle || '');
+        } else {
+          setJobNotFound(true);
+        }
+      } catch {
+        if (!cancelled) setJobNotFound(true);
+      } finally {
+        if (!cancelled) setResolvingJob(false);
+      }
+    }
+    resolveJob();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paramPrefix]);
 
   // Check deadline
   useEffect(() => {
@@ -127,12 +171,12 @@ export function JobApplicationPage() {
 
   const onSubmit = async (data: JobApplicationFormData) => {
     if (!job?.jobPrefix) {
-      showToast('No job selected. Please go back and select a job.', 'error');
+      showToast(MESSAGES.application.noJobSelected, 'error');
       return;
     }
 
     if (!isEditMode && !resumeFile) {
-      showToast('Please upload your resume.', 'warning');
+      showToast(MESSAGES.application.resumeRequired, 'warning');
       return;
     }
 
@@ -156,12 +200,22 @@ export function JobApplicationPage() {
         formData.append('resume', resumeFile);
       }
 
+      // Optional referral — sent as separate form parts (keys are case-sensitive),
+      // and only when the candidate actually entered a value. Captured at apply
+      // time only; the update endpoint ignores these fields.
+      if (!isEditMode) {
+        const referralName = data.referralName?.trim();
+        const referralId = data.referralId?.trim();
+        if (referralName) formData.append('referralName', referralName);
+        if (referralId) formData.append('referralId', referralId);
+      }
+
       if (isEditMode) {
         await jobApplicationService.update(formData);
-        showToast('Application updated successfully.', 'success');
+        showToast(MESSAGES.application.updated, 'success');
       } else {
         await jobApplicationService.apply(formData);
-        showToast('Application submitted successfully.', 'success');
+        showToast(MESSAGES.application.submitted, 'success');
       }
 
       navigate(ROUTES.CANDIDATE.APPLICATIONS);
@@ -172,11 +226,22 @@ export function JobApplicationPage() {
     }
   };
 
+  // Resolving a shared link's job by prefix.
+  if (resolvingJob) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-8 h-8 animate-spin text-[var(--primary)]" />
+      </div>
+    );
+  }
+
   if (!job) {
     return (
       <div className="text-center py-16">
         <p className="text-lg text-[var(--textSecondary)]">
-          No job selected. Please go to the Events page and select a job to apply.
+          {jobNotFound
+            ? 'This job could not be found. It may have been removed or the link is incorrect.'
+            : 'No job selected. Please go to the Events page and select a job to apply.'}
         </p>
         <Button className="mt-4" onClick={() => navigate(ROUTES.CANDIDATE.EVENTS)}>
           Browse Jobs
@@ -257,9 +322,19 @@ export function JobApplicationPage() {
 
             <Input
               label="Mobile Number"
-              {...register('mobileNumber')}
-              error={errors.mobileNumber?.message}
+              type="tel"
+              inputMode="numeric"
+              maxLength={10}
+              autoComplete="tel"
               placeholder="Enter 10-digit mobile number"
+              error={errors.mobileNumber?.message}
+              {...register('mobileNumber')}
+              onChange={(e) =>
+                setValue('mobileNumber', digitsOnly(e.target.value), {
+                  shouldValidate: true,
+                  shouldDirty: true,
+                })
+              }
             />
 
             <Input
@@ -282,6 +357,43 @@ export function JobApplicationPage() {
               error={errors.role?.message}
               placeholder="Applied role"
             />
+
+            {/* Referral — editable on a new application; read-only when editing
+                (referral is captured at apply time only and never sent on update). */}
+            {!isEditMode ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                  label="Referral Name"
+                  helperText="Optional"
+                  placeholder="Who referred you?"
+                  error={errors.referralName?.message}
+                  {...register('referralName')}
+                />
+                <Input
+                  label="Referral ID"
+                  helperText="Optional"
+                  placeholder="Referral code or employee ID"
+                  error={errors.referralId?.message}
+                  {...register('referralId')}
+                />
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                  label="Referral Name"
+                  value={existingApplication?.referralName?.trim() || 'Not provided'}
+                  readOnly
+                  disabled
+                  helperText="Set at apply time — can't be changed"
+                />
+                <Input
+                  label="Referral ID"
+                  value={existingApplication?.referralId?.trim() || 'Not provided'}
+                  readOnly
+                  disabled
+                />
+              </div>
+            )}
 
             {/* Resume Upload */}
             <div className="space-y-2">

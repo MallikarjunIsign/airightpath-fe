@@ -13,7 +13,9 @@ export const passwordSchema = z
 
 export const mobileSchema = z
   .string()
-  .regex(/^[0-9]{10}$/, 'Please enter a valid 10-digit mobile number');
+  .min(1, 'Mobile number is required')
+  // Indian mobile format: 10 digits starting 6-9 (rejects 0000000000, 1111111111, etc.)
+  .regex(/^[6-9]\d{9}$/, 'Enter a valid 10-digit mobile number starting with 6-9');
 
 export const resumeFileSchema = z
   .instanceof(File)
@@ -70,21 +72,40 @@ export const resetPasswordSchema = z
   });
 
 export const jobPostSchema = z.object({
-  jobPrefix: z.string().min(1, 'Job prefix is required'),
-  jobTitle: z.string().min(1, 'Job title is required'),
-  companyName: z.string().min(1, 'Company name is required'),
-  location: z.string().min(1, 'Location is required'),
-  jobDescription: z.string().min(1, 'Job description is required').max(3000, 'Max 3000 characters'),
-  keySkills: z.string().min(1, 'Skills are required'),
-  experience: z.string().min(1, 'Experience is required'),
-  education: z.string().min(1, 'Education is required'),
+  jobPrefix: z.string().trim().min(1, 'Job prefix is required'),
+  jobTitle: z.string().trim().min(1, 'Job title is required'),
+  companyName: z.string().trim().min(1, 'Company name is required'),
+  location: z.string().trim().min(1, 'Location is required'),
+  jobDescription: z
+    .string()
+    .trim()
+    .min(1, 'Job description is required')
+    .max(3000, 'Job description must be 3000 characters or fewer'),
+  keySkills: z.string().trim().min(1, 'At least one skill is required'),
+  experience: z.string().trim().min(1, 'Experience is required'),
+  education: z.string().trim().min(1, 'Education is required'),
   salaryRange: z.string().optional(),
-  jobType: z.string().min(1, 'Job type is required'),
+  jobType: z.string().min(1, 'Please select a job type'),
   industry: z.string().optional(),
   department: z.string().optional(),
   role: z.string().optional(),
-  numberOfOpenings: z.number().min(1, 'At least 1 opening required'),
-  applicationDeadline: z.string().min(1, 'Deadline is required'),
+  numberOfOpenings: z
+    .number({ invalid_type_error: 'Number of openings is required' })
+    .int('Openings must be a whole number (no decimals)')
+    .min(1, 'At least 1 opening is required')
+    .max(100000, 'Number of openings looks too high'),
+  applicationDeadline: z
+    .string()
+    .min(1, 'Application deadline is required')
+    .refine((val) => {
+      // Backend stores a LocalDate and only closes applications the day AFTER the
+      // deadline, so today is still valid. Compare at local day granularity.
+      const selected = new Date(`${val}T00:00:00`);
+      if (Number.isNaN(selected.getTime())) return false;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      return selected.getTime() >= today.getTime();
+    }, 'Deadline cannot be in the past'),
 });
 
 export const jobApplicationSchema = z.object({
@@ -95,4 +116,7 @@ export const jobApplicationSchema = z.object({
   experience: z.string().min(1, 'Experience is required'),
   address: z.string().min(1, 'Address is required'),
   role: z.string().min(1, 'Role is required'),
+  // Optional referral — no validation; a candidate may leave neither, either, or both.
+  referralName: z.string().optional(),
+  referralId: z.string().optional(),
 });

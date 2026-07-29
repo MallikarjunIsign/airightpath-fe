@@ -55,4 +55,20 @@ export const jobApplicationService = {
   sendFailureMail(data: { emails: string[]; jobPrefix: string; content?: string }) {
     return api.post<ApiResponse<unknown>>(ENDPOINTS.JOB_APPLICATIONS.SEND_FAILURE_MAIL, data);
   },
+
+  /** Manually move candidates to SHORTLISTED without running ATS screening. */
+  shortlist(data: { jobPrefix: string; emails: string[] }) {
+    return api.patch<ApiResponse<unknown>>(ENDPOINTS.JOB_APPLICATIONS.SHORTLIST, data);
+  },
+
+  /** Admin sets a candidate's referral status. Sent as query params (no body). */
+  setReferralStatus(data: {
+    jobPrefix: string;
+    email: string;
+    referralStatus: 'PENDING' | 'VERIFIED' | 'REJECTED';
+  }) {
+    return api.patch<ApiResponse<unknown>>(ENDPOINTS.JOB_APPLICATIONS.REFERRAL_STATUS, null, {
+      params: data,
+    });
+  },
 };

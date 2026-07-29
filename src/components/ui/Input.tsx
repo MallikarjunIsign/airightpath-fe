@@ -9,12 +9,13 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(
-  ({ label, error, helperText, leftIcon, rightIcon, className = '', ...props }, ref) => {
+  ({ label, error, helperText, leftIcon, rightIcon, required, className = '', ...props }, ref) => {
     return (
       <div className="w-full">
         {label && (
           <label className="block text-sm font-medium text-[var(--text)] mb-2">
             {label}
+            {required && <span className="text-[var(--error)] ml-0.5">*</span>}
           </label>
         )}
         <div className="relative group">
@@ -25,6 +26,8 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
           )}
           <input
             ref={ref}
+            aria-required={required}
+            aria-invalid={!!error}
             className={`
               w-full px-4 py-2.5 h-11 rounded-xl
               bg-[var(--inputBg)]

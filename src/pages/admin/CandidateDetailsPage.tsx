@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Loader2,
   Users,
@@ -15,6 +16,9 @@ import {
   MapPin,
   Briefcase,
   Clock,
+  ClipboardList,
+  Download,
+  ExternalLink,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -27,8 +31,19 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { EmptyState } from '@/components/ui/EmptyState';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
+import { assessmentService } from '@/services/assessment.service';
+import { resumeService } from '@/services/resume.service';
+import axios from 'axios';
+import { usePersistentState, writePersistentValue } from '@/hooks/usePersistentState';
 import { useToast } from '@/components/ui/Toast';
+import { ROUTES } from '@/config/routes';
+import { referralDisplay, referralStatusLabel, hasReferral } from '@/utils/referral.utils';
+import { MESSAGES } from '@/config/messages';
+import { ReferralFields } from '@/components/application/ReferralFields';
 import type { JobPostDTO, JobApplicationDTO, JobApplicationStatus } from '@/types/job.types';
+
+// Assessments are assigned at the RECONFIRMED stage, just before the exam link is sent.
+const ASSIGN_STAGE: JobApplicationStatus = 'RECONFIRMED';
 
 const STAGES: JobApplicationStatus[] = [
   'APPLIED',
@@ -98,10 +113,11 @@ function getAppEmail(app: JobApplicationDTO): string {
 
 export function CandidateDetailsPage() {
   const { showToast } = useToast();
+  const navigate = useNavigate();
 
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
-  const [selectedPrefix, setSelectedPrefix] = useState('');
-  const [activeStage, setActiveStage] = useState<JobApplicationStatus>('APPLIED');
+  const [selectedPrefix, setSelectedPrefix] = usePersistentState('candidates:selectedPrefix', '');
+  const [activeStage, setActiveStage] = usePersistentState<JobApplicationStatus>('candidates:activeStage', 'APPLIED');
   const [candidates, setCandidates] = useState<JobApplicationDTO[]>([]);
   const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set());
   const [loadingJobs, setLoadingJobs] = useState(true);
@@ -116,9 +132,24 @@ export function CandidateDetailsPage() {
   // Candidate detail modal
   const [selectedCandidate, setSelectedCandidate] = useState<JobApplicationDTO | null>(null);
 
+  // Manual shortlist / referral validation in-flight flags
+  const [shortlisting, setShortlisting] = useState(false);
+  const [validatingReferral, setValidatingReferral] = useState(false);
+
+  // Resume viewer
+  const [resumeView, setResumeView] = useState<{ url: string; name: string } | null>(null);
+  const [resumeLoading, setResumeLoading] = useState(false);
+
   useEffect(() => {
     fetchJobs();
   }, []);
+
+  // Revoke the blob URL when the resume viewer closes / on unmount.
+  useEffect(() => {
+    return () => {
+      if (resumeView) URL.revokeObjectURL(resumeView.url);
+    };
+  }, [resumeView]);
 
   useEffect(() => {
     if (selectedPrefix) {
@@ -201,7 +232,7 @@ export function CandidateDetailsPage() {
 
   function openActionModal(action: BulkAction) {
     if (selectedEmails.size === 0) {
-      showToast('Please select at least one candidate', 'warning');
+      showToast(MESSAGES.admin.common.selectCandidate, 'warning');
       return;
     }
     setModalAction(action);
@@ -209,18 +240,182 @@ export function CandidateDetailsPage() {
     setModalContent('');
   }
 
+  async function openResume(candidate: JobApplicationDTO) {
+    const email = getAppEmail(candidate);
+    if (!email) return;
+    setResumeLoading(true);
+    try {
+      const res = await resumeService.view(email, { _skipErrorToast: true });
+      const url = URL.createObjectURL(res.data);
+      setResumeView({ url, name: candidate.resumeFileName || `${email}-resume.pdf` });
+    } catch (err) {
+      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+      showToast(
+        status === 400 || status === 404
+          ? MESSAGES.admin.resume.unavailable
+          : MESSAGES.admin.resume.openFailed,
+        'error',
+      );
+    } finally {
+      setResumeLoading(false);
+    }
+  }
+
+  function closeResume() {
+    setResumeView((prev) => {
+      if (prev) URL.revokeObjectURL(prev.url);
+      return null;
+    });
+  }
+
+  function downloadResume() {
+    if (!resumeView) return;
+    const a = document.createElement('a');
+    a.href = resumeView.url;
+    a.download = resumeView.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  // Applied candidates are screened via ATS to become shortlisted.
+  function handleScreenAts() {
+    if (!selectedPrefix) {
+      showToast(MESSAGES.admin.common.selectJobFirst, 'warning');
+      return;
+    }
+    writePersistentValue('ats:selectedPrefix', selectedPrefix);
+    navigate(ROUTES.ADMIN.ATS);
+  }
+
+  // Manually shortlist candidates (Applied → Shortlisted) without ATS screening.
+  async function handleShortlist(emails: string[]) {
+    if (!selectedPrefix) {
+      showToast(MESSAGES.admin.common.selectJobFirst, 'warning');
+      return;
+    }
+    if (emails.length === 0) {
+      showToast(MESSAGES.admin.candidates.selectToShortlist, 'warning');
+      return;
+    }
+    setShortlisting(true);
+    try {
+      await jobApplicationService.shortlist({ jobPrefix: selectedPrefix, emails });
+
+      // The endpoint can partially succeed, so trust the read state rather than
+      // assuming all requested emails were shortlisted: after success a candidate
+      // flips to status SHORTLISTED. Re-read and count who actually moved.
+      const res = await jobApplicationService.getByPrefix(selectedPrefix);
+      const data = res.data ?? [];
+      setCandidates(data);
+
+      const requested = new Set(emails.map((e) => e.toLowerCase()));
+      const done = data.filter(
+        (c) => requested.has(getAppEmail(c).toLowerCase()) && c.status === 'SHORTLISTED',
+      ).length;
+      const failed = emails.length - done;
+
+      if (failed <= 0) {
+        showToast(MESSAGES.admin.candidates.shortlisted(done), 'success');
+      } else if (done === 0) {
+        showToast(MESSAGES.admin.candidates.shortlistFailed(failed), 'error');
+      } else {
+        showToast(
+          MESSAGES.admin.candidates.shortlistPartial(done, emails.length, failed),
+          'warning',
+        );
+      }
+
+      setSelectedEmails(new Set());
+      setSelectedCandidate(null);
+    } catch {
+      // Error toast auto-handled by interceptor
+    } finally {
+      setShortlisting(false);
+    }
+  }
+
+  // Admin sets a candidate's referral status (verify / reject).
+  async function handleSetReferralStatus(
+    candidate: JobApplicationDTO,
+    referralStatus: 'VERIFIED' | 'REJECTED',
+  ) {
+    const email = getAppEmail(candidate);
+    if (!selectedPrefix || !email) return;
+    setValidatingReferral(true);
+    try {
+      await jobApplicationService.setReferralStatus({
+        jobPrefix: selectedPrefix,
+        email,
+        referralStatus,
+      });
+      showToast(MESSAGES.admin.candidates.referralSet(referralStatus === 'VERIFIED'), 'success');
+      // Reflect immediately in the open modal and the list.
+      setSelectedCandidate((prev) => (prev ? { ...prev, referralStatus } : prev));
+      setCandidates((prev) =>
+        prev.map((c) => (getAppEmail(c) === email ? { ...c, referralStatus } : c)),
+      );
+    } catch {
+      // Error toast auto-handled by interceptor
+    } finally {
+      setValidatingReferral(false);
+    }
+  }
+
+  // Go to the Assign page with this job + the selected candidates pre-selected.
+  function handleAssignAssessment() {
+    if (selectedEmails.size === 0) {
+      showToast(MESSAGES.admin.common.selectCandidate, 'warning');
+      return;
+    }
+    navigate(ROUTES.ADMIN.ASSESSMENTS_ASSIGN, {
+      state: { jobPrefix: selectedPrefix, emails: Array.from(selectedEmails) },
+    });
+  }
+
   async function handleSendAction() {
     if (!modalAction || !selectedPrefix) return;
 
     // Require dateTime for ack mail (email contains exam schedule)
     if (modalAction === 'ack' && !modalDateTime) {
-      showToast('Date & Time is required for acknowledgement mail', 'warning');
+      showToast(MESSAGES.admin.candidates.ackDateTimeRequired, 'warning');
       return;
     }
 
     setSending(true);
 
     const emails = Array.from(selectedEmails);
+
+    // Guard: an exam link is meaningless unless each candidate actually has an
+    // assessment assigned for this job. Without this, the server would mark them
+    // EXAM_SENT with no exam to take. Block and point the admin to the Assign step.
+    if (modalAction === 'examLink') {
+      try {
+        const checks = await Promise.all(
+          emails.map(async (email) => {
+            try {
+              const res = await assessmentService.getCandidateAssessments(email);
+              const hasExam = (res.data ?? []).some((a) => a.jobPrefix === selectedPrefix);
+              return { email, hasExam };
+            } catch {
+              return { email, hasExam: false };
+            }
+          })
+        );
+        const missing = checks.filter((c) => !c.hasExam).map((c) => c.email);
+        if (missing.length > 0) {
+          showToast(
+            MESSAGES.admin.candidates.noExamForCandidates(missing.length, missing.join(', ')),
+            'error'
+          );
+          setSending(false);
+          return;
+        }
+      } catch {
+        // If the pre-check itself fails, fall through and let the send proceed.
+      }
+    }
+
     const payload: {
       emails: string[];
       jobPrefix: string;
@@ -259,7 +454,7 @@ export function CandidateDetailsPage() {
           await jobApplicationService.sendFailureMail(payload);
           break;
       }
-      showToast(`${BULK_ACTION_CONFIG[modalAction].label} sent successfully!`, 'success');
+      showToast(MESSAGES.admin.candidates.actionSent(BULK_ACTION_CONFIG[modalAction].label), 'success');
       setModalAction(null);
       setSelectedEmails(new Set());
       fetchCandidates();
@@ -383,9 +578,42 @@ export function CandidateDetailsPage() {
             </CardContent>
           </Card>
 
-          {/* Bulk Actions — only show actions relevant to the active stage */}
-          {availableActions.length > 0 && (
+          {/* Bulk Actions — stage-relevant: Applied → ATS screening, Shortlisted → Assign */}
+          {(availableActions.length > 0 ||
+            activeStage === ('APPLIED' as JobApplicationStatus) ||
+            activeStage === ASSIGN_STAGE) && (
             <div className="flex flex-wrap gap-2">
+              {activeStage === ('APPLIED' as JobApplicationStatus) && (
+                <>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    leftIcon={<FileText size={16} />}
+                    onClick={handleScreenAts}
+                  >
+                    Screen with ATS
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    leftIcon={<CheckCircle size={16} />}
+                    isLoading={shortlisting}
+                    onClick={() => handleShortlist(Array.from(selectedEmails))}
+                  >
+                    Shortlist Selected
+                  </Button>
+                </>
+              )}
+              {activeStage === ASSIGN_STAGE && (
+                <Button
+                  variant="primary"
+                  size="sm"
+                  leftIcon={<ClipboardList size={16} />}
+                  onClick={handleAssignAssessment}
+                >
+                  Assign Assessment
+                </Button>
+              )}
               {availableActions.map((key) => {
                 const config = BULK_ACTION_CONFIG[key];
                 return (
@@ -449,6 +677,7 @@ export function CandidateDetailsPage() {
                         <TableHead>Mobile</TableHead>
                         <TableHead>Experience</TableHead>
                         <TableHead>Role</TableHead>
+                        <TableHead>Referral</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Actions</TableHead>
                       </TableRow>
@@ -473,6 +702,7 @@ export function CandidateDetailsPage() {
                             <TableCell>{candidate.mobileNumber || '-'}</TableCell>
                             <TableCell>{candidate.experience}</TableCell>
                             <TableCell>{candidate.jobRole || '-'}</TableCell>
+                            <TableCell>{referralDisplay(candidate.referralName, candidate.referralId)}</TableCell>
                             <TableCell>
                               <Badge variant="info" size="sm">
                                 {STAGE_LABELS[candidate.status] ?? candidate.status}
@@ -554,9 +784,20 @@ export function CandidateDetailsPage() {
           title="Candidate Details"
           size="lg"
           footer={
-            <Button variant="ghost" onClick={() => setSelectedCandidate(null)}>
-              Close
-            </Button>
+            <div className="flex w-full items-center justify-between gap-2">
+              <Button variant="ghost" onClick={() => setSelectedCandidate(null)}>
+                Close
+              </Button>
+              {selectedCandidate.status === 'APPLIED' && (
+                <Button
+                  leftIcon={<CheckCircle size={16} />}
+                  isLoading={shortlisting}
+                  onClick={() => handleShortlist([getAppEmail(selectedCandidate)])}
+                >
+                  Shortlist
+                </Button>
+              )}
+            </div>
           }
         >
           <div className="space-y-6">
@@ -614,6 +855,11 @@ export function CandidateDetailsPage() {
                     <p className="text-[var(--text)] font-medium">{selectedCandidate.jobRole || 'N/A'}</p>
                   </div>
                 </div>
+                <ReferralFields
+                  referralName={selectedCandidate.referralName}
+                  referralId={selectedCandidate.referralId}
+                  alwaysShow
+                />
                 <div className="flex items-center gap-2 text-sm col-span-full">
                   <MapPin size={16} className="text-[var(--primary)] flex-shrink-0" />
                   <div>
@@ -623,6 +869,54 @@ export function CandidateDetailsPage() {
                 </div>
               </div>
             </div>
+
+            {/* Referral validation — only when the candidate was referred */}
+            {hasReferral(selectedCandidate.referralName, selectedCandidate.referralId) && (
+              <div>
+                <h4 className="text-sm font-semibold text-[var(--text)] mb-3">Referral</h4>
+                <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-[var(--textSecondary)]">Status:</span>
+                    <Badge
+                      variant={
+                        selectedCandidate.referralStatus?.toUpperCase() === 'VERIFIED'
+                          ? 'success'
+                          : selectedCandidate.referralStatus?.toUpperCase() === 'REJECTED'
+                            ? 'error'
+                            : 'warning'
+                      }
+                      size="sm"
+                    >
+                      {referralStatusLabel(selectedCandidate.referralStatus)}
+                    </Badge>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      leftIcon={<CheckCircle size={14} />}
+                      isLoading={validatingReferral}
+                      disabled={selectedCandidate.referralStatus?.toUpperCase() === 'VERIFIED'}
+                      onClick={() => handleSetReferralStatus(selectedCandidate, 'VERIFIED')}
+                    >
+                      Verify
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      leftIcon={<XCircle size={14} />}
+                      disabled={
+                        validatingReferral ||
+                        selectedCandidate.referralStatus?.toUpperCase() === 'REJECTED'
+                      }
+                      onClick={() => handleSetReferralStatus(selectedCandidate, 'REJECTED')}
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Application Status Details */}
             <div>
@@ -681,13 +975,25 @@ export function CandidateDetailsPage() {
 
             {/* Resume */}
             {selectedCandidate.resumeFileName && (
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
+              <button
+                type="button"
+                onClick={() => openResume(selectedCandidate)}
+                disabled={resumeLoading}
+                className="w-full flex items-center gap-3 p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)] hover:border-[var(--primary)] hover:bg-[var(--primary)]/[0.04] transition-colors text-left disabled:opacity-60"
+              >
                 <FileText size={20} className="text-[var(--primary)] flex-shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-[var(--text)]">Resume</p>
                   <p className="text-xs text-[var(--textSecondary)] truncate">{selectedCandidate.resumeFileName}</p>
                 </div>
-              </div>
+                {resumeLoading ? (
+                  <Loader2 size={16} className="animate-spin text-[var(--primary)] flex-shrink-0" />
+                ) : (
+                  <span className="text-xs text-[var(--primary)] font-medium flex items-center gap-1 flex-shrink-0">
+                    <Eye size={14} /> View
+                  </span>
+                )}
+              </button>
             )}
 
             {/* Match Percent */}
@@ -714,6 +1020,39 @@ export function CandidateDetailsPage() {
               </div>
             )}
           </div>
+        </Modal>
+      )}
+
+      {/* Resume viewer */}
+      {resumeView && (
+        <Modal
+          isOpen={!!resumeView}
+          onClose={closeResume}
+          title={resumeView.name}
+          size="xl"
+          footer={
+            <>
+              <Button variant="ghost" onClick={closeResume}>
+                Close
+              </Button>
+              <Button
+                variant="outline"
+                leftIcon={<ExternalLink size={16} />}
+                onClick={() => window.open(resumeView.url, '_blank', 'noopener,noreferrer')}
+              >
+                Open in New Tab
+              </Button>
+              <Button leftIcon={<Download size={16} />} onClick={downloadResume}>
+                Download
+              </Button>
+            </>
+          }
+        >
+          <iframe
+            src={resumeView.url}
+            title="Resume"
+            className="w-full h-[70vh] rounded-lg border border-[var(--border)] bg-white"
+          />
         </Modal>
       )}
     </div>

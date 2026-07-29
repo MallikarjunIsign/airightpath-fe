@@ -1,7 +1,9 @@
-import { ReactNode } from 'react';
+import { ReactNode, CSSProperties } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Navbar } from './Navbar';
+import { PageBreadcrumbs } from './PageBreadcrumbs';
+import { Logo } from '@/components/ui/Logo';
 import { ENV } from '@/config/env';
 
 interface LayoutProps {
@@ -12,7 +14,15 @@ export function Layout({ children }: LayoutProps) {
   const environment = ENV.IS_DEV ? 'dev' : 'prod';
 
   return (
-    <div className="layout-canvas min-h-screen">
+    <div
+      className="layout-canvas min-h-screen"
+      style={{
+        // Consumed by <Modal contained> so dialogs stay within the content area
+        // (right of the sidebar, below the navbar) instead of overlapping chrome.
+        ['--app-content-left' as string]: 'var(--sidebar-width, 0px)',
+        ['--app-content-top' as string]: '3.5rem',
+      } as CSSProperties}
+    >
       {/* Ambient background glow — subtle depth across the canvas */}
       <div className="layout-ambient" aria-hidden="true" />
 
@@ -30,6 +40,7 @@ export function Layout({ children }: LayoutProps) {
         }}
       >
         <div className="max-w-[1400px] mx-auto animate-fade-in-up">
+          <PageBreadcrumbs />
           {children || <Outlet />}
         </div>
       </main>
@@ -44,11 +55,8 @@ export function PublicLayout({ children }: { children?: ReactNode }) {
 
       <header className="navbar-surface fixed top-0 left-0 right-0 h-14 z-navbar">
         <div className="h-full px-6 flex items-center justify-between max-w-7xl mx-auto">
-          <div className="flex items-center gap-3">
-            <div className="sidebar-logo-mark w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-sm gradient-brand">
-              RP
-            </div>
-            <span className="font-heading font-bold text-[1.05rem] gradient-text">RightPath</span>
+          <div className="flex items-center">
+            <Logo className="h-9 w-auto" />
           </div>
         </div>
       </header>

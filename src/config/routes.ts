@@ -10,6 +10,7 @@ export const ROUTES = {
   },
   ADMIN: {
     DASHBOARD: '/admin/dashboard',
+    JOBS: '/admin/jobs',
     JOBS_CREATE: '/admin/jobs/create',
     CANDIDATES: '/admin/candidates',
     USERS: '/admin/users',
@@ -33,6 +34,7 @@ export const ROUTES = {
     EVENTS: '/candidate/events',
     APPLICATIONS: '/candidate/applications',
     APPLY: '/candidate/apply',
+    APPLY_JOB: '/candidate/apply/:jobPrefix',
     ASSESSMENTS: '/candidate/assessments',
     INSTRUCTIONS: '/candidate/instructions',
     EXAM_APTITUDE: '/candidate/exam/aptitude',
@@ -48,3 +50,13 @@ export const ROUTES = {
     FORBIDDEN: '/forbidden',
   },
 } as const;
+
+/** Relative apply path for a specific job, e.g. `/candidate/apply/DEV-2024-001`. */
+export function applyJobPath(jobPrefix: string): string {
+  return `/candidate/apply/${encodeURIComponent(jobPrefix)}`;
+}
+
+/** Absolute, shareable apply URL for a specific job (includes the current origin). */
+export function applyJobUrl(jobPrefix: string): string {
+  return `${window.location.origin}${applyJobPath(jobPrefix)}`;
+}

@@ -18,10 +18,11 @@ export const resumeService = {
     });
   },
 
-  view(email: string) {
+  view(email: string, config?: Record<string, unknown>) {
     return api.get<Blob>(ENDPOINTS.RESUME.VIEW(email), {
       responseType: 'blob',
-    });
+      ...config,
+    } as never);
   },
 
   viewAll() {

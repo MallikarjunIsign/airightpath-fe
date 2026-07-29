@@ -33,11 +33,14 @@ import { useTimer } from '@/hooks/useTimer';
 import { useFullscreen } from '@/hooks/useFullscreen';
 import { usePageVisibility } from '@/hooks/usePageVisibility';
 import { useFaceDetection } from '@/hooks/useFaceDetection';
+import { useExamCamera } from '@/hooks/useExamCamera';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/ui/Modal';
 import { APP_CONFIG } from '@/config/app.config';
+import { PROCTORING_CONFIG } from '@/config/proctoring.config';
+import { MESSAGES } from '@/config/messages';
 import { ROUTES } from '@/config/routes';
 import { formatTimer } from '@/utils/format.utils';
 import type { Assessment, CodingQuestion, RawCodingQuestion } from '@/types/assessment.types';
@@ -161,6 +164,12 @@ export function CodingAssessmentPage() {
   const isSubmittingRef = useRef(false);
   const initRef = useRef(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Proctoring only starts counting once the exam is fully initialised, so the
+  // initial camera/fullscreen permission prompts don't register as violations.
+  const proctoringActiveRef = useRef(false);
+
+  const proctoring = PROCTORING_CONFIG;
+  const camera = useExamCamera();
   const isDraggingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -186,15 +195,22 @@ export function CodingAssessmentPage() {
   // ── Proctoring hooks ──────────────────────────────────────────────
   const { isFullscreen, enterFullscreen, exitFullscreen, fullscreenExitCount } = useFullscreen({
     onExitAttempt: (count) => {
-      showToast(`Warning: Fullscreen exited! (${count})`, 'warning');
+      showToast(MESSAGES.proctoring.fullscreenExited(count), 'warning');
     },
   });
 
   usePageVisibility({
     onHidden: () => {
+      if (!proctoring.tabSwitch.enabled || !proctoringActiveRef.current) return;
       setTabWarnings((prev) => {
         const next = prev + 1;
-        showToast(`Warning: Tab switch detected! (${next})`, 'warning');
+        const max = proctoring.tabSwitch.maxBeforeAutoSubmit;
+        if (max > 0 && next >= max) {
+          handleAutoSubmit('Too many tab switches.');
+        } else {
+          const counter = max > 0 ? `${next}/${max}` : `${next}`;
+          showToast(MESSAGES.proctoring.tabSwitch(counter), 'warning');
+        }
         return next;
       });
     },
@@ -202,22 +218,42 @@ export function CodingAssessmentPage() {
 
   const { loadModels, startDetection, stopDetection, warningCount, faceDetected } =
     useFaceDetection({
-      maxWarnings: APP_CONFIG.FACE_DETECTION_MAX_WARNINGS,
-      onMaxWarnings: () => handleAutoSubmit('Face not detected too many times.'),
-      onNoFace: () => {
-        showToast('Warning: Your face is not detected!', 'warning');
-      },
+      maxWarnings:
+        proctoring.eyeDetection.maxBeforeAutoSubmit > 0
+          ? proctoring.eyeDetection.maxBeforeAutoSubmit
+          : Number.POSITIVE_INFINITY,
+      onMaxWarnings: () => handleAutoSubmit('Too many face/eye warnings.'),
+      onNoFace: () => showToast(MESSAGES.proctoring.faceNotDetected, 'warning'),
+      onMultipleFaces: (count) =>
+        showToast(MESSAGES.proctoring.multipleFaces(count), 'warning'),
+      onLookingAway: (direction) =>
+        showToast(MESSAGES.proctoring.lookingAway(direction), 'warning'),
     });
 
   const totalWarnings = tabWarnings + warningCount + fullscreenExitCount;
-  const maxWarnings = APP_CONFIG.PROCTORING_MAX_TOTAL_WARNINGS;
 
+  // Acquires the camera (prompts for permission). Attaching the stream to the
+  // <video> + starting detection happens in the effect below, once the element
+  // is mounted — during `loading` the preview isn't rendered yet, so doing it
+  // here would silently no-op. Reused for the "Enable Camera & Retry" action.
+  const setupCamera = useCallback(async () => {
+    await camera.start();
+  }, [camera]);
+
+  // Attach the live stream to the preview and start face detection once the
+  // <video> exists (after loading) and the camera is active.
   useEffect(() => {
-    if (totalWarnings >= maxWarnings && !isSubmittingRef.current && !loading) {
-      handleAutoSubmit('Too many proctoring warnings.');
+    if (loading) return;
+    const video = videoRef.current;
+    const stream = camera.streamRef.current;
+    if (!video || !stream || video.srcObject === stream) return;
+    video.srcObject = stream;
+    if (proctoring.eyeDetection.enabled) {
+      const begin = () => startDetection(video);
+      if (video.readyState >= 1) begin();
+      else video.addEventListener('loadedmetadata', begin, { once: true });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [totalWarnings]);
+  }, [loading, camera.status, camera.streamRef, proctoring.eyeDetection.enabled, startDetection]);
 
   // ── Monaco editor helpers ─────────────────────────────────────────
   const handleEditorMount: OnMount = (editor, monaco) => {
@@ -326,7 +362,7 @@ export function CodingAssessmentPage() {
         jobPrefix: assessment.jobPrefix,
       });
 
-      showToast('Coding exam submitted successfully!', 'success');
+      showToast(MESSAGES.exam.codingSubmitted, 'success');
       await exitFullscreen();
       navigate(ROUTES.CANDIDATE.RESULTS);
     } catch {
@@ -341,7 +377,7 @@ export function CodingAssessmentPage() {
   const handleAutoSubmit = useCallback(
     (reason: string) => {
       if (isSubmittingRef.current) return;
-      showToast(`Auto-submitting: ${reason}`, 'error');
+      showToast(MESSAGES.proctoring.autoSubmitting(reason), 'error');
       handleSubmitExam();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -375,18 +411,19 @@ export function CodingAssessmentPage() {
         normalized.forEach((q) => { initialStatuses[q.id] = 'not_started'; });
         setQuestionStatus(initialStatuses);
 
-        await enterFullscreen();
-
-        try {
-          await loadModels();
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-            videoRef.current.onloadedmetadata = () => startDetection(videoRef.current!);
-          }
-        } catch (camErr) {
-          console.warn('Face detection/camera unavailable:', camErr);
+        if (proctoring.fullscreen.enabled) {
+          await enterFullscreen();
         }
+
+        // Load face-detection models first so detection can start as soon as the
+        // camera is live (skipped entirely when eye detection is disabled).
+        if (proctoring.eyeDetection.enabled) {
+          await loadModels();
+        }
+
+        // Request the camera and wire up the preview + detection. On failure the
+        // camera hook exposes a status the UI renders a blocking overlay from.
+        await setupCamera();
 
         if (user?.email) {
           await assessmentService.markAttended({
@@ -395,6 +432,8 @@ export function CodingAssessmentPage() {
           });
         }
 
+        // Proctoring counters go live only now — after all permission prompts.
+        proctoringActiveRef.current = true;
         startTimer();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load coding questions.');
@@ -409,9 +448,7 @@ export function CodingAssessmentPage() {
   useEffect(() => {
     return () => {
       stopDetection();
-      if (videoRef.current?.srcObject) {
-        (videoRef.current.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
-      }
+      camera.stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -530,7 +567,7 @@ export function CodingAssessmentPage() {
       });
 
       setQuestionStatus((prev) => ({ ...prev, [currentQ.id]: 'saved' }));
-      showToast(`Question ${currentIndex + 1} saved!`, 'success');
+      showToast(MESSAGES.exam.questionSaved(currentIndex + 1), 'success');
     } catch {
       // Error toast auto-handled
     } finally {
@@ -564,7 +601,7 @@ export function CodingAssessmentPage() {
 
       processCompilerResponse(res.data);
       setQuestionStatus((prev) => ({ ...prev, [currentQ.id]: 'submitted' }));
-      showToast(`Question ${currentIndex + 1} submitted!`, 'success');
+      showToast(MESSAGES.exam.questionSubmitted(currentIndex + 1), 'success');
     } catch {
       // Error toast auto-handled
     } finally {
@@ -652,8 +689,28 @@ export function CodingAssessmentPage() {
 
   return (
     <div className="min-h-screen bg-[var(--background)] flex flex-col">
+      {/* Camera Required Overlay — blocks the exam until the camera is live */}
+      {proctoring.camera.required &&
+        !loading &&
+        (camera.status === 'denied' ||
+          camera.status === 'unavailable' ||
+          camera.status === 'error') && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/85 backdrop-blur-sm">
+            <div className="text-center p-8 rounded-2xl bg-[var(--cardBg)] border border-[var(--border)] max-w-md mx-4 shadow-2xl">
+              <Camera className="w-16 h-16 text-red-500 mx-auto mb-4" />
+              <h2 className="text-xl font-bold text-[var(--text)] mb-2">Camera Required</h2>
+              <p className="text-[var(--textSecondary)] mb-6">
+                {camera.message} Your exam cannot continue until camera access is enabled.
+              </p>
+              <Button onClick={setupCamera} leftIcon={<Camera size={16} />}>
+                Enable Camera &amp; Retry
+              </Button>
+            </div>
+          </div>
+        )}
+
       {/* Fullscreen overlay */}
-      {!isFullscreen && !loading && (
+      {proctoring.fullscreen.enabled && !isFullscreen && !loading && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
           <div className="text-center p-8 rounded-2xl bg-[var(--cardBg)] border border-[var(--border)] max-w-md mx-4 shadow-2xl">
             <ShieldAlert className="w-16 h-16 text-amber-500 mx-auto mb-4" />
@@ -702,11 +759,25 @@ export function CodingAssessmentPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="w-16 h-12 bg-black rounded overflow-hidden flex-shrink-0">
+            <div
+              className={`w-16 h-12 bg-black rounded overflow-hidden flex-shrink-0 relative ring-1 ${
+                camera.status === 'active' ? 'ring-green-500/50' : 'ring-red-500/60'
+              }`}
+            >
               <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+              {camera.status !== 'active' && (
+                <button
+                  onClick={setupCamera}
+                  title={camera.message ?? 'Camera off'}
+                  className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 text-[9px] font-medium text-white/80 hover:bg-black/60"
+                >
+                  <Camera size={12} className="text-white/60" />
+                  {camera.status === 'requesting' ? '…' : 'Retry'}
+                </button>
+              )}
             </div>
 
-            {!faceDetected && (
+            {!faceDetected && proctoring.eyeDetection.enabled && (
               <div className="flex items-center gap-1 text-amber-500 animate-pulse">
                 <EyeOff size={14} />
                 <span className="text-xs font-medium">No face</span>
@@ -716,15 +787,32 @@ export function CodingAssessmentPage() {
             <div className="relative group">
               <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${warningColor}`}>
                 <AlertTriangle size={12} />
-                <span>{totalWarnings}/{maxWarnings}</span>
+                <span>{totalWarnings} warning{totalWarnings === 1 ? '' : 's'}</span>
               </div>
-              <div className="absolute right-0 top-full mt-2 w-48 p-2.5 rounded-lg bg-[var(--cardBg)] border border-[var(--border)] shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity z-20">
+              <div className="absolute right-0 top-full mt-2 w-52 p-2.5 rounded-lg bg-[var(--cardBg)] border border-[var(--border)] shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity z-20">
                 <p className="text-xs font-semibold text-[var(--text)] mb-1.5">Warnings</p>
                 <div className="space-y-0.5 text-xs text-[var(--textSecondary)]">
-                  <p>Tab switches: {tabWarnings}</p>
-                  <p>Face detection: {warningCount}</p>
-                  <p>Fullscreen exits: {fullscreenExitCount}</p>
+                  {proctoring.tabSwitch.enabled && (
+                    <p>
+                      Tab switches: {tabWarnings}
+                      {proctoring.tabSwitch.maxBeforeAutoSubmit > 0
+                        ? ` / ${proctoring.tabSwitch.maxBeforeAutoSubmit}`
+                        : ''}
+                    </p>
+                  )}
+                  {proctoring.eyeDetection.enabled && (
+                    <p>
+                      Face / eye: {warningCount}
+                      {proctoring.eyeDetection.maxBeforeAutoSubmit > 0
+                        ? ` / ${proctoring.eyeDetection.maxBeforeAutoSubmit}`
+                        : ''}
+                    </p>
+                  )}
+                  {proctoring.fullscreen.enabled && <p>Fullscreen exits: {fullscreenExitCount}</p>}
                 </div>
+                <p className="mt-1.5 text-[10px] text-[var(--textSecondary)] border-t border-[var(--border)] pt-1.5">
+                  Reaching a limit auto-submits your exam.
+                </p>
               </div>
             </div>
 

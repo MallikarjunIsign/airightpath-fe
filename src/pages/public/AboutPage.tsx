@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { ArrowLeft, Target, Users, Award, Shield, Lightbulb } from 'lucide-react';
 import { ROUTES } from '@/config/routes';
+import { Logo } from '@/components/ui/Logo';
 
 export function AboutPage() {
   const values = [
@@ -14,9 +15,8 @@ export function AboutPage() {
     <div className="min-h-screen bg-[var(--background)]">
       <header className="fixed top-0 left-0 right-0 h-16 bg-[var(--navbarBg)]/80 backdrop-blur-md border-b border-[var(--navbarBorder)] z-30">
         <div className="h-full px-6 flex items-center justify-between max-w-7xl mx-auto">
-          <Link to={ROUTES.PUBLIC.HOME} className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-sm gradient-brand shadow-sm">RP</div>
-            <span className="font-bold text-lg font-heading gradient-text">RightPath</span>
+          <Link to={ROUTES.PUBLIC.HOME} className="flex items-center">
+            <Logo className="h-8 w-auto" />
           </Link>
         </div>
       </header>

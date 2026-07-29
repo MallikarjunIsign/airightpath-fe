@@ -9,13 +9,13 @@ import {
   CheckCircle,
   Monitor,
   Clock,
-  Loader2,
 } from 'lucide-react';
 import { useToast } from '@/components/ui/Toast';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { ROUTES } from '@/config/routes';
 import { APP_CONFIG } from '@/config/app.config';
+import { MESSAGES } from '@/config/messages';
 import type { Assessment } from '@/types/assessment.types';
 
 export function ExamInstructionsPage() {
@@ -53,22 +53,31 @@ export function ExamInstructionsPage() {
 
       setCameraReady(true);
       setMicReady(true);
-      showToast('Camera and microphone access granted.', 'success');
+      showToast(MESSAGES.examSetup.permissionsGranted, 'success');
     } catch {
-      showToast('Failed to access camera/microphone. Please allow permissions.', 'error');
+      showToast(MESSAGES.examSetup.permissionsFailed, 'error');
     } finally {
       setPermissionLoading(false);
     }
   };
 
-  const handleStartExam = () => {
+  const handleStartExam = async () => {
     if (!agreed) {
-      showToast('Please agree to the terms and conditions.', 'warning');
+      showToast(MESSAGES.examSetup.agreeRequired, 'warning');
       return;
     }
     if (!cameraReady || !micReady) {
-      showToast('Please enable camera and microphone before starting.', 'warning');
+      showToast(MESSAGES.examSetup.enableDevicesRequired, 'warning');
       return;
+    }
+
+    // Enter fullscreen here, inside the click gesture. The exam page's own init
+    // runs async after navigation and has no user activation, so requestFullscreen
+    // would be rejected there — fullscreen persists across the client-side nav.
+    try {
+      await document.documentElement.requestFullscreen();
+    } catch {
+      // Denied/unsupported — the exam page shows a "Return to Fullscreen" prompt.
     }
 
     // Stop the preview stream before navigating

@@ -13,6 +13,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { ROUTES } from '@/config/routes';
+import { MESSAGES } from '@/config/messages';
 import type { Result, ResultDetail } from '@/types/result.types';
 
 export function ResultDetailPage() {
@@ -29,7 +30,7 @@ export function ResultDetailPage() {
 
   useEffect(() => {
     if (!result && !id) {
-      showToast('No result data available.', 'error');
+      showToast(MESSAGES.result.noData, 'error');
       navigate(ROUTES.CANDIDATE.RESULTS);
       return;
     }

@@ -28,6 +28,7 @@ import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { ROUTES } from '@/config/routes';
 import { formatDate } from '@/utils/format.utils';
+import { usePersistentState } from '@/hooks/usePersistentState';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
 
 export function EventsPage() {
@@ -37,8 +38,8 @@ export function EventsPage() {
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
   const [appliedJobPrefixes, setAppliedJobPrefixes] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState('');
+  const [searchQuery, setSearchQuery] = usePersistentState('events:searchQuery', '');
+  const [filterType, setFilterType] = usePersistentState('events:filterType', '');
   const [selectedJob, setSelectedJob] = useState<JobPostDTO | null>(null);
 
   useEffect(() => {

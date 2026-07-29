@@ -48,6 +48,10 @@ export interface JobApplicationDTO {
   resumeFileName?: string;
   contentType?: string;
   matchPercent?: number;
+  /** ATS shortlisting outcome, e.g. "Shortlisted" / "Not Shortlisted". */
+  shortlistStatus?: string;
+  /** Whether the ATS scan has run, e.g. "Screening Completed" / "Pending". */
+  atsScanStatus?: string;
   confirmationStatus?: string;
   acknowledgedStatus?: string;
   reconfirmationStatus?: string;
@@ -61,4 +65,9 @@ export interface JobApplicationDTO {
   jobTitle?: string;
   companyName?: string;
   applicationDeadline?: string;
+  /** Optional referral captured at apply time (either may be null). */
+  referralId?: string | null;
+  referralName?: string | null;
+  /** Admin validation of the referral: PENDING | VALIDATED | REJECTED (or null). */
+  referralStatus?: string | null;
 }
