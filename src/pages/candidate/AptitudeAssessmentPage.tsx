@@ -9,6 +9,7 @@ import {
   Loader2,
   EyeOff,
   Camera,
+  Users,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/Toast';
@@ -92,6 +93,7 @@ export function AptitudeAssessmentPage() {
     fullscreenExitCount,
     totalWarnings,
     faceDetected,
+    multipleFaces,
     setupCamera,
     stopDetection,
     begin: beginProctoring,
@@ -307,6 +309,12 @@ export function AptitudeAssessmentPage() {
               <div className="flex items-center gap-1 text-amber-500 animate-pulse">
                 <EyeOff size={16} />
                 <span className="text-sm font-medium">Face not detected</span>
+              </div>
+            )}
+            {multipleFaces && (
+              <div className="flex items-center gap-1 text-red-500 animate-pulse">
+                <Users size={16} />
+                <span className="text-sm font-medium">Multiple faces detected</span>
               </div>
             )}
 

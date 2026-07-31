@@ -61,12 +61,16 @@ export function useExamProctoring({ loading, onAutoSubmit }: UseExamProctoringOp
     },
   });
 
-  const { loadModels, startDetection, stopDetection, warningCount, faceDetected } = useFaceDetection({
+  const { loadModels, startDetection, stopDetection, warningCount, faceDetected, multipleFaces } = useFaceDetection({
     maxWarnings:
       config.eyeDetection.maxBeforeAutoSubmit > 0
         ? config.eyeDetection.maxBeforeAutoSubmit
         : Number.POSITIVE_INFINITY,
     checkIntervalMs: config.eyeDetection.checkIntervalMs,
+    // A second person is a serious violation → flag promptly (2 checks ≈ 8s);
+    // a brief look-away deserves grace → warn slower (4 checks ≈ 16s).
+    multipleFacesConsecutiveFrames: 2,
+    noFaceConsecutiveFrames: 4,
     onMaxWarnings: () => onAutoSubmitRef.current('Too many face/eye warnings.'),
     onNoFace: () => showToast(MESSAGES.proctoring.faceNotDetected, 'warning'),
     onMultipleFaces: (count) => showToast(MESSAGES.proctoring.multipleFaces(count), 'warning'),
@@ -130,6 +134,7 @@ export function useExamProctoring({ loading, onAutoSubmit }: UseExamProctoringOp
     fullscreenExitCount,
     totalWarnings,
     faceDetected,
+    multipleFaces,
     setupCamera,
     stopDetection,
     begin,

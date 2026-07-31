@@ -51,11 +51,12 @@ export const PROCTORING_CONFIG = {
     /** Auto-submit once face/eye warnings reach this count. 0 = warn only. */
     maxBeforeAutoSubmit: parseCount(env.VITE_PROCTORING_MAX_EYE_WARNINGS, 5),
     /**
-     * Milliseconds between face-detection checks. Larger = more grace before a
-     * "face not visible" warning fires (a warning needs ~2 consecutive misses).
-     * Default 8000 (≈16s of no face before the first warning).
+     * Milliseconds between face-detection checks (the detection cadence). Grace
+     * before a warning is derived per category from this: "no face" needs 4
+     * consecutive misses (≈16s of grace for brief look-aways) while "multiple
+     * faces" needs only 2 (≈8s — a second person is flagged promptly).
      */
-    checkIntervalMs: parseCount(env.VITE_PROCTORING_EYE_CHECK_INTERVAL_MS, 8000),
+    checkIntervalMs: parseCount(env.VITE_PROCTORING_EYE_CHECK_INTERVAL_MS, 4000),
   },
 } as const;
 

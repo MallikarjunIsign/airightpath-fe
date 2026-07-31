@@ -6,6 +6,10 @@ interface UseFaceDetectionOptions {
   lookingAwayThreshold?: number;
   lookingDownThreshold?: number;
   lookingAwayConsecutiveFrames?: number;
+  /** Consecutive "no face" detections before warning (grace for brief look-aways). */
+  noFaceConsecutiveFrames?: number;
+  /** Consecutive "multiple faces" detections before warning (kept low = prompt). */
+  multipleFacesConsecutiveFrames?: number;
   onMaxWarnings?: () => void;
   onNoFace?: () => void;
   onMultipleFaces?: (count: number) => void;
@@ -45,6 +49,8 @@ export function useFaceDetection(options?: UseFaceDetectionOptions) {
   const lookingAwayThreshold = options?.lookingAwayThreshold ?? 0.28;
   const lookingDownThreshold = options?.lookingDownThreshold ?? 0.22;
   const lookingAwayConsecutiveFrames = options?.lookingAwayConsecutiveFrames ?? 2;
+  const noFaceConsecutiveFrames = options?.noFaceConsecutiveFrames ?? 2;
+  const multipleFacesConsecutiveFrames = options?.multipleFacesConsecutiveFrames ?? 2;
 
   // Stable refs for callbacks
   const onNoFaceRef = useRef(options?.onNoFace);
@@ -117,7 +123,7 @@ export function useFaceDetection(options?: UseFaceDetectionOptions) {
               multipleFacesCountRef.current = 0;
               multipleFacesActiveRef.current = false;
 
-              if (noFaceCountRef.current >= 2) {
+              if (noFaceCountRef.current >= noFaceConsecutiveFrames) {
                 setFaceDetected(false);
 
                 // Fire callback + add warning once per sustained no-face episode
@@ -138,7 +144,7 @@ export function useFaceDetection(options?: UseFaceDetectionOptions) {
               noFaceCountRef.current = 0;
               noFaceActiveRef.current = false;
 
-              if (multipleFacesCountRef.current >= 2) {
+              if (multipleFacesCountRef.current >= multipleFacesConsecutiveFrames) {
                 setMultipleFaces(true);
 
                 // Fire callback + add warning once per sustained multiple-faces episode
@@ -223,7 +229,7 @@ export function useFaceDetection(options?: UseFaceDetectionOptions) {
         });
       }
     },
-    [checkIntervalMs, lookingAwayThreshold, lookingDownThreshold, lookingAwayConsecutiveFrames, addWarning]
+    [checkIntervalMs, lookingAwayThreshold, lookingDownThreshold, lookingAwayConsecutiveFrames, noFaceConsecutiveFrames, multipleFacesConsecutiveFrames, addWarning]
   );
 
   const stopDetection = useCallback(() => {

@@ -14,6 +14,7 @@ import {
   Camera,
   EyeOff,
   Loader2,
+  Users,
   AlertOctagon,
   TimerOff,
   GripHorizontal,
@@ -155,6 +156,9 @@ export function CodingAssessmentPage() {
   const [codePerQuestion, setCodePerQuestion] = useState<Record<number, string>>({});
   const [langPerQuestion, setLangPerQuestion] = useState<Record<number, string>>({});
   const [questionStatus, setQuestionStatus] = useState<Record<number, QuestionStatus>>({});
+  // Per-(question, language) code, so switching language loads that language's
+  // starter code (or your prior code for it) rather than keeping the old text.
+  const [codeByLang, setCodeByLang] = useState<Record<string, string>>({});
 
   // Refs
   const isSubmittingRef = useRef(false);
@@ -192,6 +196,7 @@ export function CodingAssessmentPage() {
     fullscreenExitCount,
     totalWarnings,
     faceDetected,
+    multipleFaces,
     setupCamera,
     stopDetection,
     begin: beginProctoring,
@@ -417,14 +422,20 @@ export function CodingAssessmentPage() {
 
   // ── Language change ───────────────────────────────────────────────
   const handleLanguageChange = (newLanguage: string) => {
-    setLanguage(newLanguage);
-    if (code.trim() === '' || isSkeletonCode(code)) {
-      setCode(LANGUAGE_SKELETONS[newLanguage] || `// Write your ${newLanguage} code here\n`);
-    }
+    if (newLanguage === language) return;
     const currentQ = questions[currentIndex];
+    // Load the new language's predefined starter code (or your prior code for it)
+    // and refresh the editor. Stash the current code under its language so nothing
+    // is lost if you switch back.
     if (currentQ) {
+      setCodeByLang((prev) => ({ ...prev, [`${currentQ.id}:${language}`]: code }));
       setLangPerQuestion((prev) => ({ ...prev, [currentQ.id]: newLanguage }));
+      const saved = codeByLang[`${currentQ.id}:${newLanguage}`];
+      setCode(saved ?? LANGUAGE_SKELETONS[newLanguage] ?? `// Write your ${newLanguage} code here\n`);
+    } else {
+      setCode(LANGUAGE_SKELETONS[newLanguage] ?? `// Write your ${newLanguage} code here\n`);
     }
+    setLanguage(newLanguage);
     clearEditorMarkers();
   };
 
@@ -703,6 +714,12 @@ export function CodingAssessmentPage() {
               <div className="flex items-center gap-1 text-amber-500 animate-pulse">
                 <EyeOff size={14} />
                 <span className="text-xs font-medium">No face</span>
+              </div>
+            )}
+            {multipleFaces && proctoring.eyeDetection.enabled && (
+              <div className="flex items-center gap-1 text-red-500 animate-pulse">
+                <Users size={14} />
+                <span className="text-xs font-medium">Multiple faces</span>
               </div>
             )}
 
