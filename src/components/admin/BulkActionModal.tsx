@@ -1,7 +1,7 @@
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
+import { DateTimeField } from '@/components/ui/DateTimeField';
 
 interface BulkActionModalProps {
   title: string;
@@ -55,11 +55,10 @@ export function BulkActionModal({
         </p>
 
         {hasDateTime && (
-          <Input
-            label={dateTimeRequired ? 'Date & Time *' : 'Date & Time'}
-            type="datetime-local"
+          <DateTimeField
+            label="Date & Time"
             value={dateTime}
-            onChange={(e) => onDateTimeChange(e.target.value)}
+            onChange={onDateTimeChange}
             required={dateTimeRequired}
           />
         )}

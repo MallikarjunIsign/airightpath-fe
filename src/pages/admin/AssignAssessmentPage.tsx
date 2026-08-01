@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Loader2, ClipboardList, Send, Sparkles, Upload, Eye, FileText, X, FileCog } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
+import { DateTimeField } from '@/components/ui/DateTimeField';
 import { Select } from '@/components/ui/Select';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
@@ -585,21 +585,19 @@ export function AssignAssessmentPage() {
 
             {/* Date/Time Pickers */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input
+              <DateTimeField
                 label="Start Time"
-                type="datetime-local"
                 min={minDateTime}
                 helperText="Cannot be in the past"
                 value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
+                onChange={setStartTime}
               />
-              <Input
+              <DateTimeField
                 label="Deadline"
-                type="datetime-local"
                 min={startTime || minDateTime}
                 helperText="Must be after the start time"
                 value={deadline}
-                onChange={(e) => setDeadline(e.target.value)}
+                onChange={setDeadline}
               />
             </div>
 

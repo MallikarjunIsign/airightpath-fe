@@ -77,6 +77,32 @@
       scroll-behavior: auto !important;
     }
   }
+
+  /* Native date/time inputs — keep responsive so they never overflow narrow
+     screens (their edit fields have an intrinsic min-width that won't shrink). */
+  input[type="date"],
+  input[type="time"],
+  input[type="datetime-local"] {
+    min-width: 0;
+    max-width: 100%;
+  }
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="time"]::-webkit-calendar-picker-indicator,
+  input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+    margin-inline-start: auto;
+    cursor: pointer;
+  }
+
+  /* Prevent iOS Safari from auto-zooming when a date/time field is focused —
+     it zooms whenever the control's font-size is below 16px, which makes the
+     native picker overlap and mis-render on mobile. */
+  @media (max-width: 640px) {
+    input[type="date"],
+    input[type="time"],
+    input[type="datetime-local"] {
+      font-size: 16px;
+    }
+  }
 }
 
 /* ============================================================================

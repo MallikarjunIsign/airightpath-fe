@@ -3,6 +3,7 @@ import { Loader2, Video, Send, Mail, Calendar } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { DateTimeField } from '@/components/ui/DateTimeField';
 import { Select } from '@/components/ui/Select';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
@@ -222,11 +223,10 @@ export function InterviewSchedulerPage() {
             )}
 
             {/* Deadline */}
-            <Input
+            <DateTimeField
               label="Interview Deadline"
-              type="datetime-local"
               value={deadlineTime}
-              onChange={(e) => setDeadlineTime(e.target.value)}
+              onChange={setDeadlineTime}
             />
 
             {/* Question Date Range */}
