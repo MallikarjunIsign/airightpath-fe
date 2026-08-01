@@ -1,14 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import {
-  Upload,
-  FileText,
-  Eye,
-  RefreshCw,
-  Loader2,
-  X,
-  Download,
-  ExternalLink,
-} from 'lucide-react';
+import { Upload, FileText, Eye, Loader2, X, Download, ExternalLink } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/Toast';
 import { resumeService } from '@/services/resume.service';
@@ -29,8 +20,7 @@ export function ResumePage() {
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
   const [selectedJob, setSelectedJob] = useState('');
   const [file, setFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [updating, setUpdating] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [viewing, setViewing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [dragActive, setDragActive] = useState(false);
@@ -96,40 +86,22 @@ export function ResumePage() {
     setDragActive(false);
   };
 
-  const handleUpload = async () => {
-    if (!file || !selectedJob) {
-      showToast(MESSAGES.resume.selectJobAndFile, 'warning');
-      return;
-    }
-    setUploading(true);
-    try {
-      await resumeService.upload(selectedJob, file, { _skipErrorToast: true });
-      showToast(MESSAGES.resume.uploaded, 'success');
-      setFile(null);
-    } catch (err) {
-      // 404 = the candidate hasn't applied to the selected job (no application to attach to).
-      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
-      showToast(
-        status === 404 ? MESSAGES.resume.noApplicationForJob : MESSAGES.resume.actionFailed,
-        'error',
-      );
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handleUpdate = async () => {
+  // A candidate has a single resume, stored per-user (by email). Saving always
+  // uses the email-based endpoint, so it works the same whether it's the first
+  // upload or a replacement — no per-job application lookup, which is what made
+  // the old Upload button 404 with "you haven't applied to this job yet".
+  const handleSave = async () => {
     if (!file) {
-      showToast(MESSAGES.resume.selectFileToUpdate, 'warning');
+      showToast(MESSAGES.resume.selectFile, 'warning');
       return;
     }
-    setUpdating(true);
+    setSaving(true);
     try {
       const formData = new FormData();
       formData.append('file', file);
       if (user?.email) formData.append('email', user.email);
       await resumeService.update(formData, { _skipErrorToast: true });
-      showToast(MESSAGES.resume.updated, 'success');
+      showToast(MESSAGES.resume.saved, 'success');
       setFile(null);
     } catch (err) {
       const status = axios.isAxiosError(err) ? err.response?.status : undefined;
@@ -138,7 +110,7 @@ export function ResumePage() {
         'error',
       );
     } finally {
-      setUpdating(false);
+      setSaving(false);
     }
   };
 
@@ -269,21 +241,12 @@ export function ResumePage() {
           {/* Action Buttons */}
           <div className="flex flex-wrap gap-3 mt-6">
             <Button
-              onClick={handleUpload}
-              isLoading={uploading}
-              disabled={!file || !selectedJob}
+              onClick={handleSave}
+              isLoading={saving}
+              disabled={!file}
               leftIcon={<Upload size={18} />}
             >
-              Upload Resume
-            </Button>
-            <Button
-              variant="outline"
-              onClick={handleUpdate}
-              isLoading={updating}
-              disabled={!file}
-              leftIcon={<RefreshCw size={18} />}
-            >
-              Update Resume
+              Save Resume
             </Button>
             <Button
               variant="secondary"
