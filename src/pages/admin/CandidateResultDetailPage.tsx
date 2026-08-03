@@ -22,8 +22,10 @@ import { Badge } from '@/components/ui/Badge';
 import { ROUTES } from '@/config/routes';
 import { assessmentService } from '@/services/assessment.service';
 import { compilerService } from '@/services/compiler.service';
+import { isSkeletonCode } from '@/utils/code.utils';
 import type { Result } from '@/types/result.types';
 import type { CodeSubmissionResponse } from '@/types/compiler.types';
+import type { RawCodingQuestion } from '@/types/assessment.types';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -37,6 +39,15 @@ interface AptitudeQuestion {
   marks?: number;
   Difficulty?: string;
   category?: string;
+}
+
+/** One entry of the CODING result's `resultsJson` — every question on the paper. */
+interface CodingAnswer {
+  questionId?: number | string;
+  title?: string;
+  code?: string;
+  language?: string;
+  status?: string;
 }
 
 type DetailTab = 'overview' | 'aptitude' | 'coding';
@@ -64,6 +75,7 @@ export function CandidateResultDetailPage() {
   const [loading, setLoading] = useState(true);
   const [results, setResults] = useState<Result[]>([]);
   const [codeSubmissions, setCodeSubmissions] = useState<CodeSubmissionResponse[]>([]);
+  const [codingQuestions, setCodingQuestions] = useState<RawCodingQuestion[]>([]);
   const [activeTab, setActiveTab] = useState<DetailTab>('overview');
 
   useEffect(() => {
@@ -80,10 +92,33 @@ export function CandidateResultDetailPage() {
       setResults(resResults.data ?? []);
       const allCode = resCode.data ?? [];
       setCodeSubmissions(allCode.filter((c) => c.userEmail === email));
+      fetchCodingQuestions();
     } catch {
       // handled by interceptor
     } finally {
       setLoading(false);
+    }
+  }
+
+  /**
+   * The question paper lives on the candidate's CODING assessment, not on the
+   * submission, so pull it separately to show what each answer was solving.
+   * Best-effort: the code view still renders without it.
+   */
+  async function fetchCodingQuestions() {
+    try {
+      const res = await assessmentService.getCandidateAssessments(email!);
+      const coding = (res.data ?? []).find(
+        (a) => a.assessmentType === 'CODING' && a.jobPrefix === jobPrefix,
+      );
+      if (!coding?.id) return;
+      const paper = await assessmentService.fetchQuestions(coding.id);
+      const raw = paper.data?.questions;
+      if (!raw) return;
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (Array.isArray(parsed)) setCodingQuestions(parsed as RawCodingQuestion[]);
+    } catch {
+      // Question paper is optional context — ignore failures.
     }
   }
 
@@ -99,18 +134,36 @@ export function CandidateResultDetailPage() {
     }
   }, [aptitudeResult]);
 
+  // The CODING result carries one entry per question on the paper — including
+  // the ones never opened — so it, not the compiler submissions, defines the list.
+  const codingAnswers: CodingAnswer[] = useMemo(() => {
+    if (!codingResult?.resultsJson) return [];
+    try {
+      const parsed = JSON.parse(codingResult.resultsJson);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }, [codingResult]);
+
+  // Counted off the question paper (see buildCodingRows) so unattempted
+  // questions are part of the totals, not just the ones that were submitted.
   const codingStats = useMemo(() => {
-    const totalQ = codeSubmissions.length;
-    const totalTests = codeSubmissions.reduce((s, sub) => s + (sub.testResults?.length ?? 0), 0);
-    const passedTests = codeSubmissions.reduce(
-      (s, sub) => s + (sub.testResults?.filter((t) => t.passed).length ?? 0),
+    const rows = buildCodingRows(codingQuestions, codeSubmissions, codingAnswers);
+    const totalQ = rows.length;
+    const totalTests = rows.reduce(
+      (s, r) => s + (r.sub?.testResults?.length ?? r.question?.testCases?.length ?? 0),
       0,
     );
-    const qPassed = codeSubmissions.filter(
-      (s) => s.testResults?.length > 0 && s.testResults.every((t) => t.passed),
+    const passedTests = rows.reduce(
+      (s, r) => s + (r.sub?.testResults?.filter((t) => t.passed).length ?? 0),
+      0,
+    );
+    const qPassed = rows.filter(
+      (r) => (r.sub?.testResults?.length ?? 0) > 0 && r.sub!.testResults.every((t) => t.passed),
     ).length;
     return { totalQ, totalTests, passedTests, qPassed };
-  }, [codeSubmissions]);
+  }, [codeSubmissions, codingQuestions, codingAnswers]);
 
   const overallStatus = (() => {
     const a = aptitudeResult?.status;
@@ -129,7 +182,8 @@ export function CandidateResultDetailPage() {
   })();
 
   const hasAptitude = !!aptitudeResult;
-  const hasCoding = !!codingResult || codeSubmissions.length > 0;
+  const hasCoding =
+    !!codingResult || codeSubmissions.length > 0 || codingQuestions.length > 0;
 
   if (loading) {
     return (
@@ -302,7 +356,12 @@ export function CandidateResultDetailPage() {
         <AptitudeTab result={aptitudeResult} questions={aptitudeQuestions} />
       )}
       {activeTab === 'coding' && (
-        <CodingTab result={codingResult} submissions={codeSubmissions} />
+        <CodingTab
+          result={codingResult}
+          submissions={codeSubmissions}
+          questions={codingQuestions}
+          answers={codingAnswers}
+        />
       )}
     </div>
   );
@@ -841,16 +900,100 @@ function AptitudeTab({ result, questions }: { result: Result; questions: Aptitud
 
 // ── Coding Tab ─────────────────────────────────────────────────────────
 
+/** One row per question; `sub`/`answer` are absent when that source has nothing. */
+interface CodingRow {
+  key: string;
+  label: string;
+  question?: RawCodingQuestion;
+  answer?: CodingAnswer;
+  sub?: CodeSubmissionResponse;
+}
+
+const idOf = (v: unknown) => (v == null || v === '' ? null : String(v));
+
+/**
+ * The code as submitted wins over the last compiler run — the run may predate
+ * the candidate's final edits.
+ */
+const codeOf = (r: CodingRow) => r.answer?.code?.trim() || r.sub?.script?.trim() || '';
+
+/**
+ * Merges the three sources that describe a coding attempt:
+ *  - the CODING result's `resultsJson` — every question, its title and the code
+ *    as it stood at submit time (the only source that lists untouched questions),
+ *  - the question paper — the full problem statement and sample I/O,
+ *  - the compiler submissions — the test-case results.
+ * Whichever of the first two is available defines the list and its order, so a
+ * question the candidate never opened still shows up as "Not attempted".
+ */
+function buildCodingRows(
+  questions: RawCodingQuestion[],
+  submissions: CodeSubmissionResponse[],
+  answers: CodingAnswer[] = [],
+): CodingRow[] {
+  const rows: CodingRow[] = [];
+  const matched = new Set<CodeSubmissionResponse>();
+
+  type Seed = { id: string | null; answer?: CodingAnswer; question?: RawCodingQuestion };
+  let seeds: Seed[];
+  if (answers.length > 0) {
+    seeds = answers.map((a) => ({ id: idOf(a.questionId), answer: a }));
+  } else if (questions.length > 0) {
+    seeds = questions.map((q) => ({ id: idOf(q.id), question: q }));
+  } else {
+    seeds = submissions.map((s) => ({ id: idOf(s.questionId) }));
+  }
+
+  seeds.forEach((seed, idx) => {
+    const question =
+      seed.question ??
+      questions.find((q) => idOf(q.id) === seed.id) ??
+      (seed.id === null ? questions[idx] : undefined);
+
+    let sub = submissions.find(
+      (s) => !matched.has(s) && idOf(s.questionId) !== null && idOf(s.questionId) === seed.id,
+    );
+    // Older submissions carry no questionId — fall back to paper order.
+    if (!sub) {
+      const byOrder = submissions[idx];
+      if (byOrder && !matched.has(byOrder) && byOrder.questionId == null) sub = byOrder;
+    }
+    if (sub) matched.add(sub);
+
+    rows.push({
+      key: `row-${seed.id ?? idx}`,
+      label: seed.id ?? String(idx + 1),
+      question,
+      answer: seed.answer,
+      sub,
+    });
+  });
+
+  // Anything we could not tie back to a question still gets its own row.
+  submissions.forEach((s, idx) => {
+    if (matched.has(s)) return;
+    rows.push({ key: `sub-${s.questionId ?? idx}`, label: String(s.questionId ?? idx + 1), sub: s });
+  });
+
+  return rows;
+}
+
 function CodingTab({
   result,
   submissions,
+  questions,
+  answers,
 }: {
   result?: Result;
   submissions: CodeSubmissionResponse[];
+  questions: RawCodingQuestion[];
+  answers: CodingAnswer[];
 }) {
   const [expandedQ, setExpandedQ] = useState<string | null>(null);
 
-  if (submissions.length === 0) {
+  const rows = buildCodingRows(questions, submissions, answers);
+
+  if (rows.length === 0) {
     return (
       <Card>
         <CardContent>
@@ -862,18 +1005,23 @@ function CodingTab({
     );
   }
 
-  const totalTests = submissions.reduce((s, sub) => s + (sub.testResults?.length ?? 0), 0);
-  const passedTests = submissions.reduce(
-    (s, sub) => s + (sub.testResults?.filter((t) => t.passed).length ?? 0),
+  // Test-case totals fall back to the paper so questions the candidate never
+  // opened still count towards the denominator.
+  const totalTests = rows.reduce(
+    (s, r) => s + (r.sub?.testResults?.length ?? r.question?.testCases?.length ?? 0),
+    0,
+  );
+  const passedTests = rows.reduce(
+    (s, r) => s + (r.sub?.testResults?.filter((t) => t.passed).length ?? 0),
     0,
   );
   const passRate = totalTests > 0 ? Math.round((passedTests / totalTests) * 100) : 0;
-  const attempted = submissions.filter((sub) => (sub.script ?? '').trim() !== '').length;
-  const notAttempted = submissions.length - attempted;
-  const solved = submissions.filter(
-    (sub) => (sub.testResults?.length ?? 0) > 0 && sub.testResults.every((t) => t.passed),
+  const attempted = rows.filter((r) => !isSkeletonCode(codeOf(r))).length;
+  const notAttempted = rows.length - attempted;
+  const solved = rows.filter(
+    (r) => (r.sub?.testResults?.length ?? 0) > 0 && r.sub!.testResults.every((t) => t.passed),
   ).length;
-  const unsolved = submissions.length - solved;
+  const unsolved = rows.length - solved;
 
   return (
     <div className="space-y-5">
@@ -895,7 +1043,7 @@ function CodingTab({
             )}
             <div className="flex flex-wrap gap-5 text-sm">
               <span className="text-[var(--textSecondary)]">
-                Questions: <strong className="text-[var(--text)]">{submissions.length}</strong>
+                Questions: <strong className="text-[var(--text)]">{rows.length}</strong>
               </span>
               <span style={{ color: 'var(--success)' }}>
                 Solved: <strong>{solved}</strong>
@@ -925,62 +1073,70 @@ function CodingTab({
 
       {/* Per-question cards */}
       <div className="space-y-3">
-        {submissions.map((sub, idx) => {
-          const qId = sub.questionId ?? `q-${idx}`;
-          const isExpanded = expandedQ === qId;
-          const tests = sub.testResults ?? [];
+        {rows.map((row) => {
+          const { key, label, question, answer, sub } = row;
+          const isExpanded = expandedQ === key;
+          const tests = sub?.testResults ?? [];
           const allPass = tests.length > 0 && tests.every((t) => t.passed);
           const passCount = tests.filter((t) => t.passed).length;
+          const title = answer?.title || question?.title || `Question ${label}`;
+          const prompt = question?.description || question?.question || '';
+          const code = codeOf(row);
+          const language = answer?.language || sub?.language;
+          // "Attempted" means the starter template was actually changed.
+          const hasCode = !isSkeletonCode(code);
+          const accent = allPass ? 'var(--success)' : hasCode ? 'var(--error)' : 'var(--warning)';
+          const accentBg = allPass
+            ? 'var(--successMuted, rgba(16,185,129,0.12))'
+            : hasCode
+              ? 'var(--errorMuted, rgba(239,68,68,0.12))'
+              : 'var(--warningMuted, rgba(245,158,11,0.12))';
 
           return (
-            <Card key={qId}>
+            <Card key={key}>
               {/* Question Header — clickable */}
               <button
-                onClick={() => setExpandedQ(isExpanded ? null : qId)}
+                onClick={() => setExpandedQ(isExpanded ? null : key)}
                 className="w-full text-left transition-colors"
               >
                 <CardContent>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
                       <div
-                        className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold"
-                        style={{
-                          background: allPass
-                            ? 'var(--successMuted, rgba(16,185,129,0.12))'
-                            : 'var(--errorMuted, rgba(239,68,68,0.12))',
-                          color: allPass ? 'var(--success)' : 'var(--error)',
-                        }}
+                        className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold flex-shrink-0"
+                        style={{ background: accentBg, color: accent }}
                       >
-                        Q{sub.questionId ?? idx + 1}
+                        Q{label}
                       </div>
-                      <div>
-                        <p className="text-sm font-semibold text-[var(--text)]">
-                          Question {sub.questionId ?? idx + 1}
-                        </p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Badge variant="primary" size="sm">{sub.language}</Badge>
-                          <Badge variant={allPass ? 'success' : 'error'} size="sm">
-                            {passCount}/{tests.length} passed
-                          </Badge>
-                          {!(sub.script ?? '').trim() && (
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-[var(--text)]">{title}</p>
+                        {prompt && (
+                          <p className="text-xs text-[var(--textSecondary)] mt-0.5 line-clamp-1">
+                            {prompt}
+                          </p>
+                        )}
+                        <div className="flex flex-wrap items-center gap-2 mt-1">
+                          {language && <Badge variant="primary" size="sm">{language}</Badge>}
+                          {tests.length > 0 && (
+                            <Badge variant={allPass ? 'success' : 'error'} size="sm">
+                              {passCount}/{tests.length} passed
+                            </Badge>
+                          )}
+                          {!hasCode && (
                             <Badge variant="warning" size="sm">Not attempted</Badge>
                           )}
                         </div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 flex-shrink-0">
                       <div
                         className="w-8 h-8 rounded-full flex items-center justify-center"
-                        style={{
-                          background: allPass
-                            ? 'var(--successMuted, rgba(16,185,129,0.12))'
-                            : 'var(--errorMuted, rgba(239,68,68,0.12))',
-                        }}
+                        style={{ background: accentBg }}
                       >
-                        {allPass ? (
-                          <CheckCircle size={16} style={{ color: 'var(--success)' }} />
-                        ) : (
-                          <XCircle size={16} style={{ color: 'var(--error)' }} />
+                        {allPass && <CheckCircle size={16} style={{ color: 'var(--success)' }} />}
+                        {!allPass && hasCode && <XCircle size={16} style={{ color: 'var(--error)' }} />}
+                        {!allPass && !hasCode && (
+                          <AlertTriangle size={16} style={{ color: 'var(--warning)' }} />
                         )}
                       </div>
                       {isExpanded ? (
@@ -996,14 +1152,75 @@ function CodingTab({
               {/* Expanded Content */}
               {isExpanded && (
                 <div className="px-6 pb-6 space-y-5 border-t border-[var(--borderMuted)]">
+                  {/* The problem the candidate was asked to solve */}
+                  <div className="mt-5">
+                    <div className="flex flex-wrap items-center gap-2 mb-2.5">
+                      <p className="text-[10px] font-bold text-[var(--textTertiary)] uppercase tracking-widest">
+                        Question {label}
+                      </p>
+                      {question?.Difficulty && (
+                        <Badge variant="primary" size="sm">{question.Difficulty}</Badge>
+                      )}
+                      {question?.marks !== undefined && (
+                        <span className="text-xs text-[var(--textTertiary)]">
+                          Marks: <strong className="text-[var(--text)]">{question.marks}</strong>
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      className="rounded-xl border border-[var(--borderMuted)] px-5 py-4"
+                      style={{ background: 'var(--bgSubtle)' }}
+                    >
+                      <p className="text-sm font-semibold text-[var(--text)]">{title}</p>
+                      {prompt ? (
+                        <p className="text-sm text-[var(--text)] leading-relaxed whitespace-pre-wrap mt-2">
+                          {prompt}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-[var(--textTertiary)] mt-2 italic">
+                          Full problem statement is not stored with this result.
+                        </p>
+                      )}
+                      {(question?.sampleInput || question?.sampleOutput) && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+                          {question.sampleInput && (
+                            <IOBlock
+                              label="Sample Input"
+                              value={question.sampleInput}
+                              className="rounded-lg border border-[var(--borderMuted)]"
+                            />
+                          )}
+                          {question.sampleOutput && (
+                            <IOBlock
+                              label="Sample Output"
+                              value={question.sampleOutput}
+                              className="rounded-lg border border-[var(--borderMuted)]"
+                            />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Nothing came back from the candidate for this question. */}
+                  {!hasCode && (
+                    <div className="rounded-xl border border-dashed border-[var(--borderMuted)] px-5 py-6 text-center">
+                      <p className="text-sm text-[var(--textSecondary)]">
+                        {code
+                          ? 'The candidate left the starter template unchanged — this question was not attempted.'
+                          : 'No code recorded for this question — the candidate never attempted it.'}
+                      </p>
+                    </div>
+                  )}
+
                   {/* Code Viewer */}
-                  {sub.script && (
-                    <div className="mt-5">
+                  {hasCode && (
+                    <div>
                       <div className="flex items-center justify-between mb-2.5">
                         <p className="text-[10px] font-bold text-[var(--textTertiary)] uppercase tracking-widest">
                           Submitted Code
                         </p>
-                        <Badge variant="primary" size="sm">{sub.language}</Badge>
+                        {language && <Badge variant="primary" size="sm">{language}</Badge>}
                       </div>
                       <div className="rounded-xl overflow-hidden border border-[var(--borderMuted)]">
                         <div
@@ -1011,7 +1228,7 @@ function CodingTab({
                           style={{ background: 'var(--bgSubtle)', color: 'var(--textSecondary)' }}
                         >
                           <Zap size={12} />
-                          {sub.language}
+                          {language ?? 'code'}
                         </div>
                         <pre
                           className="text-[13px] leading-6 p-5 overflow-x-auto max-h-[400px] overflow-y-auto font-mono"
@@ -1021,7 +1238,7 @@ function CodingTab({
                           }}
                         >
                           <code>
-                            {sub.script.split('\n').map((line, i) => (
+                            {code.split('\n').map((line, i) => (
                               <div key={i} className="flex hover:bg-[var(--bgSubtle)] -mx-5 px-5 transition-colors">
                                 <span
                                   className="select-none w-10 text-right mr-5 flex-shrink-0 font-mono"
@@ -1041,9 +1258,20 @@ function CodingTab({
                   {/* Test Case Results */}
                   {tests.length > 0 && (
                     <div>
-                      <p className="text-[10px] font-bold text-[var(--textTertiary)] uppercase tracking-widest mb-3">
-                        Test Case Results
-                      </p>
+                      <div className="flex flex-wrap items-center gap-2 mb-3">
+                        <p className="text-[10px] font-bold text-[var(--textTertiary)] uppercase tracking-widest">
+                          Test Case Results
+                        </p>
+                        <span className="text-xs text-[var(--textSecondary)]">
+                          <strong style={{ color: 'var(--success)' }}>{passCount} passed</strong>
+                          {' · '}
+                          <strong style={{ color: 'var(--error)' }}>
+                            {tests.length - passCount} failed
+                          </strong>
+                          {' · '}
+                          {tests.length} total
+                        </span>
+                      </div>
                       <div className="space-y-3">
                         {tests.map((tc, tIdx) => (
                           <div
@@ -1115,6 +1343,39 @@ function CodingTab({
                       </div>
                     </div>
                   )}
+
+                  {/* Never ran — show what the answer would have been graded on. */}
+                  {tests.length === 0 && (question?.testCases?.length ?? 0) > 0 && (
+                    <div>
+                      <p className="text-[10px] font-bold text-[var(--textTertiary)] uppercase tracking-widest mb-3">
+                        Expected Test Cases ({question!.testCases!.length}) — none executed
+                      </p>
+                      <div className="space-y-3">
+                        {question!.testCases!.map((tc, tIdx) => (
+                          <div
+                            key={`${tIdx}-${tc.input}`}
+                            className="rounded-xl border border-[var(--borderMuted)] overflow-hidden"
+                          >
+                            <div
+                              className="flex items-center justify-between px-4 py-3"
+                              style={{ background: 'var(--bgSubtle)' }}
+                            >
+                              <span className="text-sm font-semibold text-[var(--text)]">
+                                Test Case {tIdx + 1}
+                              </span>
+                              <Badge variant={tc.isHidden ? 'secondary' : 'warning'} size="sm">
+                                {tc.isHidden ? 'HIDDEN' : 'NOT RUN'}
+                              </Badge>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-[var(--borderMuted)]">
+                              <IOBlock label="Input" value={tc.input} />
+                              <IOBlock label="Expected Output" value={tc.expectedOutput} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </Card>
@@ -1131,13 +1392,15 @@ function IOBlock({
   label,
   value,
   highlight,
+  className = '',
 }: {
   label: string;
   value: string;
   highlight?: boolean;
+  className?: string;
 }) {
   return (
-    <div className="px-4 py-3" style={{ background: 'var(--bgSubtle)' }}>
+    <div className={`px-4 py-3 ${className}`} style={{ background: 'var(--bgSubtle)' }}>
       <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--textTertiary)' }}>
         {label}
       </p>
