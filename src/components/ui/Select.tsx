@@ -11,20 +11,20 @@ interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(
   ({ label, error, helperText, options, required, className = '', ...props }, ref) => {
     return (
-      <div className="w-full">
+      <div className="w-full min-w-0">
         {label && (
           <label className="block text-sm font-medium text-[var(--text)] mb-2">
             {label}
             {required && <span className="text-[var(--error)] ml-0.5">*</span>}
           </label>
         )}
-        <div className="relative group">
+        <div className="relative group min-w-0">
           <select
             ref={ref}
             aria-required={required}
             aria-invalid={!!error}
             className={`
-              w-full px-4 py-2.5 h-11 rounded-xl appearance-none
+              w-full max-w-full min-w-0 truncate px-4 py-2.5 h-11 rounded-xl appearance-none
               bg-[var(--inputBg)]
               border border-[var(--inputBorder)]
               text-[var(--text)]

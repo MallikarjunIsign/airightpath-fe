@@ -31,6 +31,13 @@ import { formatDate } from '@/utils/format.utils';
 import { usePersistentState } from '@/hooks/usePersistentState';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
 
+// Normalize a job type to a consistently formatted, title-cased label so that
+// values differing only in casing/whitespace ("Full-time" -> "Full-Time")
+// display identically.
+function formatJobType(value: string): string {
+  return value.trim().toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export function EventsPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -64,9 +71,19 @@ export function EventsPage() {
     fetchData();
   }, [user?.email]);
 
+  // Job types come from free-form data, so the same type can arrive with
+  // inconsistent casing/whitespace (e.g. "Full-Time" vs "Full-time"). Dedupe
+  // case-insensitively and present a single, consistently formatted label. The
+  // option `value` is the lowercased key so the filter can match any casing.
   const jobTypes = useMemo(() => {
-    const types = new Set(jobs.map((j) => j.jobType));
-    return Array.from(types);
+    const seen = new Map<string, string>(); // key -> display label
+    for (const j of jobs) {
+      const raw = j.jobType?.trim();
+      if (!raw) continue;
+      const key = raw.toLowerCase();
+      if (!seen.has(key)) seen.set(key, formatJobType(raw));
+    }
+    return Array.from(seen, ([value, label]) => ({ value, label }));
   }, [jobs]);
 
   const filteredJobs = useMemo(() => {
@@ -78,7 +95,8 @@ export function EventsPage() {
         (job.keySkills ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
         job.location.toLowerCase().includes(searchQuery.toLowerCase());
 
-      const matchesType = !filterType || job.jobType === filterType;
+      const matchesType =
+        !filterType || job.jobType?.trim().toLowerCase() === filterType.toLowerCase();
 
       return matchesSearch && matchesType;
     });
@@ -130,9 +148,9 @@ export function EventsPage() {
             onChange={(e) => setFilterType(e.target.value)}
           >
             <option value="">All Types</option>
-            {jobTypes.map((type) => (
-              <option key={type} value={type}>
-                {type}
+            {jobTypes.map(({ value, label }) => (
+              <option key={value} value={value}>
+                {label}
               </option>
             ))}
           </select>
