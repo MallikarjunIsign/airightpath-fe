@@ -25,6 +25,7 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/ui/Modal';
 import { ROUTES } from '@/config/routes';
 import { formatDate } from '@/utils/format.utils';
@@ -142,18 +143,11 @@ export function EventsPage() {
           />
         </div>
         <div className="sm:w-48">
-          <select
-            className="w-full px-4 py-2 rounded-lg appearance-none bg-[var(--inputBg)] border border-[var(--inputBorder)] text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--inputFocus)] focus:border-transparent transition-all duration-200"
+          <Select
+            options={[{ value: '', label: 'All Types' }, ...jobTypes]}
             value={filterType}
             onChange={(e) => setFilterType(e.target.value)}
-          >
-            <option value="">All Types</option>
-            {jobTypes.map(({ value, label }) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
+          />
         </div>
       </div>
 

@@ -24,6 +24,7 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/ui/Modal';
 import { ShareJobLink } from '@/components/admin/ShareJobLink';
 import { ROUTES } from '@/config/routes';
@@ -125,18 +126,14 @@ export function AdminJobsPage() {
           />
         </div>
         <div className="sm:w-48">
-          <select
-            className="w-full px-4 py-2 h-11 rounded-lg appearance-none bg-[var(--inputBg)] border border-[var(--inputBorder)] text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--inputFocus)] focus:border-transparent transition-all duration-200"
+          <Select
+            options={[
+              { value: '', label: 'All Types' },
+              ...jobTypes.map((type) => ({ value: type, label: type })),
+            ]}
             value={filterType}
             onChange={(e) => setFilterType(e.target.value)}
-          >
-            <option value="">All Types</option>
-            {jobTypes.map((type) => (
-              <option key={type} value={type}>
-                {type}
-              </option>
-            ))}
-          </select>
+          />
         </div>
       </div>
 
