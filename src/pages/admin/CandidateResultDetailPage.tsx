@@ -868,6 +868,12 @@ function CodingTab({
     0,
   );
   const passRate = totalTests > 0 ? Math.round((passedTests / totalTests) * 100) : 0;
+  const attempted = submissions.filter((sub) => (sub.script ?? '').trim() !== '').length;
+  const notAttempted = submissions.length - attempted;
+  const solved = submissions.filter(
+    (sub) => (sub.testResults?.length ?? 0) > 0 && sub.testResults.every((t) => t.passed),
+  ).length;
+  const unsolved = submissions.length - solved;
 
   return (
     <div className="space-y-5">
@@ -890,6 +896,18 @@ function CodingTab({
             <div className="flex flex-wrap gap-5 text-sm">
               <span className="text-[var(--textSecondary)]">
                 Questions: <strong className="text-[var(--text)]">{submissions.length}</strong>
+              </span>
+              <span style={{ color: 'var(--success)' }}>
+                Solved: <strong>{solved}</strong>
+              </span>
+              <span style={{ color: 'var(--error)' }}>
+                Unsolved: <strong>{unsolved}</strong>
+              </span>
+              <span className="text-[var(--textSecondary)]">
+                Attempted: <strong className="text-[var(--text)]">{attempted}</strong>
+              </span>
+              <span style={{ color: 'var(--warning, #f59e0b)' }}>
+                Not Attempted: <strong>{notAttempted}</strong>
               </span>
               <span style={{ color: 'var(--success)' }}>
                 Test Cases: <strong>{passedTests}/{totalTests}</strong>
@@ -944,6 +962,9 @@ function CodingTab({
                           <Badge variant={allPass ? 'success' : 'error'} size="sm">
                             {passCount}/{tests.length} passed
                           </Badge>
+                          {!(sub.script ?? '').trim() && (
+                            <Badge variant="warning" size="sm">Not attempted</Badge>
+                          )}
                         </div>
                       </div>
                     </div>
