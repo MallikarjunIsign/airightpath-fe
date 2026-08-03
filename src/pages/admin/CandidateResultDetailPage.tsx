@@ -689,6 +689,8 @@ function SkillBar({ label, percentage, detail }: { label: string; percentage: nu
 function AptitudeTab({ result, questions }: { result: Result; questions: AptitudeQuestion[] }) {
   const correct = questions.filter((q) => q.isCorrect).length;
   const incorrect = questions.length - correct;
+  const answered = questions.filter((q) => (q.selectedAnswer ?? '').toString().trim() !== '').length;
+  const unanswered = questions.length - answered;
 
   if (questions.length === 0) {
     return (
@@ -725,6 +727,12 @@ function AptitudeTab({ result, questions }: { result: Result; questions: Aptitud
               </span>
               <span style={{ color: 'var(--error)' }}>
                 Incorrect: <strong>{incorrect}</strong>
+              </span>
+              <span className="text-[var(--textSecondary)]">
+                Answered: <strong className="text-[var(--text)]">{answered}</strong>
+              </span>
+              <span style={{ color: 'var(--warning, #f59e0b)' }}>
+                Not Answered: <strong>{unanswered}</strong>
               </span>
               <span className="text-[var(--textSecondary)]">
                 Accuracy:{' '}
@@ -774,7 +782,7 @@ function AptitudeTab({ result, questions }: { result: Result; questions: Aptitud
                           color: q.isCorrect ? 'var(--success)' : 'var(--error)',
                         }}
                       >
-                        {q.selectedAnswer ?? '--'}
+                        {(q.selectedAnswer ?? '').toString().trim() || 'Not answered'}
                       </span>
                     </div>
 
