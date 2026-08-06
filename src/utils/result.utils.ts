@@ -3,9 +3,9 @@
  * merging and the summary totals the admin/candidate result pages both quote.
  * Kept free of JSX so the numbers stay testable and identical everywhere.
  */
-import type { RawCodingQuestion } from '@/types/assessment.types';
+import type { RawCodingQuestion, RawQuestion } from '@/types/assessment.types';
 import type { CodeSubmissionResponse } from '@/types/compiler.types';
-import type { AptitudeAnswer, CodingAnswer } from '@/types/result.types';
+import type { AptitudeAnswer, CodingAnswer, Result } from '@/types/result.types';
 import { isSkeletonCode } from './code.utils';
 
 // ── Shared display helpers ─────────────────────────────────────────────
@@ -348,6 +348,91 @@ export function summarizeCoding(rows: CodingRow[]): CodingSummary {
     notAttempted: rows.length - attempted,
     passRate: totalTests ? Math.round((passedTests / totalTests) * 100) : 0,
   };
+}
+
+// ── Scoring ────────────────────────────────────────────────────────────
+//
+// `Result.score` is NOT a percentage:
+//  - APTITUDE stores the raw marks earned (the exam sums `q.marks` per correct
+//    answer), so a 19/30 paper arrives as `score: 19`.
+//  - CODING stores a literal 0 — the exam has no grader, the verdict lives in
+//    the compiler's test-case results.
+// Rendering `score` with a "%" therefore under-reports aptitude and zeroes
+// coding, which is what made the Overall Score disagree with the module views.
+// Everything below converts a module to a real 0-100 percentage, and returns
+// null when there is genuinely nothing to score.
+
+const clampPercent = (value: number) => Math.min(100, Math.max(0, Math.round(value)));
+
+const isNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+
+/** Total marks the paper was out of, when the question paper is available. */
+function paperTotalMarks(paper: RawQuestion[], answers: AptitudeAnswer[]): number {
+  // Only trust the paper when it lines up with the answered set.
+  if (paper.length === 0) return 0;
+  if (answers.length > 0 && paper.length !== answers.length) return 0;
+  return paper.reduce((sum, q) => sum + (isNumber(q.marks) ? q.marks : 1), 0);
+}
+
+/**
+ * Aptitude as a percentage, best source first: the backend's own percentage →
+ * marks earned over the paper's total → correct answers over question count.
+ */
+export function aptitudeScorePercent(
+  result?: Result,
+  answers: AptitudeAnswer[] = [],
+  paper: RawQuestion[] = [],
+): number | null {
+  if (!result) return null;
+
+  if (isNumber(result.percentage)) return clampPercent(result.percentage);
+
+  const earned = isNumber(result.score) ? result.score : 0;
+  const totalMarks =
+    isNumber(result.totalMarks) && result.totalMarks > 0
+      ? result.totalMarks
+      : paperTotalMarks(paper, answers);
+  if (totalMarks > 0) return clampPercent((earned / totalMarks) * 100);
+
+  // No marks denominator anywhere — fall back to the answer sheet.
+  if (answers.length > 0) {
+    const correct = answers.filter((a) => a.isCorrect).length;
+    return clampPercent((correct / answers.length) * 100);
+  }
+
+  return null;
+}
+
+/**
+ * Coding as a percentage. The exam submits `score: 0`, so unless the backend
+ * starts sending a real percentage this is the test-case pass rate — the same
+ * number the coding module shows, which keeps the two consistent.
+ */
+export function codingScorePercent(rows: CodingRow[], result?: Result): number | null {
+  if (result && isNumber(result.percentage)) return clampPercent(result.percentage);
+
+  if (
+    result &&
+    isNumber(result.totalMarks) &&
+    result.totalMarks > 0 &&
+    isNumber(result.score) &&
+    result.score > 0
+  ) {
+    return clampPercent((result.score / result.totalMarks) * 100);
+  }
+
+  const { totalTests, passedTests } = summarizeCoding(rows);
+  if (totalTests > 0) return clampPercent((passedTests / totalTests) * 100);
+
+  return null;
+}
+
+/** Mean of the modules that actually have a score; null when none do. */
+export function overallScorePercent(parts: (number | null | undefined)[]): number | null {
+  const values = parts.filter(isNumber);
+  if (values.length === 0) return null;
+  return clampPercent(values.reduce((a, b) => a + b, 0) / values.length);
 }
 
 /**

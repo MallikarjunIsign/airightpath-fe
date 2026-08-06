@@ -24,7 +24,11 @@ interface DateTimeFieldProps {
   /** Combined value in `YYYY-MM-DDTHH:mm` form (or '' when unset). */
   value: string;
   onChange: (value: string) => void;
-  /** Minimum, as `YYYY-MM-DDTHH:mm`; only its date part gates the calendar. */
+  /**
+   * Earliest selectable moment, as `YYYY-MM-DDTHH:mm`. Earlier days are
+   * disabled on the calendar and, on the minimum day itself, earlier times are
+   * disabled on the clock — so `min` of "today 14:30" cannot yield 09:00 today.
+   */
   min?: string;
   helperText?: string;
   required?: boolean;
@@ -56,7 +60,14 @@ export function DateTimeField({
   const parsed = value ? parseISO(value) : null;
   const selected = parsed && isValid(parsed) ? parsed : null;
   const minParsed = min ? parseISO(min) : null;
-  const minDay = minParsed && isValid(minParsed) ? startOfDay(minParsed) : null;
+  const minMoment = minParsed && isValid(minParsed) ? minParsed : null;
+  const minDay = minMoment ? startOfDay(minMoment) : null;
+
+  /** On the minimum day the clock is bounded too; other days are unbounded. */
+  const minTime =
+    minMoment && selected && isSameDay(selected, minMoment)
+      ? { hour: minMoment.getHours(), minute: minMoment.getMinutes() }
+      : null;
 
   const [viewMonth, setViewMonth] = useState<Date>(selected ?? new Date());
 
@@ -89,8 +100,11 @@ export function DateTimeField({
   const hour = selected ? selected.getHours() : 0;
   const minute = selected ? selected.getMinutes() : 0;
 
+  /** Writes the value, never below `min` — a safety net behind the disabled UI. */
   const commit = (base: Date, h: number, m: number) => {
-    onChange(format(setMinutes(setHours(base, h), m), "yyyy-MM-dd'T'HH:mm"));
+    let next = setMinutes(setHours(base, h), m);
+    if (minMoment && isBefore(next, minMoment)) next = minMoment;
+    onChange(format(next, "yyyy-MM-dd'T'HH:mm"));
   };
 
   const days = eachDayOfInterval({
@@ -222,6 +236,7 @@ export function DateTimeField({
             <ClockPicker
               hour={hour}
               minute={minute}
+              minTime={minTime}
               onChange={(h, m) => commit(selected ?? new Date(), h, m)}
             />
           )}
@@ -250,6 +265,8 @@ export function DateTimeField({
 interface ClockPickerProps {
   hour: number; // 0-23
   minute: number; // 0-59
+  /** Earliest allowed time on the selected day, or null when unbounded. */
+  minTime?: { hour: number; minute: number } | null;
   onChange: (hour: number, minute: number) => void;
 }
 
@@ -268,20 +285,36 @@ function clockPoint(angleDeg: number, radius: number) {
  * minute ring — like the standard Android/Material time picker. Converts to/from
  * the 24-hour value the parent stores.
  */
-function ClockPicker({ hour, minute, onChange }: Readonly<ClockPickerProps>) {
+function ClockPicker({ hour, minute, minTime, onChange }: Readonly<ClockPickerProps>) {
   const [mode, setMode] = useState<'hours' | 'minutes'>('hours');
 
   const period: 'AM' | 'PM' = hour < 12 ? 'AM' : 'PM';
   const hour12 = hour % 12 === 0 ? 12 : hour % 12;
 
+  const to24 = (h12: number, p: 'AM' | 'PM') => (h12 % 12) + (p === 'PM' ? 12 : 0);
+
+  // A whole hour is out of reach only when even its last minute is too early.
+  const isHourDisabled = (h24: number) => !!minTime && h24 < minTime.hour;
+  const isMinuteDisabled = (m: number) =>
+    !!minTime && (hour < minTime.hour || (hour === minTime.hour && m < minTime.minute));
+  // AM is unreachable whenever the same hour in the morning is below the floor.
+  const isPeriodDisabled = (p: 'AM' | 'PM') =>
+    !!minTime && p === 'AM' && to24(hour12, 'AM') < minTime.hour;
+
   const setPeriod = (p: 'AM' | 'PM') => {
-    const base = hour % 12; // 0-11
-    onChange(p === 'PM' ? base + 12 : base, minute);
+    if (isPeriodDisabled(p)) return;
+    const next24 = to24(hour12, p);
+    if (isHourDisabled(next24)) return;
+    onChange(next24, minute);
   };
 
   const pickHour12 = (h12: number) => {
-    const base = h12 % 12; // 12 -> 0
-    onChange(period === 'PM' ? base + 12 : base, minute);
+    const next24 = to24(h12, period);
+    if (isHourDisabled(next24)) return;
+    // Jumping onto the minimum hour can strand the minutes in the past.
+    const nextMinute =
+      minTime && next24 === minTime.hour && minute < minTime.minute ? minTime.minute : minute;
+    onChange(next24, nextMinute);
     setMode('minutes');
   };
 
@@ -295,7 +328,9 @@ function ClockPicker({ hour, minute, onChange }: Readonly<ClockPickerProps>) {
       const h = Math.round(angle / 30) % 12; // 0-11, where 0 means 12 o'clock
       pickHour12(h === 0 ? 12 : h);
     } else {
-      onChange(hour, Math.round(angle / 6) % 60);
+      const m = Math.round(angle / 6) % 60;
+      if (isMinuteDisabled(m)) return;
+      onChange(hour, m);
     }
   };
 
@@ -333,20 +368,24 @@ function ClockPicker({ hour, minute, onChange }: Readonly<ClockPickerProps>) {
           {pad(minute)}
         </button>
         <div className="flex flex-col gap-1 ml-2">
-          {(['AM', 'PM'] as const).map((p) => (
-            <button
-              key={p}
-              type="button"
-              onClick={() => setPeriod(p)}
-              className={`px-2 py-0.5 text-xs font-semibold rounded border transition-colors ${
-                period === p
-                  ? 'bg-[var(--primary)] text-white border-[var(--primary)]'
-                  : 'text-[var(--textSecondary)] border-[var(--border)] hover:bg-[var(--surface1)]'
-              }`}
-            >
-              {p}
-            </button>
-          ))}
+          {(['AM', 'PM'] as const).map((p) => {
+            const disabled = isPeriodDisabled(p);
+            return (
+              <button
+                key={p}
+                type="button"
+                disabled={disabled}
+                onClick={() => setPeriod(p)}
+                className={`px-2 py-0.5 text-xs font-semibold rounded border transition-colors ${
+                  period === p
+                    ? 'bg-[var(--primary)] text-white border-[var(--primary)]'
+                    : 'text-[var(--textSecondary)] border-[var(--border)] hover:bg-[var(--surface1)]'
+                } ${disabled ? 'opacity-40 cursor-not-allowed hover:bg-transparent' : ''}`}
+              >
+                {p}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -373,6 +412,11 @@ function ClockPicker({ hour, minute, onChange }: Readonly<ClockPickerProps>) {
           const angle = mode === 'hours' ? (n % 12) * 30 : n * 6;
           const p = clockPoint(angle, CLOCK_R);
           const active = isActiveNumber(n);
+          const disabled =
+            mode === 'hours' ? isHourDisabled(to24(n, period)) : isMinuteDisabled(n);
+          let fill = 'fill-[var(--text)]';
+          if (active) fill = 'fill-white';
+          else if (disabled) fill = 'fill-[var(--textTertiary)] opacity-40';
           return (
             <text
               key={n}
@@ -380,9 +424,7 @@ function ClockPicker({ hour, minute, onChange }: Readonly<ClockPickerProps>) {
               y={p.y}
               textAnchor="middle"
               dominantBaseline="central"
-              className={`text-[13px] font-medium pointer-events-none ${
-                active ? 'fill-white' : 'fill-[var(--text)]'
-              }`}
+              className={`text-[13px] font-medium pointer-events-none ${fill}`}
             >
               {mode === 'hours' ? n : pad(n)}
             </text>
@@ -390,7 +432,9 @@ function ClockPicker({ hour, minute, onChange }: Readonly<ClockPickerProps>) {
         })}
       </svg>
       <p className="text-xs text-[var(--textTertiary)] mt-2">
-        Tap the {mode === 'hours' ? 'hour' : 'minute'} on the clock
+        {minTime
+          ? `Earliest today is ${pad(minTime.hour)}:${pad(minTime.minute)}`
+          : `Tap the ${mode === 'hours' ? 'hour' : 'minute'} on the clock`}
       </p>
     </div>
   );

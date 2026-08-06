@@ -47,6 +47,9 @@ import {
 } from '@/components/admin/result/ResultModals';
 import {
   statusVariant,
+  aptitudeScorePercent,
+  codingScorePercent,
+  overallScorePercent,
   OUTCOME,
   answerOutcome,
   codingOutcome,
@@ -195,12 +198,26 @@ export function CandidateResultDetailPage() {
     return 'PENDING';
   })();
 
-  const overallScore = (() => {
-    const scores: number[] = [];
-    if (aptitudeResult) scores.push(aptitudeResult.score);
-    if (codingResult) scores.push(codingResult.score);
-    if (scores.length === 0) return 0;
-    return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+  // `Result.score` is raw marks for aptitude and a hard-coded 0 for coding, so
+  // both modules are converted to real percentages before anything is averaged
+  // — see the scoring notes in result.utils.ts.
+  const aptitudeScore = useMemo(
+    () => aptitudeScorePercent(aptitudeResult, aptitudeAnswers, aptitudePaper),
+    [aptitudeResult, aptitudeAnswers, aptitudePaper],
+  );
+  const codingScore = useMemo(
+    () => codingScorePercent(codingRows, codingResult),
+    [codingRows, codingResult],
+  );
+  const overallScore = overallScorePercent([aptitudeScore, codingScore]);
+
+  // Spelling out what went into the average keeps it reconcilable with the tabs.
+  const overallBasis = (() => {
+    const parts: string[] = [];
+    if (aptitudeScore !== null) parts.push('Aptitude');
+    if (codingScore !== null) parts.push('Coding');
+    if (parts.length === 0) return 'No scored modules';
+    return `Average of ${parts.join(' + ')}`;
   })();
 
   const hasAptitude = !!aptitudeResult;
@@ -271,15 +288,27 @@ export function CandidateResultDetailPage() {
           icon={<Award size={20} />}
           iconColor="var(--primary)"
           label="Overall Score"
-          chart={<RadialScore score={overallScore} size={80} stroke={8} />}
+          hint={overallBasis}
+          chart={
+            overallScore !== null ? (
+              <RadialScore score={overallScore} size={80} stroke={8} />
+            ) : (
+              <KpiPlaceholder text="N/A" />
+            )
+          }
         />
         <KpiTile
           icon={<BookOpen size={20} />}
           iconColor="var(--info)"
           label="Aptitude"
+          hint={
+            aptitudeResult
+              ? `${aptitudeResult.score}${aptitudeResult.totalMarks ? `/${aptitudeResult.totalMarks}` : ''} marks`
+              : undefined
+          }
           chart={
-            aptitudeResult ? (
-              <RadialScore score={aptitudeResult.score} size={80} stroke={8} />
+            aptitudeScore !== null ? (
+              <RadialScore score={aptitudeScore} size={80} stroke={8} />
             ) : (
               <KpiPlaceholder text="N/A" />
             )
@@ -289,9 +318,14 @@ export function CandidateResultDetailPage() {
           icon={<Code2 size={20} />}
           iconColor="#a855f7"
           label="Coding"
+          hint={
+            codingScore !== null
+              ? `${codingStats.passedTests}/${codingStats.totalTests} test cases`
+              : undefined
+          }
           chart={
-            codingResult ? (
-              <RadialScore score={codingResult.score} size={80} stroke={8} />
+            codingScore !== null ? (
+              <RadialScore score={codingScore} size={80} stroke={8} />
             ) : codingRows.length > 0 ? (
               <KpiValue value={`${codingStats.solved}/${codingStats.totalQ}`} sub="Q Solved" />
             ) : (
@@ -368,6 +402,8 @@ export function CandidateResultDetailPage() {
         <OverviewTab
           aptitude={aptitudeResult}
           coding={codingResult}
+          aptitudeScore={aptitudeScore}
+          codingScore={codingScore}
           aptitudeAnswers={aptitudeAnswers}
           codingRows={codingRows}
           codingStats={codingStats}
@@ -377,13 +413,19 @@ export function CandidateResultDetailPage() {
       {activeTab === 'aptitude' && aptitudeResult && (
         <AptitudeTab
           result={aptitudeResult}
+          score={aptitudeScore}
           answers={aptitudeAnswers}
           paper={aptitudePaper}
           examWindow={examWindows.aptitude}
         />
       )}
       {activeTab === 'coding' && (
-        <CodingTab result={codingResult} rows={codingRows} examWindow={examWindows.coding} />
+        <CodingTab
+          result={codingResult}
+          score={codingScore}
+          rows={codingRows}
+          examWindow={examWindows.coding}
+        />
       )}
     </div>
   );
@@ -396,20 +438,28 @@ function KpiTile({
   iconColor,
   label,
   chart,
+  hint,
 }: {
   icon: React.ReactNode;
   iconColor: string;
   label: string;
   chart: React.ReactNode;
+  /** Small caption spelling out what the number is derived from. */
+  hint?: string;
 }) {
   return (
     <Card>
       <CardContent>
         <div className="flex flex-col items-center gap-3 py-2">
           {chart}
-          <div className="flex items-center gap-1.5">
-            <span style={{ color: iconColor }}>{icon}</span>
-            <span className="text-xs font-semibold text-[var(--textSecondary)]">{label}</span>
+          <div className="text-center">
+            <div className="flex items-center justify-center gap-1.5">
+              <span style={{ color: iconColor }}>{icon}</span>
+              <span className="text-xs font-semibold text-[var(--textSecondary)]">{label}</span>
+            </div>
+            {hint && (
+              <p className="text-[10px] text-[var(--textTertiary)] mt-1 leading-tight">{hint}</p>
+            )}
           </div>
         </div>
       </CardContent>
@@ -468,14 +518,18 @@ function SummaryScore({
   score,
   status,
   caption,
+  detail,
 }: {
-  score?: number;
+  /** Percentage, or null/undefined when the module has nothing to score. */
+  score?: number | null;
   status?: string;
   caption: string;
+  /** Raw figure the percentage came from, e.g. "19/30 marks". */
+  detail?: string;
 }) {
   return (
     <div className="flex items-center gap-4">
-      {score !== undefined ? (
+      {score !== undefined && score !== null ? (
         <RadialScore score={score} size={76} stroke={8} />
       ) : (
         <div className="w-[76px] h-[76px] rounded-full border-[7px] border-[var(--borderMuted)] flex items-center justify-center flex-shrink-0">
@@ -486,6 +540,7 @@ function SummaryScore({
         <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--textTertiary)]">
           {caption}
         </p>
+        {detail && <p className="text-xs text-[var(--textSecondary)] mt-1">{detail}</p>}
         {status && (
           <div className="mt-1.5">
             <Badge variant={statusVariant(status)} size="md">{status}</Badge>
@@ -501,6 +556,8 @@ function SummaryScore({
 function OverviewTab({
   aptitude,
   coding,
+  aptitudeScore,
+  codingScore,
   aptitudeAnswers,
   codingRows,
   codingStats,
@@ -508,6 +565,8 @@ function OverviewTab({
 }: {
   aptitude?: Result;
   coding?: Result;
+  aptitudeScore: number | null;
+  codingScore: number | null;
   aptitudeAnswers: AptitudeAnswer[];
   codingRows: CodingRow[];
   codingStats: ReturnType<typeof summarizeCoding>;
@@ -549,7 +608,12 @@ function OverviewTab({
           <CardContent>
             <div className="space-y-5">
               <div className="flex items-center justify-between gap-4">
-                <SummaryScore score={aptitude.score} status={aptitude.status} caption="Aptitude score" />
+                <SummaryScore
+                  score={aptitudeScore}
+                  status={aptitude.status}
+                  caption="Aptitude score"
+                  detail={`${aptitude.score}${aptitude.totalMarks ? `/${aptitude.totalMarks}` : ''} marks`}
+                />
                 <div className="text-right">
                   <p className="text-xs text-[var(--textTertiary)] uppercase tracking-wider font-medium">
                     Questions
@@ -607,7 +671,12 @@ function OverviewTab({
           <CardContent>
             <div className="space-y-5">
               <div className="flex items-center justify-between gap-4">
-                <SummaryScore score={coding?.score} status={coding?.status} caption="Coding score" />
+                <SummaryScore
+                  score={codingScore}
+                  status={coding?.status}
+                  caption="Coding score"
+                  detail={`${codingStats.passedTests}/${codingStats.totalTests} test cases passed`}
+                />
                 <div className="text-right">
                   <p className="text-xs text-[var(--textTertiary)] uppercase tracking-wider font-medium">
                     Questions
@@ -671,11 +740,13 @@ function OverviewTab({
 
 function AptitudeTab({
   result,
+  score,
   answers,
   paper,
   examWindow,
 }: {
   result: Result;
+  score: number | null;
   answers: AptitudeAnswer[];
   paper: RawQuestion[];
   examWindow?: string | null;
@@ -739,7 +810,12 @@ function AptitudeTab({
         <CardContent>
           <div className="space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-4">
-              <SummaryScore score={result.score} status={result.status} caption="Aptitude summary" />
+              <SummaryScore
+                score={score}
+                status={result.status}
+                caption="Aptitude summary"
+                detail={`${result.score}${result.totalMarks ? `/${result.totalMarks}` : ''} marks · ${stats.correct}/${stats.total} correct`}
+              />
               <Button
                 variant="secondary"
                 size="sm"
@@ -920,10 +996,12 @@ function AptitudeTab({
 
 function CodingTab({
   result,
+  score,
   rows,
   examWindow,
 }: {
   result?: Result;
+  score: number | null;
   rows: CodingRow[];
   examWindow?: string | null;
 }) {
@@ -966,7 +1044,12 @@ function CodingTab({
         <CardContent>
           <div className="space-y-5">
             <div className="flex flex-wrap items-center justify-between gap-4">
-              <SummaryScore score={result?.score} status={result?.status} caption="Programming summary" />
+              <SummaryScore
+                score={score}
+                status={result?.status}
+                caption="Programming summary"
+                detail={`${stats.passedTests}/${stats.totalTests} test cases · ${stats.solved}/${stats.totalQ} solved`}
+              />
               <Button
                 variant="secondary"
                 size="sm"

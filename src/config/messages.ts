@@ -145,6 +145,7 @@ export const MESSAGES = {
         `Shortlisted ${done} of ${total}; ${failed} could not be shortlisted.`,
       referralSet: (verified: boolean) => `Referral ${verified ? 'verified' : 'rejected'}.`,
       ackDateTimeRequired: 'Date & Time is required for acknowledgement mail',
+      dateTimeInPast: 'Date & Time cannot be in the past. Please pick a future slot.',
       actionSent: (label: string) => `${label} sent successfully!`,
       noExamForCandidates: (count: number, emails: string) =>
         `No exam assigned for ${count} candidate(s): ${emails}. ` +

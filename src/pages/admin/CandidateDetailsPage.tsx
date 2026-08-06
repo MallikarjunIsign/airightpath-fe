@@ -32,6 +32,7 @@ import { usePersistentState, writePersistentValue } from '@/hooks/usePersistentS
 import { useToast } from '@/components/ui/Toast';
 import { ROUTES } from '@/config/routes';
 import { getAppEmail } from '@/utils/application.utils';
+import { nowDateTimeLocal, isPast } from '@/utils/datetime.utils';
 import { MESSAGES } from '@/config/messages';
 import type { JobPostDTO, JobApplicationDTO, JobApplicationStatus } from '@/types/job.types';
 
@@ -370,6 +371,14 @@ export function CandidateDetailsPage() {
       return;
     }
 
+    // A schedule the candidate cannot make is worse than no email at all —
+    // the picker blocks past slots, this catches a value that went stale
+    // while the modal was open.
+    if (modalDateTime && isPast(modalDateTime)) {
+      showToast(MESSAGES.admin.candidates.dateTimeInPast, 'warning');
+      return;
+    }
+
     setSending(true);
 
     const emails = Array.from(selectedEmails);
@@ -669,6 +678,7 @@ export function CandidateDetailsPage() {
           sending={sending}
           dateTime={modalDateTime}
           onDateTimeChange={setModalDateTime}
+          minDateTime={nowDateTimeLocal()}
           content={modalContent}
           onContentChange={setModalContent}
           onClose={() => setModalAction(null)}

@@ -1,7 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Search,
   MapPin,
   Briefcase,
   Calendar,
@@ -24,20 +23,16 @@ import { jobApplicationService } from '@/services/job-application.service';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/ui/Modal';
+import {
+  JobListFilters,
+  JobListCount,
+  JobListPager,
+} from '@/components/jobs/JobListControls';
 import { ROUTES } from '@/config/routes';
 import { formatDate } from '@/utils/format.utils';
-import { usePersistentState } from '@/hooks/usePersistentState';
+import { useJobListing, isJobExpired } from '@/hooks/useJobListing';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
-
-// Normalize a job type to a consistently formatted, title-cased label so that
-// values differing only in casing/whitespace ("Full-time" -> "Full-Time")
-// display identically.
-function formatJobType(value: string): string {
-  return value.trim().toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
-}
 
 export function EventsPage() {
   const navigate = useNavigate();
@@ -46,9 +41,10 @@ export function EventsPage() {
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
   const [appliedJobPrefixes, setAppliedJobPrefixes] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = usePersistentState('events:searchQuery', '');
-  const [filterType, setFilterType] = usePersistentState('events:filterType', '');
   const [selectedJob, setSelectedJob] = useState<JobPostDTO | null>(null);
+
+  // Search / type / status filters and paging — defaults to active jobs, 20 a page.
+  const listing = useJobListing(jobs, 'events');
 
   useEffect(() => {
     async function fetchData() {
@@ -72,41 +68,7 @@ export function EventsPage() {
     fetchData();
   }, [user?.email]);
 
-  // Job types come from free-form data, so the same type can arrive with
-  // inconsistent casing/whitespace (e.g. "Full-Time" vs "Full-time"). Dedupe
-  // case-insensitively and present a single, consistently formatted label. The
-  // option `value` is the lowercased key so the filter can match any casing.
-  const jobTypes = useMemo(() => {
-    const seen = new Map<string, string>(); // key -> display label
-    for (const j of jobs) {
-      const raw = j.jobType?.trim();
-      if (!raw) continue;
-      const key = raw.toLowerCase();
-      if (!seen.has(key)) seen.set(key, formatJobType(raw));
-    }
-    return Array.from(seen, ([value, label]) => ({ value, label }));
-  }, [jobs]);
-
-  const filteredJobs = useMemo(() => {
-    return jobs.filter((job) => {
-      const matchesSearch =
-        !searchQuery ||
-        job.jobTitle.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        job.companyName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (job.keySkills ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-        job.location.toLowerCase().includes(searchQuery.toLowerCase());
-
-      const matchesType =
-        !filterType || job.jobType?.trim().toLowerCase() === filterType.toLowerCase();
-
-      return matchesSearch && matchesType;
-    });
-  }, [jobs, searchQuery, filterType]);
-
-  const isDeadlinePassed = (deadline: string) => {
-    if (!deadline) return false;
-    return new Date(deadline) < new Date(new Date().toDateString());
-  };
+  const isDeadlinePassed = (deadline: string) => isJobExpired({ applicationDeadline: deadline });
 
   const isJobApplied = (job: JobPostDTO) => {
     return appliedJobPrefixes.has(job.jobPrefix);
@@ -132,42 +94,27 @@ export function EventsPage() {
     <div className="space-y-6">
       <h1 className="text-3xl font-bold text-[var(--text)]">Available Jobs</h1>
 
-      {/* Search and Filter */}
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="flex-1">
-          <Input
-            placeholder="Search jobs by title, company, skills, location..."
-            leftIcon={<Search size={18} />}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-        <div className="sm:w-48">
-          <Select
-            options={[{ value: '', label: 'All Types' }, ...jobTypes]}
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value)}
-          />
-        </div>
-      </div>
+      {/* Search, type and status filters */}
+      <JobListFilters
+        listing={listing}
+        searchPlaceholder="Search jobs by title, company, skills, location..."
+      />
 
       {/* Results Count */}
-      <p className="text-sm text-[var(--textSecondary)]">
-        Showing {filteredJobs.length} of {jobs.length} jobs
-      </p>
+      <JobListCount listing={listing} />
 
       {/* Job Cards Grid */}
-      {filteredJobs.length === 0 ? (
+      {listing.filtered.length === 0 ? (
         <div className="text-center py-16">
           <Briefcase className="w-12 h-12 mx-auto text-[var(--textTertiary)] mb-4" />
           <p className="text-lg font-medium text-[var(--text)]">No jobs found</p>
           <p className="text-[var(--textSecondary)] mt-1">
-            Try adjusting your search or filter criteria.
+            Try adjusting your search, type or status filter.
           </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredJobs.map((job) => {
+          {listing.paged.map((job) => {
             const applied = isJobApplied(job);
             const expired = isDeadlinePassed(job.applicationDeadline);
 
@@ -282,6 +229,9 @@ export function EventsPage() {
           })}
         </div>
       )}
+
+      {/* Page size + pager */}
+      <JobListPager listing={listing} />
 
       {/* Job Details Modal */}
       {selectedJob && (

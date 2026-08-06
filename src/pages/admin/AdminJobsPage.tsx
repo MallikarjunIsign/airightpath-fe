@@ -1,7 +1,6 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Search,
   MapPin,
   Briefcase,
   Calendar,
@@ -23,13 +22,17 @@ import { jobService } from '@/services/job.service';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { Input } from '@/components/ui/Input';
-import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/ui/Modal';
 import { ShareJobLink } from '@/components/admin/ShareJobLink';
+import {
+  JobListFilters,
+  JobListCount,
+  JobListPager,
+} from '@/components/jobs/JobListControls';
 import { ROUTES } from '@/config/routes';
 import { formatDate } from '@/utils/format.utils';
-import { usePersistentState, writePersistentValue } from '@/hooks/usePersistentState';
+import { writePersistentValue } from '@/hooks/usePersistentState';
+import { useJobListing, isJobExpired } from '@/hooks/useJobListing';
 import type { JobPostDTO } from '@/types/job.types';
 
 /**
@@ -41,9 +44,10 @@ export function AdminJobsPage() {
 
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = usePersistentState('adminJobs:searchQuery', '');
-  const [filterType, setFilterType] = usePersistentState('adminJobs:filterType', '');
   const [selectedJob, setSelectedJob] = useState<JobPostDTO | null>(null);
+
+  // Search / type / status filters and paging — defaults to active jobs, 20 a page.
+  const listing = useJobListing(jobs, 'adminJobs');
 
   useEffect(() => {
     async function fetchJobs() {
@@ -60,30 +64,7 @@ export function AdminJobsPage() {
     fetchJobs();
   }, []);
 
-  const jobTypes = useMemo(() => {
-    return Array.from(new Set(jobs.map((j) => j.jobType).filter(Boolean)));
-  }, [jobs]);
-
-  const filteredJobs = useMemo(() => {
-    return jobs.filter((job) => {
-      const q = searchQuery.toLowerCase();
-      const matchesSearch =
-        !searchQuery ||
-        job.jobTitle.toLowerCase().includes(q) ||
-        job.companyName.toLowerCase().includes(q) ||
-        (job.keySkills ?? '').toLowerCase().includes(q) ||
-        job.location.toLowerCase().includes(q) ||
-        job.jobPrefix.toLowerCase().includes(q);
-
-      const matchesType = !filterType || job.jobType === filterType;
-      return matchesSearch && matchesType;
-    });
-  }, [jobs, searchQuery, filterType]);
-
-  const isDeadlinePassed = (deadline: string) => {
-    if (!deadline) return false;
-    return new Date(deadline) < new Date(new Date().toDateString());
-  };
+  const isDeadlinePassed = (deadline: string) => isJobExpired({ applicationDeadline: deadline });
 
   const handleViewCandidates = (job: JobPostDTO) => {
     // Pre-select this job on the Candidates page, then navigate there.
@@ -115,47 +96,29 @@ export function AdminJobsPage() {
         </Button>
       </div>
 
-      {/* Search and Filter */}
-      <div className="flex flex-col sm:flex-row gap-4">
-        <div className="flex-1">
-          <Input
-            placeholder="Search jobs by title, company, skills, location, prefix..."
-            leftIcon={<Search size={18} />}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-        <div className="sm:w-48">
-          <Select
-            options={[
-              { value: '', label: 'All Types' },
-              ...jobTypes.map((type) => ({ value: type, label: type })),
-            ]}
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value)}
-          />
-        </div>
-      </div>
+      {/* Search, type and status filters */}
+      <JobListFilters
+        listing={listing}
+        searchPlaceholder="Search jobs by title, company, skills, location, prefix..."
+      />
 
       {/* Results Count */}
-      <p className="text-sm text-[var(--textSecondary)]">
-        Showing {filteredJobs.length} of {jobs.length} jobs
-      </p>
+      <JobListCount listing={listing} />
 
       {/* Job Cards Grid */}
-      {filteredJobs.length === 0 ? (
+      {listing.filtered.length === 0 ? (
         <div className="text-center py-16">
           <Briefcase className="w-12 h-12 mx-auto text-[var(--textTertiary)] mb-4" />
           <p className="text-lg font-medium text-[var(--text)]">No jobs found</p>
           <p className="text-[var(--textSecondary)] mt-1">
             {jobs.length === 0
               ? 'No jobs have been created yet.'
-              : 'Try adjusting your search or filter criteria.'}
+              : 'Try adjusting your search, type or status filter.'}
           </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredJobs.map((job) => {
+          {listing.paged.map((job) => {
             const expired = isDeadlinePassed(job.applicationDeadline);
             return (
               <Card key={job.id ?? job.jobPrefix} hover>
@@ -237,6 +200,9 @@ export function AdminJobsPage() {
           })}
         </div>
       )}
+
+      {/* Page size + pager */}
+      <JobListPager listing={listing} />
 
       {/* Job Details Modal */}
       {selectedJob && (

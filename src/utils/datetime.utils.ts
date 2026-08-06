@@ -18,3 +18,22 @@ export function isPast(value: string): boolean {
   const t = new Date(value).getTime();
   return !Number.isNaN(t) && t < Date.now();
 }
+
+/**
+ * A `YYYY-MM-DDTHH:mm` value as a human schedule line —
+ * "Mon, 10 Aug 2026, 02:30 PM". Used for the preview of what a candidate will
+ * read in a scheduling email, so the admin never has to decode the raw value.
+ */
+export function formatScheduleForEmail(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString('en-GB', {
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
+}

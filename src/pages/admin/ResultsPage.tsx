@@ -19,9 +19,27 @@ import { jobService } from '@/services/job.service';
 import { assessmentService } from '@/services/assessment.service';
 import { compilerService } from '@/services/compiler.service';
 import { usePersistentState } from '@/hooks/usePersistentState';
+import {
+  aptitudeScorePercent,
+  codingScorePercent,
+  overallScorePercent,
+  buildCodingRows,
+  scoreColor,
+} from '@/utils/result.utils';
 import type { JobPostDTO } from '@/types/job.types';
-import type { Result } from '@/types/result.types';
+import type { Result, AptitudeAnswer, CodingAnswer } from '@/types/result.types';
 import type { CodeSubmissionResponse } from '@/types/compiler.types';
+
+/** Results/answers are stored as a JSON string on the result row. */
+function parseAnswers<T>(raw?: string): T[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+}
 
 // ── Aggregated candidate row ─────────────────────────────────────────
 interface CandidateRow {
@@ -30,6 +48,10 @@ interface CandidateRow {
   codingResult?: Result;
   codeSubmissions: CodeSubmissionResponse[];
   overallStatus: 'PASSED' | 'FAILED' | 'PARTIAL';
+  /** Percentages derived per module — `Result.score` is marks, not a percent. */
+  aptitudeScore: number | null;
+  codingScore: number | null;
+  overallScore: number | null;
 }
 
 export function ResultsPage() {
@@ -87,13 +109,18 @@ export function ResultsPage() {
   const candidateRows: CandidateRow[] = useMemo(() => {
     const map = new Map<string, CandidateRow>();
 
+    const blankRow = (email: string): CandidateRow => ({
+      email,
+      codeSubmissions: [],
+      overallStatus: 'PARTIAL',
+      aptitudeScore: null,
+      codingScore: null,
+      overallScore: null,
+    });
+
     for (const r of results) {
       if (!map.has(r.candidateEmail)) {
-        map.set(r.candidateEmail, {
-          email: r.candidateEmail,
-          codeSubmissions: [],
-          overallStatus: 'PARTIAL',
-        });
+        map.set(r.candidateEmail, blankRow(r.candidateEmail));
       }
       const row = map.get(r.candidateEmail)!;
       if (r.assessmentType === 'APTITUDE') {
@@ -107,16 +134,12 @@ export function ResultsPage() {
     for (const cs of codeSubmissions) {
       const email = cs.userEmail ?? '';
       if (!map.has(email)) {
-        map.set(email, {
-          email,
-          codeSubmissions: [],
-          overallStatus: 'PARTIAL',
-        });
+        map.set(email, blankRow(email));
       }
       map.get(email)!.codeSubmissions.push(cs);
     }
 
-    // Compute overall status
+    // Compute overall status and the module percentages
     for (const row of map.values()) {
       const aptStatus = row.aptitudeResult?.status;
       const codStatus = row.codingResult?.status;
@@ -127,6 +150,18 @@ export function ResultsPage() {
       } else {
         row.overallStatus = 'PARTIAL';
       }
+
+      // Aptitude ships raw marks and coding ships 0, so both are re-derived
+      // here — the same helpers the result detail page uses, so the two agree.
+      const aptitudeAnswers = parseAnswers<AptitudeAnswer>(row.aptitudeResult?.resultsJson);
+      const codingRows = buildCodingRows(
+        [],
+        row.codeSubmissions,
+        parseAnswers<CodingAnswer>(row.codingResult?.resultsJson),
+      );
+      row.aptitudeScore = aptitudeScorePercent(row.aptitudeResult, aptitudeAnswers);
+      row.codingScore = codingScorePercent(codingRows, row.codingResult);
+      row.overallScore = overallScorePercent([row.aptitudeScore, row.codingScore]);
     }
 
     return Array.from(map.values());
@@ -228,38 +263,57 @@ export function ResultsPage() {
                           <TableCell>
                             {row.aptitudeResult ? (
                               <ScoreBadge
-                                score={row.aptitudeResult.score}
+                                score={row.aptitudeScore}
                                 status={row.aptitudeResult.status}
+                                detail={`${row.aptitudeResult.score}${
+                                  row.aptitudeResult.totalMarks
+                                    ? `/${row.aptitudeResult.totalMarks}`
+                                    : ''
+                                } marks`}
                               />
                             ) : (
                               <span className="text-[var(--textTertiary)] text-sm">--</span>
                             )}
                           </TableCell>
                           <TableCell>
-                            {row.codingResult ? (
-                              <ScoreBadge
-                                score={row.codingResult.score}
-                                status={row.codingResult.status}
-                              />
-                            ) : row.codeSubmissions.length > 0 ? (
-                              <CodingSubmissionSummary submissions={row.codeSubmissions} />
+                            {row.codingResult || row.codeSubmissions.length > 0 ? (
+                              <div className="space-y-0.5">
+                                <ScoreBadge
+                                  score={row.codingScore}
+                                  status={row.codingResult?.status}
+                                />
+                                <CodingSubmissionSummary submissions={row.codeSubmissions} />
+                              </div>
                             ) : (
                               <span className="text-[var(--textTertiary)] text-sm">--</span>
                             )}
                           </TableCell>
                           <TableCell>
-                            <Badge
-                              variant={
-                                row.overallStatus === 'PASSED'
-                                  ? 'success'
-                                  : row.overallStatus === 'FAILED'
-                                    ? 'error'
-                                    : 'warning'
-                              }
-                              size="sm"
-                            >
-                              {row.overallStatus === 'PARTIAL' ? 'Pending' : row.overallStatus}
-                            </Badge>
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="text-sm font-bold tabular-nums"
+                                style={{
+                                  color:
+                                    row.overallScore === null
+                                      ? 'var(--textTertiary)'
+                                      : scoreColor(row.overallScore),
+                                }}
+                              >
+                                {row.overallScore === null ? '--' : `${row.overallScore}%`}
+                              </span>
+                              <Badge
+                                variant={
+                                  row.overallStatus === 'PASSED'
+                                    ? 'success'
+                                    : row.overallStatus === 'FAILED'
+                                      ? 'error'
+                                      : 'warning'
+                                }
+                                size="sm"
+                              >
+                                {row.overallStatus === 'PARTIAL' ? 'Pending' : row.overallStatus}
+                              </Badge>
+                            </div>
                           </TableCell>
                           <TableCell className="text-sm text-[var(--textSecondary)]">
                             {getSubmittedDate(row)}
@@ -308,38 +362,52 @@ function StatCard({ label, value, color }: { label: string; value: number; color
   );
 }
 
-function ScoreBadge({ score, status }: { score: number; status?: string }) {
+function ScoreBadge({
+  score,
+  status,
+  detail,
+}: {
+  /** Percentage, or null when the module cannot be scored. */
+  score: number | null;
+  status?: string;
+  detail?: string;
+}) {
   const isPassed = status === 'PASSED';
   return (
-    <div className="flex items-center gap-1.5">
-      {isPassed ? (
-        <CheckCircle size={14} className="text-green-500" />
-      ) : (
-        <XCircle size={14} className="text-red-500" />
-      )}
-      <span className={`text-sm font-semibold ${isPassed ? 'text-green-600' : 'text-red-600'}`}>
-        {score}%
-      </span>
+    <div>
+      <div className="flex items-center gap-1.5">
+        {isPassed ? (
+          <CheckCircle size={14} className="text-green-500" />
+        ) : (
+          <XCircle size={14} className="text-red-500" />
+        )}
+        <span className={`text-sm font-semibold ${isPassed ? 'text-green-600' : 'text-red-600'}`}>
+          {score === null ? '--' : `${score}%`}
+        </span>
+      </div>
+      {detail && <p className="text-xs text-[var(--textTertiary)] ml-5">{detail}</p>}
     </div>
   );
 }
 
 function CodingSubmissionSummary({ submissions }: { submissions: CodeSubmissionResponse[] }) {
   const totalTests = submissions.reduce((sum, s) => sum + (s.testResults?.length ?? 0), 0);
+  if (totalTests === 0) return null;
+
   const passedTests = submissions.reduce(
     (sum, s) => sum + (s.testResults?.filter((t) => t.passed).length ?? 0),
     0
   );
-  const allPassed = totalTests > 0 && passedTests === totalTests;
+  const allPassed = passedTests === totalTests;
 
   return (
     <div className="flex items-center gap-1.5">
       {allPassed ? (
-        <CheckCircle size={14} className="text-green-500" />
+        <CheckCircle size={12} className="text-green-500" />
       ) : (
-        <Code2 size={14} className="text-amber-500" />
+        <Code2 size={12} className="text-amber-500" />
       )}
-      <span className="text-sm text-[var(--text)]">
+      <span className="text-xs text-[var(--textTertiary)]">
         {passedTests}/{totalTests} tests
       </span>
     </div>
