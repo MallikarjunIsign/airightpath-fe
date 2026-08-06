@@ -88,7 +88,9 @@ export const jobPostSchema = z.object({
   jobType: z.string().min(1, 'Please select a job type'),
   industry: z.string().optional(),
   department: z.string().optional(),
-  role: z.string().optional(),
+  // Required: the role is what the job lists are keyed on visually, so a post
+  // without one shows up unidentifiable.
+  role: z.string().trim().min(1, 'Job role is required'),
   numberOfOpenings: z
     .number({ invalid_type_error: 'Number of openings is required' })
     .int('Openings must be a whole number (no decimals)')
@@ -107,6 +109,28 @@ export const jobPostSchema = z.object({
       return selected.getTime() >= today.getTime();
     }, 'Deadline cannot be in the past'),
 });
+
+/**
+ * Editing an existing post reuses the create rules, except that an already
+ * expired job may keep its original deadline — otherwise fixing a typo on a
+ * closed posting would force the admin to silently reopen it.
+ */
+export function jobEditSchema(originalDeadline?: string) {
+  if (!originalDeadline) return jobPostSchema;
+  return jobPostSchema.extend({
+    applicationDeadline: z
+      .string()
+      .min(1, 'Application deadline is required')
+      .refine((val) => {
+        if (val === originalDeadline) return true;
+        const selected = new Date(`${val}T00:00:00`);
+        if (Number.isNaN(selected.getTime())) return false;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return selected.getTime() >= today.getTime();
+      }, 'Deadline cannot be in the past'),
+  });
+}
 
 export const jobApplicationSchema = z.object({
   firstName: z.string().min(1, 'First name is required'),

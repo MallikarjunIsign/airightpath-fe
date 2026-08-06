@@ -102,7 +102,8 @@ export function Modal({ isOpen, onClose, title, children, footer, size = 'md', c
         </div>
 
         {footer && (
-          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[var(--borderMuted,var(--border))]/50 flex-shrink-0">
+          // Wraps so three or more actions stack instead of overflowing on a phone.
+          <div className="flex flex-wrap items-center justify-end gap-3 px-6 py-4 border-t border-[var(--borderMuted,var(--border))]/50 flex-shrink-0">
             {footer}
           </div>
         )}

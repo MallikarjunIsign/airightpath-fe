@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Send, Briefcase, CheckCircle } from 'lucide-react';
-import { jobPostSchema } from '@/config/validation';
-import { jobService } from '@/services/job.service';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Send, Briefcase, CheckCircle, Save, ArrowLeft, Loader2 } from 'lucide-react';
+import { jobPostSchema, jobEditSchema } from '@/config/validation';
+import { jobService, isEndpointMissing } from '@/services/job.service';
+import { extractApiError } from '@/services/api.service';
 import { useToast } from '@/components/ui/Toast';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -13,6 +15,8 @@ import { Textarea } from '@/components/ui/Textarea';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { ShareJobLink } from '@/components/admin/ShareJobLink';
 import { MESSAGES } from '@/config/messages';
+import { ROUTES } from '@/config/routes';
+import type { JobPostDTO } from '@/types/job.types';
 
 type JobPostFormData = z.infer<typeof jobPostSchema>;
 
@@ -34,71 +38,203 @@ function localDateToday(): string {
 // Keystrokes that would produce a non-integer opening count.
 const BLOCKED_NUMBER_KEYS = new Set(['.', ',', 'e', 'E', '+', '-']);
 
+const EMPTY_FORM: JobPostFormData = {
+  jobPrefix: '',
+  jobTitle: '',
+  companyName: '',
+  location: '',
+  jobDescription: '',
+  keySkills: '',
+  experience: '',
+  education: '',
+  salaryRange: '',
+  jobType: '',
+  industry: '',
+  department: '',
+  role: '',
+  numberOfOpenings: 1,
+  applicationDeadline: '',
+};
+
+/** The deadline arrives as a LocalDate or an ISO timestamp — the input wants `YYYY-MM-DD`. */
+function toDateInput(value?: string): string {
+  if (!value) return '';
+  return value.slice(0, 10);
+}
+
+function toFormValues(job: JobPostDTO): JobPostFormData {
+  return {
+    jobPrefix: job.jobPrefix ?? '',
+    jobTitle: job.jobTitle ?? '',
+    companyName: job.companyName ?? '',
+    location: job.location ?? '',
+    jobDescription: job.jobDescription ?? '',
+    keySkills: job.keySkills ?? '',
+    experience: job.experience ?? '',
+    education: job.education ?? '',
+    salaryRange: job.salaryRange ?? '',
+    jobType: job.jobType ?? '',
+    industry: job.industry ?? '',
+    department: job.department ?? '',
+    role: job.role ?? '',
+    numberOfOpenings: job.numberOfOpenings ?? 1,
+    applicationDeadline: toDateInput(job.applicationDeadline),
+  };
+}
+
+/**
+ * Create and edit share this form. Edit mode is entered via
+ * `/admin/jobs/:jobPrefix/edit`; the job is handed over in router state from the
+ * jobs list, and refetched by prefix on a hard reload.
+ */
 export function JobPostFormPage() {
   const { showToast } = useToast();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { jobPrefix: editPrefix } = useParams<{ jobPrefix: string }>();
+  const isEdit = !!editPrefix;
+
   const [submitting, setSubmitting] = useState(false);
   // Job prefix of the most recently created job — drives the share-link panel.
   const [createdPrefix, setCreatedPrefix] = useState<string | null>(null);
   // Computed once on mount so the deadline floor doesn't drift each render.
   const [minDeadline] = useState(localDateToday);
 
+  const [job, setJob] = useState<JobPostDTO | null>(
+    (location.state as { job?: JobPostDTO } | null)?.job ?? null,
+  );
+  const [loadingJob, setLoadingJob] = useState(isEdit && !job);
+
+  // An expired posting keeps its original deadline so a typo fix doesn't force
+  // the admin to reopen applications.
+  const schema = useMemo(
+    () => (isEdit ? jobEditSchema(toDateInput(job?.applicationDeadline)) : jobPostSchema),
+    [isEdit, job?.applicationDeadline],
+  );
+
   const {
     register,
     handleSubmit,
     reset,
-    formState: { errors, isValid },
+    formState: { errors, isValid, isDirty },
   } = useForm<JobPostFormData>({
-    resolver: zodResolver(jobPostSchema),
+    resolver: zodResolver(schema),
     mode: 'onChange',
-    defaultValues: {
-      jobPrefix: '',
-      jobTitle: '',
-      companyName: '',
-      location: '',
-      jobDescription: '',
-      keySkills: '',
-      experience: '',
-      education: '',
-      salaryRange: '',
-      jobType: '',
-      industry: '',
-      department: '',
-      role: '',
-      numberOfOpenings: 1,
-      applicationDeadline: '',
-    },
+    defaultValues: job ? toFormValues(job) : EMPTY_FORM,
   });
+
+  // Deep-linked or reloaded edit page: the list isn't in memory, so find the job.
+  useEffect(() => {
+    if (!isEdit || job) return;
+    let cancelled = false;
+    (async () => {
+      setLoadingJob(true);
+      try {
+        const res = await jobService.getAllJobs();
+        const found = (res.data ?? []).find((j) => j.jobPrefix === editPrefix);
+        if (cancelled) return;
+        if (!found) {
+          showToast(MESSAGES.admin.jobPost.notFound, 'error');
+          navigate(ROUTES.ADMIN.JOBS);
+          return;
+        }
+        setJob(found);
+        reset(toFormValues(found));
+      } catch {
+        // Error toast auto-handled by the API interceptor.
+      } finally {
+        if (!cancelled) setLoadingJob(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEdit, editPrefix]);
 
   async function onSubmit(data: JobPostFormData) {
     if (submitting) return;
     // Defense in depth: never let a past deadline reach the backend, even if the
     // form's validity state slips (schema + min attribute already guard the UI).
+    // On an edit, an untouched already-past deadline is allowed through.
+    const unchangedDeadline =
+      isEdit && data.applicationDeadline === toDateInput(job?.applicationDeadline);
     const deadline = new Date(`${data.applicationDeadline}T00:00:00`);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    if (Number.isNaN(deadline.getTime()) || deadline.getTime() < today.getTime()) {
+    if (
+      Number.isNaN(deadline.getTime()) ||
+      (!unchangedDeadline && deadline.getTime() < today.getTime())
+    ) {
       showToast(MESSAGES.admin.jobPost.deadlineInPast, 'error');
       return;
     }
+
     setSubmitting(true);
     try {
+      if (isEdit) {
+        if (job?.id == null) {
+          showToast(MESSAGES.admin.jobPost.updateNoId, 'error');
+          return;
+        }
+        // The prefix is the key applications and assessments hang off — send the
+        // stored one back untouched.
+        await jobService.updateJob(job.id, { ...job, ...data, jobPrefix: job.jobPrefix });
+        showToast(MESSAGES.admin.jobPost.updated, 'success');
+        navigate(ROUTES.ADMIN.JOBS);
+        return;
+      }
+
       await jobService.createJob(data);
       showToast(MESSAGES.admin.jobPost.posted, 'success');
       setCreatedPrefix(data.jobPrefix);
       reset();
-    } catch {
-      // Error toast (with the server's specific message) auto-handled by the API interceptor.
+    } catch (error) {
+      if (isEdit) {
+        // updateJob suppresses the auto-toast so a missing route reads as what
+        // it is, rather than a bare 404.
+        showToast(
+          isEndpointMissing(error)
+            ? MESSAGES.admin.jobPost.updateUnavailable
+            : extractApiError(error).message,
+          'error',
+        );
+      }
+      // Create errors are toasted by the API interceptor.
     } finally {
       setSubmitting(false);
     }
   }
 
+  if (loadingJob) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="w-8 h-8 animate-spin text-[var(--primary)]" />
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      {isEdit && (
+        <button
+          type="button"
+          onClick={() => navigate(ROUTES.ADMIN.JOBS)}
+          className="inline-flex items-center gap-2 text-sm font-medium text-[var(--textSecondary)] hover:text-[var(--primary)] transition-colors"
+        >
+          <ArrowLeft size={16} />
+          Back to Job Events
+        </button>
+      )}
+
       <div>
-        <h1 className="text-3xl font-bold text-[var(--text)]">Create Job Post</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-[var(--text)]">
+          {isEdit ? 'Edit Job Post' : 'Create Job Post'}
+        </h1>
         <p className="text-[var(--textSecondary)] mt-1">
-          Fill in the details below to create a new job posting
+          {isEdit
+            ? `Update the details of ${job?.jobPrefix ?? editPrefix}. Changes apply to the live posting immediately.`
+            : 'Fill in the details below to create a new job posting'}
         </p>
       </div>
 
@@ -145,6 +281,12 @@ export function JobPostFormPage() {
                 label="Job Prefix"
                 required
                 placeholder="e.g. DEV-2024-001"
+                // Applications, assessments and results are all filed under the
+                // prefix — renaming it would orphan them. `readOnly` rather than
+                // `disabled` so the value still posts back and stays copyable.
+                readOnly={isEdit}
+                className={isEdit ? 'opacity-60 cursor-not-allowed' : ''}
+                helperText={isEdit ? 'Cannot be changed after creation' : undefined}
                 error={errors.jobPrefix?.message}
                 {...register('jobPrefix')}
               />
@@ -252,8 +394,9 @@ export function JobPostFormPage() {
               />
               <Input
                 label="Role"
+                required
                 placeholder="e.g. Backend Developer"
-                helperText="Optional"
+                helperText="Shown as the job's heading on the Job Events page"
                 error={errors.role?.message}
                 {...register('role')}
               />
@@ -280,38 +423,59 @@ export function JobPostFormPage() {
                 label="Application Deadline"
                 required
                 type="date"
-                min={minDeadline}
-                helperText="Today or later"
+                // An expired posting may keep its own past date; any new date
+                // must still be today or later.
+                min={isEdit ? undefined : minDeadline}
+                helperText={isEdit ? 'Keep as-is, or pick today or later' : 'Today or later'}
                 error={errors.applicationDeadline?.message}
                 {...register('applicationDeadline')}
               />
             </div>
 
             {/* Submit */}
-            <div className="flex flex-col items-end gap-2 pt-4 border-t border-[var(--border)]">
+            <div className="flex flex-col sm:items-end gap-2 pt-4 border-t border-[var(--border)]">
               {!isValid && (
                 <p className="text-sm text-[var(--textSecondary)]">
                   Fill in all required fields (<span className="text-[var(--error)]">*</span>) to
-                  enable posting.
+                  enable {isEdit ? 'saving' : 'posting'}.
                 </p>
               )}
-              <div className="flex justify-end">
+              {isEdit && isValid && !isDirty && (
+                <p className="text-sm text-[var(--textSecondary)]">
+                  Change a field to enable saving.
+                </p>
+              )}
+              {/* Stacked on a phone, inline from sm up, so three actions never
+                  run off the edge. */}
+              <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-3 w-full">
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => reset()}
-                  className="mr-3"
+                  onClick={() => (isEdit ? navigate(ROUTES.ADMIN.JOBS) : reset())}
+                  className="w-full sm:w-auto"
                   disabled={submitting}
                 >
-                  Reset
+                  {isEdit ? 'Cancel' : 'Reset'}
                 </Button>
+                {isEdit && (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => reset(job ? toFormValues(job) : EMPTY_FORM)}
+                    className="w-full sm:w-auto"
+                    disabled={submitting || !isDirty}
+                  >
+                    Revert Changes
+                  </Button>
+                )}
                 <Button
                   type="submit"
+                  className="w-full sm:w-auto"
                   isLoading={submitting}
-                  disabled={!isValid || submitting}
-                  leftIcon={!submitting ? <Send size={16} /> : undefined}
+                  disabled={!isValid || submitting || (isEdit && !isDirty)}
+                  leftIcon={!submitting ? (isEdit ? <Save size={16} /> : <Send size={16} />) : undefined}
                 >
-                  Post Job
+                  {isEdit ? 'Save Changes' : 'Post Job'}
                 </Button>
               </div>
             </div>

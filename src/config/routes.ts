@@ -12,6 +12,8 @@ export const ROUTES = {
     DASHBOARD: '/admin/dashboard',
     JOBS: '/admin/jobs',
     JOBS_CREATE: '/admin/jobs/create',
+    JOBS_EDIT: '/admin/jobs/:jobPrefix/edit',
+    jobsEdit: (jobPrefix: string) => `/admin/jobs/${encodeURIComponent(jobPrefix)}/edit`,
     CANDIDATES: '/admin/candidates',
     USERS: '/admin/users',
     ATS: '/admin/ats',

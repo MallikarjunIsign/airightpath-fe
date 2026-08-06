@@ -92,7 +92,7 @@ export function EventsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold text-[var(--text)]">Available Jobs</h1>
+      <h1 className="text-2xl sm:text-3xl font-bold text-[var(--text)]">Available Jobs</h1>
 
       {/* Search, type and status filters */}
       <JobListFilters
@@ -113,13 +113,13 @@ export function EventsPage() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {listing.paged.map((job) => {
             const applied = isJobApplied(job);
             const expired = isDeadlinePassed(job.applicationDeadline);
 
             return (
-              <Card key={job.id ?? job.jobPrefix} hover>
+              <Card key={job.id ?? job.jobPrefix} hover className="min-w-0">
                 <CardContent>
                   <div className="space-y-4">
                     {/* Job Title, Company and Applied Badge */}
@@ -128,13 +128,15 @@ export function EventsPage() {
                         className="min-w-0 cursor-pointer"
                         onClick={() => handleViewDetails(job)}
                       >
-                        <h3 className="text-lg font-semibold text-[var(--text)] hover:text-[var(--primary)] transition-colors">
+                        <h3 className="text-lg font-semibold text-[var(--text)] hover:text-[var(--primary)] transition-colors truncate">
                           {job.jobTitle}
                         </h3>
-                        <p className="text-sm text-[var(--textSecondary)]">{job.companyName}</p>
+                        <p className="text-sm text-[var(--textSecondary)] truncate">
+                          {job.companyName}
+                        </p>
                       </div>
                       {applied && (
-                        <Badge variant="success" size="sm">
+                        <Badge variant="success" size="sm" className="flex-shrink-0">
                           <span className="flex items-center gap-1">
                             <CheckCircle size={12} />
                             Applied
@@ -143,27 +145,28 @@ export function EventsPage() {
                       )}
                     </div>
 
-                    {/* Details */}
+                    {/* Details — each line truncates so long values can't
+                        stretch the card on any screen. */}
                     <div className="space-y-2">
-                      <div className="flex items-center gap-2 text-sm text-[var(--textSecondary)]">
+                      <div className="flex items-center gap-2 text-sm text-[var(--textSecondary)] min-w-0">
                         <MapPin size={14} className="flex-shrink-0" />
-                        <span>{job.location}</span>
+                        <span className="truncate" title={job.location}>{job.location}</span>
                       </div>
-                      <div className="flex items-center gap-2 text-sm text-[var(--textSecondary)]">
+                      <div className="flex items-center gap-2 text-sm text-[var(--textSecondary)] min-w-0">
                         <Briefcase size={14} className="flex-shrink-0" />
-                        <span>{job.jobType}</span>
+                        <span className="truncate">{job.jobType}</span>
                       </div>
-                      <div className="flex items-center gap-2 text-sm text-[var(--textSecondary)]">
+                      <div className="flex items-center gap-2 text-sm text-[var(--textSecondary)] min-w-0">
                         <Clock size={14} className="flex-shrink-0" />
-                        <span>{job.experience} experience</span>
+                        <span className="truncate">{job.experience} experience</span>
                       </div>
-                      <div className={`flex items-center gap-2 text-sm ${expired ? 'text-red-500 dark:text-red-400 font-medium' : 'text-[var(--textSecondary)]'}`}>
+                      <div className={`flex items-center gap-2 text-sm min-w-0 ${expired ? 'text-red-500 dark:text-red-400 font-medium' : 'text-[var(--textSecondary)]'}`}>
                         {expired ? (
                           <AlertTriangle size={14} className="flex-shrink-0" />
                         ) : (
                           <Calendar size={14} className="flex-shrink-0" />
                         )}
-                        <span>
+                        <span className="truncate">
                           {expired
                             ? `Expired: ${formatDate(job.applicationDeadline)}`
                             : `Deadline: ${formatDate(job.applicationDeadline)}`}
@@ -193,31 +196,38 @@ export function EventsPage() {
                       </div>
                     )}
 
-                    {/* Action Buttons */}
-                    <div className="flex gap-2">
+                    {/* Action Buttons — a grid so the two labels share the row
+                        evenly and never overflow a narrow card. */}
+                    <div className="grid grid-cols-2 gap-2">
                       <Button
                         variant="outline"
-                        className="flex-1"
+                        size="sm"
+                        className="w-full min-w-0"
                         onClick={() => handleViewDetails(job)}
-                        leftIcon={<Eye size={16} />}
+                        leftIcon={<Eye size={15} />}
                       >
                         Details
                       </Button>
                       {applied ? (
                         <Button
-                          className="flex-1"
+                          size="sm"
+                          className="w-full min-w-0"
                           variant="outline"
                           onClick={() => handleApply(job)}
-                          leftIcon={<CheckCircle size={16} />}
+                          leftIcon={<CheckCircle size={15} />}
                         >
                           View Application
                         </Button>
                       ) : expired ? (
-                        <Button className="flex-1" disabled>
+                        <Button size="sm" className="w-full min-w-0" disabled>
                           Deadline Passed
                         </Button>
                       ) : (
-                        <Button className="flex-1" onClick={() => handleApply(job)}>
+                        <Button
+                          size="sm"
+                          className="w-full min-w-0"
+                          onClick={() => handleApply(job)}
+                        >
                           Apply Now
                         </Button>
                       )}
@@ -270,15 +280,19 @@ export function EventsPage() {
         >
           <div className="space-y-6">
             {/* Header */}
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-2xl font-bold text-[var(--text)]">{selectedJob.jobTitle}</h3>
-                <div className="flex items-center gap-2 mt-1">
-                  <Building2 size={16} className="text-[var(--textTertiary)]" />
-                  <span className="text-[var(--textSecondary)]">{selectedJob.companyName}</span>
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4">
+              <div className="min-w-0">
+                <h3 className="text-xl sm:text-2xl font-bold text-[var(--text)] break-words">
+                  {selectedJob.jobTitle}
+                </h3>
+                <div className="flex items-center gap-2 mt-1 min-w-0">
+                  <Building2 size={16} className="text-[var(--textTertiary)] flex-shrink-0" />
+                  <span className="text-[var(--textSecondary)] truncate">
+                    {selectedJob.companyName}
+                  </span>
                 </div>
               </div>
-              <div className="flex flex-col items-end gap-1">
+              <div className="flex flex-wrap sm:flex-col items-start sm:items-end gap-1.5 flex-shrink-0">
                 <Badge variant="primary" size="sm">{selectedJob.jobPrefix}</Badge>
                 {isJobApplied(selectedJob) && (
                   <Badge variant="success" size="sm">
@@ -291,34 +305,35 @@ export function EventsPage() {
               </div>
             </div>
 
-            {/* Key Info Grid */}
-            <div className="grid grid-cols-2 gap-4">
+            {/* Key Info Grid — single column on a phone so labels and values
+                keep their own line instead of being squeezed. */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="flex items-center gap-2 text-sm">
                 <MapPin size={16} className="text-[var(--primary)] flex-shrink-0" />
-                <div>
+                <div className="min-w-0">
                   <p className="text-[var(--textTertiary)] text-xs">Location</p>
-                  <p className="text-[var(--text)] font-medium">{selectedJob.location}</p>
+                  <p className="text-[var(--text)] font-medium break-words">{selectedJob.location}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2 text-sm">
                 <Briefcase size={16} className="text-[var(--primary)] flex-shrink-0" />
-                <div>
+                <div className="min-w-0">
                   <p className="text-[var(--textTertiary)] text-xs">Job Type</p>
-                  <p className="text-[var(--text)] font-medium">{selectedJob.jobType}</p>
+                  <p className="text-[var(--text)] font-medium break-words">{selectedJob.jobType}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2 text-sm">
                 <Clock size={16} className="text-[var(--primary)] flex-shrink-0" />
-                <div>
+                <div className="min-w-0">
                   <p className="text-[var(--textTertiary)] text-xs">Experience</p>
-                  <p className="text-[var(--text)] font-medium">{selectedJob.experience}</p>
+                  <p className="text-[var(--text)] font-medium break-words">{selectedJob.experience}</p>
                 </div>
               </div>
               <div className="flex items-center gap-2 text-sm">
                 <GraduationCap size={16} className="text-[var(--primary)] flex-shrink-0" />
-                <div>
+                <div className="min-w-0">
                   <p className="text-[var(--textTertiary)] text-xs">Education</p>
-                  <p className="text-[var(--text)] font-medium">{selectedJob.education}</p>
+                  <p className="text-[var(--text)] font-medium break-words">{selectedJob.education}</p>
                 </div>
               </div>
               {selectedJob.salaryRange && (
@@ -326,7 +341,7 @@ export function EventsPage() {
                   <DollarSign size={16} className="text-[var(--primary)] flex-shrink-0" />
                   <div>
                     <p className="text-[var(--textTertiary)] text-xs">Salary Range</p>
-                    <p className="text-[var(--text)] font-medium">{selectedJob.salaryRange}</p>
+                    <p className="text-[var(--text)] font-medium break-words">{selectedJob.salaryRange}</p>
                   </div>
                 </div>
               )}
@@ -335,7 +350,7 @@ export function EventsPage() {
                   <Users size={16} className="text-[var(--primary)] flex-shrink-0" />
                   <div>
                     <p className="text-[var(--textTertiary)] text-xs">Openings</p>
-                    <p className="text-[var(--text)] font-medium">{selectedJob.numberOfOpenings}</p>
+                    <p className="text-[var(--text)] font-medium break-words">{selectedJob.numberOfOpenings}</p>
                   </div>
                 </div>
               )}
@@ -344,7 +359,7 @@ export function EventsPage() {
                   <Building2 size={16} className="text-[var(--primary)] flex-shrink-0" />
                   <div>
                     <p className="text-[var(--textTertiary)] text-xs">Industry</p>
-                    <p className="text-[var(--text)] font-medium">{selectedJob.industry}</p>
+                    <p className="text-[var(--text)] font-medium break-words">{selectedJob.industry}</p>
                   </div>
                 </div>
               )}
@@ -353,7 +368,7 @@ export function EventsPage() {
                   <FileText size={16} className="text-[var(--primary)] flex-shrink-0" />
                   <div>
                     <p className="text-[var(--textTertiary)] text-xs">Department</p>
-                    <p className="text-[var(--text)] font-medium">{selectedJob.department}</p>
+                    <p className="text-[var(--text)] font-medium break-words">{selectedJob.department}</p>
                   </div>
                 </div>
               )}
@@ -362,7 +377,7 @@ export function EventsPage() {
                   <Mail size={16} className="text-[var(--primary)] flex-shrink-0" />
                   <div>
                     <p className="text-[var(--textTertiary)] text-xs">Contact</p>
-                    <p className="text-[var(--text)] font-medium">{selectedJob.contactEmail}</p>
+                    <p className="text-[var(--text)] font-medium break-words">{selectedJob.contactEmail}</p>
                   </div>
                 </div>
               )}

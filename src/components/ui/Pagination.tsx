@@ -74,14 +74,17 @@ export function Pagination({
   const pages = generatePageNumbers(currentPage, totalPages, siblingCount);
 
   const buttonBase = `
-    inline-flex items-center justify-center
+    inline-flex items-center justify-center flex-shrink-0
     w-9 h-9 rounded-xl text-sm font-medium
     transition-all duration-200
     disabled:opacity-40 disabled:cursor-not-allowed
   `;
 
   return (
-    <div className={`flex items-center justify-between gap-4 ${className}`} {...props}>
+    <div
+      className={`flex flex-wrap items-center justify-between gap-x-4 gap-y-2 ${className}`}
+      {...props}
+    >
       {totalItems !== undefined && pageSize !== undefined && (
         <p className="text-sm text-[var(--textSecondary)] tabular-nums">
           Showing {Math.min((currentPage - 1) * pageSize + 1, totalItems)}
@@ -90,7 +93,11 @@ export function Pagination({
         </p>
       )}
 
-      <nav className="flex items-center gap-1" aria-label="Pagination">
+      {/* Page buttons scroll rather than overflow when there are many pages. */}
+      <nav
+        className="flex items-center gap-1 max-w-full overflow-x-auto scrollbar-thin"
+        aria-label="Pagination"
+      >
         {showFirstLast && (
           <button
             onClick={() => onPageChange(1)}

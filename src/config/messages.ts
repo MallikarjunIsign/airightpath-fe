@@ -159,6 +159,15 @@ export const MESSAGES = {
     jobPost: {
       deadlineInPast: 'Application deadline cannot be in the past.',
       posted: 'Job posted successfully!',
+      updated: 'Job updated successfully!',
+      notFound: 'That job could not be found.',
+      updateNoId: 'This job has no id, so it cannot be updated. Please refresh and try again.',
+      updateUnavailable:
+        'Editing jobs is not available on this server yet — the update endpoint has not been deployed.',
+      deleted: (prefix: string) => `Job ${prefix} deleted.`,
+      deleteNoId: 'This job has no id, so it cannot be deleted. Please refresh and try again.',
+      deleteUnavailable:
+        'Deleting jobs is not available on this server yet — the delete endpoint has not been deployed.',
     },
     prompts: {
       reuseCopied: (source: string) => `Copied prompts from ${source}. Review and Save to apply.`,

@@ -17,6 +17,15 @@ export const JOB_PAGE_SIZES = [20, 40, 60, 100];
 
 export const DEFAULT_JOB_PAGE_SIZE = 20;
 
+/**
+ * What a job is called in the lists: the role, which identifies the position
+ * more precisely than the title. Jobs created before the role became mandatory
+ * fall back to the title.
+ */
+export function jobDisplayName(job: Pick<JobPostDTO, 'role' | 'jobTitle'>): string {
+  return job.role?.trim() || job.jobTitle;
+}
+
 /** A job is expired once its application deadline is before today. */
 export function isJobExpired(job: Pick<JobPostDTO, 'applicationDeadline'>): boolean {
   if (!job.applicationDeadline) return false;
@@ -85,6 +94,7 @@ export function useJobListing(jobs: JobPostDTO[], storagePrefix: string): JobLis
       const matchesSearch =
         !q ||
         job.jobTitle?.toLowerCase().includes(q) ||
+        (job.role ?? '').toLowerCase().includes(q) ||
         job.companyName?.toLowerCase().includes(q) ||
         (job.keySkills ?? '').toLowerCase().includes(q) ||
         job.location?.toLowerCase().includes(q) ||

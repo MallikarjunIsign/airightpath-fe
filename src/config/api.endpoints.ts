@@ -21,6 +21,10 @@ export const ENDPOINTS = {
   JOBS: {
     GET_ALL: "/api/jobs/getPost",
     CREATE: "/api/jobs/post",
+    // Pending backend delivery — see docs/backend-requirements-job-update.md
+    // and docs/backend-requirements-job-delete.md.
+    UPDATE: (id: number) => `/api/jobs/post/${id}`,
+    DELETE: (id: number) => `/api/jobs/post/${id}`,
   },
   JOB_APPLICATIONS: {
     APPLY: "/api/job-applications/apply",

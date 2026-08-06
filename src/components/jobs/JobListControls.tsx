@@ -22,8 +22,8 @@ export function JobListFilters({
   const { counts } = listing;
 
   return (
-    <div className="flex flex-col sm:flex-row gap-4">
-      <div className="flex-1">
+    <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
+      <div className="flex-1 min-w-0">
         <Input
           placeholder={searchPlaceholder}
           leftIcon={<Search size={18} />}
@@ -31,22 +31,26 @@ export function JobListFilters({
           onChange={(e) => listing.setSearchQuery(e.target.value)}
         />
       </div>
-      <div className="sm:w-44">
-        <Select
-          options={[{ value: '', label: 'All Types' }, ...listing.jobTypes]}
-          value={listing.filterType}
-          onChange={(e) => listing.setFilterType(e.target.value)}
-        />
-      </div>
-      <div className="sm:w-44">
-        <Select
-          options={STATUS_OPTIONS.map((opt) => ({
-            value: opt.value,
-            label: `${opt.label} (${counts[opt.value]})`,
-          }))}
-          value={listing.status}
-          onChange={(e) => listing.setStatus(e.target.value as JobStatusFilter)}
-        />
+      {/* On a phone the two dropdowns share one row under the search box
+          rather than each taking a full-width line. */}
+      <div className="flex gap-3 sm:gap-4">
+        <div className="flex-1 min-w-0 sm:flex-none sm:w-44">
+          <Select
+            options={[{ value: '', label: 'All Types' }, ...listing.jobTypes]}
+            value={listing.filterType}
+            onChange={(e) => listing.setFilterType(e.target.value)}
+          />
+        </div>
+        <div className="flex-1 min-w-0 sm:flex-none sm:w-44">
+          <Select
+            options={STATUS_OPTIONS.map((opt) => ({
+              value: opt.value,
+              label: `${opt.label} (${counts[opt.value]})`,
+            }))}
+            value={listing.status}
+            onChange={(e) => listing.setStatus(e.target.value as JobStatusFilter)}
+          />
+        </div>
       </div>
     </div>
   );

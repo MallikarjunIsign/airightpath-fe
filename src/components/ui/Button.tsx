@@ -102,7 +102,10 @@ export function Button({
       ) : (
         <>
           {leftIcon && <span className="flex-shrink-0">{leftIcon}</span>}
-          <span>{children}</span>
+          {/* `truncate` also zeroes the flex item's automatic minimum size, so a
+              long label shortens instead of pushing the button past its
+              container on narrow screens. */}
+          <span className="truncate">{children}</span>
           {rightIcon && (
             <span className="flex-shrink-0 transition-transform duration-200 group-hover:translate-x-0.5">
               {rightIcon}
