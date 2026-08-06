@@ -466,6 +466,7 @@ export function AtsScreeningPage() {
                 <AtsResultsTable
                   candidates={filteredCandidates}
                   sortField={sortField}
+                  sortDirection={sortDirection}
                   onSort={toggleSort}
                   onView={setSelectedCandidate}
                 />
