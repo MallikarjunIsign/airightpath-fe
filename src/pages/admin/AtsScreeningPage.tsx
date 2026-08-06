@@ -271,6 +271,8 @@ export function AtsScreeningPage() {
             <div className="space-y-4">
               <Select
                 options={jobOptions}
+                searchable
+                searchPlaceholder="Search by job title or prefix..."
                 value={selectedPrefix}
                 onChange={(e) => onJobSelected(e.target.value)}
               />

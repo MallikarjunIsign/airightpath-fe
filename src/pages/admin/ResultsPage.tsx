@@ -205,6 +205,8 @@ export function ResultsPage() {
             <Select
               label="Select Job"
               options={jobOptions}
+              searchable
+              searchPlaceholder="Search by job title or prefix..."
               value={selectedPrefix}
               onChange={(e) => setSelectedPrefix(e.target.value)}
             />

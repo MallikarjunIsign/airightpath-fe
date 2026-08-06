@@ -8,7 +8,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { ChevronDown, Check } from 'lucide-react';
+import { ChevronDown, Check, Search } from 'lucide-react';
 
 interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   label?: string;
@@ -17,11 +17,20 @@ interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   options: { value: string; label: string }[];
   /** Shown on the trigger when nothing is selected yet. */
   placeholder?: string;
+  /**
+   * Show a filter box inside the popup. Defaults to on once the list is long
+   * enough to scroll; pass `true`/`false` to force it either way.
+   */
+  searchable?: boolean;
+  /** Placeholder for the filter box. */
+  searchPlaceholder?: string;
 }
 
 /** Space (px) the popup keeps between itself and the viewport edge. */
 const VIEWPORT_GUTTER = 12;
 const MAX_POPUP_HEIGHT = 288;
+/** Beyond this many options, scrolling to find one is a chore — filter instead. */
+const SEARCHABLE_THRESHOLD = 8;
 
 /**
  * Dropdown with a popup we render and size ourselves. The native `<select>`
@@ -36,19 +45,32 @@ const MAX_POPUP_HEIGHT = 288;
  */
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(
   (
-    { label, error, helperText, options, placeholder, required, className = '', ...props },
+    {
+      label,
+      error,
+      helperText,
+      options,
+      placeholder,
+      searchable,
+      searchPlaceholder = 'Search...',
+      required,
+      className = '',
+      ...props
+    },
     ref,
   ) => {
     const selectRef = useRef<HTMLSelectElement>(null);
     const wrapperRef = useRef<HTMLDivElement>(null);
     const listRef = useRef<HTMLDivElement>(null);
     const triggerRef = useRef<HTMLButtonElement>(null);
+    const searchRef = useRef<HTMLInputElement>(null);
     const listId = useId();
 
     const [open, setOpen] = useState(false);
     const [dropUp, setDropUp] = useState(false);
     const [maxHeight, setMaxHeight] = useState(MAX_POPUP_HEIGHT);
     const [activeIndex, setActiveIndex] = useState(-1);
+    const [query, setQuery] = useState('');
     // Mirrors the native select for uncontrolled use (e.g. RHF `register`).
     const [uncontrolledValue, setUncontrolledValue] = useState('');
 
@@ -57,6 +79,18 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
     const currentValue = isControlled ? String(props.value ?? '') : uncontrolledValue;
     const selectedIndex = options.findIndex((o) => o.value === currentValue);
     const selectedLabel = selectedIndex >= 0 ? options[selectedIndex].label : '';
+
+    const showSearch = searchable ?? options.length > SEARCHABLE_THRESHOLD;
+
+    // The popup, keyboard cursor and Enter key all work off this list, so a
+    // filtered popup behaves exactly like an unfiltered one.
+    const q = query.trim().toLowerCase();
+    const visibleOptions =
+      showSearch && q
+        ? options.filter(
+            (o) => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q),
+          )
+        : options;
 
     const setRefs = useCallback(
       (node: HTMLSelectElement | null) => {
@@ -123,15 +157,28 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
     useEffect(() => {
       if (!open) return;
       setActiveIndex(selectedIndex >= 0 ? selectedIndex : 0);
+      setQuery('');
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [open]);
+
+    // Typing straight into the filter is the point of opening a searchable list.
+    useEffect(() => {
+      if (open && showSearch) searchRef.current?.focus();
+    }, [open, showSearch]);
+
+    // Filtering shifts the rows under the cursor — put it back on the first hit.
+    // Only while a query is active, so opening still lands on the selected row.
+    useEffect(() => {
+      if (open && query) setActiveIndex(0);
+    }, [query, open]);
 
     useEffect(() => {
       if (!open || activeIndex < 0) return;
       listRef.current?.children[activeIndex]?.scrollIntoView({ block: 'nearest' });
     }, [open, activeIndex]);
 
-    const onTriggerKeyDown = (e: React.KeyboardEvent) => {
+    /** Shared by the trigger and the filter box so both drive the same list. */
+    const onListKeyDown = (e: React.KeyboardEvent) => {
       if (disabled) return;
       if (!open) {
         if (['Enter', ' ', 'ArrowDown', 'ArrowUp'].includes(e.key)) {
@@ -144,10 +191,11 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
         case 'Escape':
           e.preventDefault();
           setOpen(false);
+          triggerRef.current?.focus();
           break;
         case 'ArrowDown':
           e.preventDefault();
-          setActiveIndex((i) => Math.min(options.length - 1, i + 1));
+          setActiveIndex((i) => Math.min(visibleOptions.length - 1, i + 1));
           break;
         case 'ArrowUp':
           e.preventDefault();
@@ -159,12 +207,17 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
           break;
         case 'End':
           e.preventDefault();
-          setActiveIndex(options.length - 1);
+          setActiveIndex(visibleOptions.length - 1);
           break;
         case 'Enter':
-        case ' ':
           e.preventDefault();
-          if (options[activeIndex]) commit(options[activeIndex].value);
+          if (visibleOptions[activeIndex]) commit(visibleOptions[activeIndex].value);
+          break;
+        case ' ':
+          // Space is a normal character while typing a filter.
+          if (showSearch) break;
+          e.preventDefault();
+          if (visibleOptions[activeIndex]) commit(visibleOptions[activeIndex].value);
           break;
         case 'Tab':
           setOpen(false);
@@ -224,7 +277,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
             aria-required={required}
             aria-invalid={!!error}
             onClick={() => setOpen((o) => !o)}
-            onKeyDown={onTriggerKeyDown}
+            onKeyDown={onListKeyDown}
             className={triggerClasses}
           >
             <span
@@ -240,38 +293,71 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
 
           {open && (
             <div
-              ref={listRef}
-              id={listId}
-              role="listbox"
               style={{ maxHeight }}
-              className={`absolute z-50 left-0 right-0 w-full overflow-y-auto overscroll-contain
-                rounded-xl border border-[var(--border)] bg-[var(--cardBg)] shadow-xl py-1
+              className={`absolute z-50 left-0 right-0 w-full flex flex-col
+                rounded-xl border border-[var(--border)] bg-[var(--cardBg)] shadow-xl
                 ${dropUp ? 'bottom-full mb-1' : 'top-full mt-1'}`}
             >
-              {options.length === 0 && (
-                <p className="px-4 py-3 text-sm text-[var(--textTertiary)]">No options</p>
+              {/* Filter stays put while the list below it scrolls. */}
+              {showSearch && (
+                <div className="flex-shrink-0 p-2 border-b border-[var(--borderMuted,var(--border))]">
+                  <div className="relative">
+                    <Search
+                      size={15}
+                      className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--textTertiary)] pointer-events-none"
+                    />
+                    <input
+                      ref={searchRef}
+                      type="text"
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      onKeyDown={onListKeyDown}
+                      placeholder={searchPlaceholder}
+                      aria-label={searchPlaceholder}
+                      aria-controls={listId}
+                      className="w-full h-9 pl-8 pr-2 rounded-lg text-sm
+                        bg-[var(--inputBg)] border border-[var(--inputBorder)] text-[var(--text)]
+                        placeholder:text-[var(--textTertiary)]
+                        focus:outline-none focus:border-[var(--inputFocus)]
+                        focus:ring-2 focus:ring-[var(--inputFocus)]/15"
+                    />
+                  </div>
+                </div>
               )}
-              {options.map((option, i) => {
-                const isSelected = option.value === currentValue;
-                return (
-                  <button
-                    key={option.value}
-                    type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    onMouseEnter={() => setActiveIndex(i)}
-                    onClick={() => commit(option.value)}
-                    className={`w-full text-left px-4 py-2.5 text-sm flex items-start gap-2 break-words transition-colors
-                      ${i === activeIndex ? 'bg-[var(--surface1)]' : ''}
-                      ${isSelected ? 'font-semibold text-[var(--primary)]' : 'text-[var(--text)]'}`}
-                  >
-                    <span className="flex-1 min-w-0 break-words">{option.label}</span>
-                    {isSelected && (
-                      <Check size={15} className="flex-shrink-0 mt-0.5 text-[var(--primary)]" />
-                    )}
-                  </button>
-                );
-              })}
+
+              <div
+                ref={listRef}
+                id={listId}
+                role="listbox"
+                className="flex-1 overflow-y-auto overscroll-contain py-1"
+              >
+                {visibleOptions.length === 0 && (
+                  <p className="px-4 py-3 text-sm text-[var(--textTertiary)]">
+                    {options.length === 0 ? 'No options' : `No matches for "${query.trim()}"`}
+                  </p>
+                )}
+                {visibleOptions.map((option, i) => {
+                  const isSelected = option.value === currentValue;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      onMouseEnter={() => setActiveIndex(i)}
+                      onClick={() => commit(option.value)}
+                      className={`w-full text-left px-4 py-2.5 text-sm flex items-start gap-2 break-words transition-colors
+                        ${i === activeIndex ? 'bg-[var(--surface1)]' : ''}
+                        ${isSelected ? 'font-semibold text-[var(--primary)]' : 'text-[var(--text)]'}`}
+                    >
+                      <span className="flex-1 min-w-0 break-words">{option.label}</span>
+                      {isSelected && (
+                        <Check size={15} className="flex-shrink-0 mt-0.5 text-[var(--primary)]" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
