@@ -6,7 +6,6 @@ import {
   Calendar,
   FileText,
   ClipboardList,
-  Upload,
   UserCheck,
   MessageSquare,
   BookOpen,
@@ -60,26 +59,21 @@ const adminNavItems: NavItem[] = [
     icon: <UserCheck size={18} />,
     path: ROUTES.ADMIN.CANDIDATES,
   },
-  { label: "Users", icon: <Users size={18} />, path: ROUTES.ADMIN.USERS },
   {
-    label: "ATS Screening",
+    // Scores the resumes of people who applied to a chosen job.
+    label: "Applicant Screening",
     icon: <FileSearch size={18} />,
     path: ROUTES.ADMIN.ATS,
   },
   {
-    label: "ATS Batch",
-    icon: <Layers size={18} />,
-    path: ROUTES.ADMIN.ATS_BATCH,
+    label: "Manage Prompts",
+    icon: <MessageSquare size={18} />,
+    path: ROUTES.ADMIN.PROMPTS,
   },
   {
-    label: "Assign",
+    label: "Assign Assessment",
     icon: <ClipboardList size={18} />,
     path: ROUTES.ADMIN.ASSESSMENTS_ASSIGN,
-  },
-  {
-    label: "Upload Questions",
-    icon: <Upload size={18} />,
-    path: ROUTES.ADMIN.ASSESSMENTS_UPLOAD,
   },
   {
     label: "Assessment Results",
@@ -87,7 +81,7 @@ const adminNavItems: NavItem[] = [
     path: ROUTES.ADMIN.ASSESSMENTS_RESULTS,
   },
   {
-    label: "Schedule",
+    label: "Schedule Interview",
     icon: <Calendar size={18} />,
     path: ROUTES.ADMIN.INTERVIEWS_SCHEDULE,
   },
@@ -97,10 +91,25 @@ const adminNavItems: NavItem[] = [
     path: ROUTES.ADMIN.INTERVIEWS_RESULTS,
   },
   {
-    label: "Prompts",
-    icon: <MessageSquare size={18} />,
-    path: ROUTES.ADMIN.PROMPTS,
+    // Paste any job description, upload resumes, get ATS scores — no job post
+    // and no applicants involved.
+    label: "Resume Match (Custom JD)",
+    icon: <Layers size={18} />,
+    path: ROUTES.ADMIN.ATS_BATCH,
   },
+  {
+    label: "User Management",
+    icon: <Users size={18} />,
+    path: ROUTES.ADMIN.USERS,
+  },
+  // Upload Questions — question papers are generated or uploaded from the
+  // Assign Assessment screen, so this duplicate entry is hidden. Route and page
+  // are unchanged; re-add the Upload icon import to restore.
+  // {
+  //   label: "Upload Questions",
+  //   icon: <Upload size={18} />,
+  //   path: ROUTES.ADMIN.ASSESSMENTS_UPLOAD,
+  // },
 ];
 
 const candidateNavItems: NavItem[] = [
@@ -232,7 +241,7 @@ export function Sidebar({ environment = "prod" }: SidebarProps) {
           sidebar-surface
           fixed left-0 top-0 h-screen
           transition-transform duration-moderate ease-spring md:transition-all
-          ${isExpanded ? "w-[240px]" : "w-[72px]"}
+          ${isExpanded ? "w-[264px]" : "w-[72px]"}
           ${mobileOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"} md:translate-x-0
           flex flex-col z-sidebar
         `}
@@ -331,11 +340,14 @@ export function Sidebar({ environment = "prod" }: SidebarProps) {
                     {item.icon}
                   </span>
 
+                  {/* One line. The sidebar is wide enough for these labels; a
+                      longer one clips and the hover title spells it out. */}
                   <span
+                    title={item.label}
                     className={`
                       truncate text-[0.8125rem] tracking-[-0.01em]
                       transition-all duration-moderate ease-spring
-                      ${isExpanded ? "flex-1 opacity-100 w-auto" : "hidden"}
+                      ${isExpanded ? "flex-1 min-w-0 opacity-100 w-auto" : "hidden"}
                     `}
                   >
                     {item.label}

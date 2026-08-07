@@ -91,7 +91,7 @@ export function Navbar() {
         ${scrolled ? 'navbar-scrolled' : ''}
       `}
       style={{
-        left: 'var(--sidebar-width, 240px)',
+        left: 'var(--sidebar-width, 264px)',
       }}
     >
       <div className="h-full px-4 sm:px-6 flex items-center gap-2">

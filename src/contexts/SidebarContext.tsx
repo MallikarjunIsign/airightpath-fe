@@ -46,7 +46,7 @@ export function SidebarProvider({ children }: { children: ReactNode }) {
     const apply = () => {
       const mobile = mq.matches;
       setIsMobile(mobile);
-      const desktopWidth = collapsed ? '72px' : '240px';
+      const desktopWidth = collapsed ? '72px' : '264px';
       document.documentElement.style.setProperty('--sidebar-width', mobile ? '0px' : desktopWidth);
       if (!mobile) setMobileOpen(false); // leaving mobile → ensure drawer is closed
     };

@@ -36,7 +36,7 @@ export function Layout({ children }: LayoutProps) {
       <main
         className="layout-content"
         style={{
-          marginLeft: 'var(--sidebar-width, 240px)',
+          marginLeft: 'var(--sidebar-width, 264px)',
         }}
       >
         <div className="max-w-[1400px] mx-auto animate-fade-in-up">
