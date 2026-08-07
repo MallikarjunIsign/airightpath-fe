@@ -94,7 +94,9 @@ export function AdminJobsPage() {
     // Pre-select this job on the Candidates page, then navigate there.
     // CandidateDetailsPage auto-loads candidates for the persisted prefix.
     writePersistentValue('candidates:selectedPrefix', job.jobPrefix);
-    navigate(ROUTES.ADMIN.CANDIDATES);
+    navigate(ROUTES.ADMIN.CANDIDATES, {
+      state: { from: { label: 'Job Events', path: ROUTES.ADMIN.JOBS } },
+    });
   };
 
   /**

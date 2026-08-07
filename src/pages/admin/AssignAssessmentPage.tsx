@@ -4,6 +4,7 @@ import { Loader2, ClipboardList, Send, Sparkles, Upload, Eye, FileText, X, FileC
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { DateTimeField } from '@/components/ui/DateTimeField';
+import { BackLink } from '@/components/ui/BackLink';
 import { Select } from '@/components/ui/Select';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
@@ -127,7 +128,17 @@ export function AssignAssessmentPage() {
       showToast(MESSAGES.admin.common.selectJobFirst, 'warning');
       return;
     }
-    navigate(ROUTES.ADMIN.PROMPTS, { state: { jobPrefix: selectedPrefix } });
+    navigate(ROUTES.ADMIN.PROMPTS, {
+      state: {
+        jobPrefix: selectedPrefix,
+        // Hand the context back so returning restores the job and selection.
+        from: {
+          label: 'Assign Assessment',
+          path: ROUTES.ADMIN.ASSESSMENTS_ASSIGN,
+          state: { jobPrefix: selectedPrefix, emails: Array.from(selectedEmails) },
+        },
+      },
+    });
   }
 
   // Apply the pending pre-selection once the candidate list has loaded.
@@ -364,8 +375,11 @@ export function AssignAssessmentPage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      {/* Shown only when another screen sent us here */}
+      <BackLink />
+
       <div>
-        <h1 className="text-3xl font-bold text-[var(--text)]">Assign Assessment</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-[var(--text)]">Assign Assessment</h1>
         <p className="text-[var(--textSecondary)] mt-1">
           Select a job, choose candidates, and assign an assessment
         </p>

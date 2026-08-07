@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { BackLink } from '@/components/ui/BackLink';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
 import { resumeService } from '@/services/resume.service';
@@ -326,9 +327,12 @@ export function AtsScreeningPage() {
 
   return (
     <div className="space-y-6">
+      {/* Shown only when another screen sent us here */}
+      <BackLink />
+
       {/* Page Header */}
       <div>
-        <h1 className="text-3xl font-bold text-[var(--text)]">ATS Screening</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-[var(--text)]">ATS Screening</h1>
         <p className="text-[var(--textSecondary)] mt-1">
           Screen and shortlist candidates by matching their resumes against job requirements
         </p>

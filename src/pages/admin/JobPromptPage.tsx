@@ -8,6 +8,7 @@ import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
 import { Badge } from '@/components/ui/Badge';
 import { useToast } from '@/components/ui/Toast';
+import { BackLink } from '@/components/ui/BackLink';
 import { jobService } from '@/services/job.service';
 import { promptService } from '@/services/prompt.service';
 import { MESSAGES } from '@/config/messages';
@@ -460,9 +461,12 @@ export function JobPromptPage() {
 
   return (
     <div className={`mx-auto space-y-6 ${mode === 'list' ? 'max-w-5xl' : 'max-w-3xl'}`}>
+      {/* Shown only when another screen sent us here */}
+      <BackLink />
+
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-[var(--text)]">Job Prompt</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-[var(--text)]">Job Prompt</h1>
           <p className="text-[var(--textSecondary)] mt-1">
             {mode === 'list'
               ? 'Reuse an existing job prompt or create a new one'

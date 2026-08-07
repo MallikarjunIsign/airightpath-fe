@@ -23,6 +23,7 @@ import { CandidateTable } from '@/components/admin/CandidateTable';
 import { CandidateDetailModal } from '@/components/admin/CandidateDetailModal';
 import { BulkActionModal } from '@/components/admin/BulkActionModal';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { BackLink } from '@/components/ui/BackLink';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
 import { assessmentService } from '@/services/assessment.service';
@@ -279,7 +280,9 @@ export function CandidateDetailsPage() {
     }
     writePersistentValue('ats:selectedPrefix', selectedPrefix);
     writePersistentValue('ats:scopeEmails', Array.from(selectedEmails));
-    navigate(ROUTES.ADMIN.ATS);
+    navigate(ROUTES.ADMIN.ATS, {
+      state: { from: { label: 'Candidates', path: ROUTES.ADMIN.CANDIDATES } },
+    });
   }
 
   // Manually shortlist candidates (Applied → Shortlisted) without ATS screening.
@@ -369,7 +372,11 @@ export function CandidateDetailsPage() {
       return;
     }
     navigate(ROUTES.ADMIN.ASSESSMENTS_ASSIGN, {
-      state: { jobPrefix: selectedPrefix, emails: Array.from(selectedEmails) },
+      state: {
+        jobPrefix: selectedPrefix,
+        emails: Array.from(selectedEmails),
+        from: { label: 'Candidates', path: ROUTES.ADMIN.CANDIDATES },
+      },
     });
   }
 
@@ -488,8 +495,11 @@ export function CandidateDetailsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Shown only when another screen sent us here */}
+      <BackLink />
+
       <div>
-        <h1 className="text-3xl font-bold text-[var(--text)]">Candidate Details</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-[var(--text)]">Candidate Details</h1>
         <p className="text-[var(--textSecondary)] mt-1">
           Track and manage candidates through the recruitment pipeline
         </p>
