@@ -42,3 +42,55 @@ export function canonicalJobType(value?: string): string {
 export function isSameJobType(a?: string, b?: string): boolean {
   return canonicalJobType(a) === canonicalJobType(b);
 }
+
+// ── Deadlines ──────────────────────────────────────────────────────────
+
+/** A deadline this many days away or nearer is flagged as closing soon. */
+export const DEADLINE_SOON_DAYS = 2;
+
+/**
+ * Whole days from today until the deadline: 0 is today, negative is past.
+ * Compared at day granularity, the same way expiry is judged, so the two
+ * never disagree about a job due today.
+ */
+export function daysUntilDeadline(deadline?: string): number | null {
+  if (!deadline) return null;
+  const due = new Date(deadline);
+  if (Number.isNaN(due.getTime())) return null;
+  const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate()).getTime();
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  return Math.round((dueDay - today) / 86_400_000);
+}
+
+export type DeadlineUrgency = 'past' | 'soon' | 'later';
+
+/** `soon` covers today through `DEADLINE_SOON_DAYS` days out. */
+export function deadlineUrgency(deadline?: string): DeadlineUrgency {
+  const days = daysUntilDeadline(deadline);
+  if (days === null) return 'later';
+  if (days < 0) return 'past';
+  return days <= DEADLINE_SOON_DAYS ? 'soon' : 'later';
+}
+
+/** Amber when the deadline is within two days, green while there is time. */
+export function deadlineColor(deadline?: string): string {
+  switch (deadlineUrgency(deadline)) {
+    case 'past':
+      return 'var(--error)';
+    case 'soon':
+      return 'var(--warning)';
+    default:
+      return 'var(--success)';
+  }
+}
+
+/** "Today" / "Tomorrow" / "in 5 days" — context for the coloured date. */
+export function deadlineLabel(deadline?: string): string {
+  const days = daysUntilDeadline(deadline);
+  if (days === null) return '';
+  if (days < 0) return `${Math.abs(days)}d ago`;
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Tomorrow';
+  return `in ${days} days`;
+}

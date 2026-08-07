@@ -5,6 +5,8 @@ interface StatsCardProps extends HTMLAttributes<HTMLDivElement> {
   icon?: ReactNode;
   label: string;
   value: string | number;
+  /** Secondary figure under the value, e.g. "45 open positions". */
+  caption?: string;
   trend?: {
     value: number;
     label?: string;
@@ -45,6 +47,7 @@ export function StatsCard({
   icon,
   label,
   value,
+  caption,
   trend,
   iconBgClass,
   variant = 'primary',
@@ -77,6 +80,9 @@ export function StatsCard({
         <div className="flex-1">
           <p className="text-sm font-medium text-[var(--textSecondary)] mb-1">{label}</p>
           <p className="text-2xl font-bold text-[var(--text)] font-heading tabular-nums">{value}</p>
+          {caption && (
+            <p className="text-xs text-[var(--textSecondary)] mt-1 tabular-nums">{caption}</p>
+          )}
           {trend && (
             <div className="flex items-center gap-1.5 mt-2">
               <span
