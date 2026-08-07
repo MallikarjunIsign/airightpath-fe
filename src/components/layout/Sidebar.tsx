@@ -60,8 +60,9 @@ const adminNavItems: NavItem[] = [
     path: ROUTES.ADMIN.CANDIDATES,
   },
   {
-    // Scores the resumes of people who applied to a chosen job.
-    label: "Applicant Screening",
+    // Scores the resumes of people who applied to a chosen job. Same wording as
+    // the "Screen with ATS" button on the Candidates screen.
+    label: "Screen with ATS",
     icon: <FileSearch size={18} />,
     path: ROUTES.ADMIN.ATS,
   },
@@ -119,17 +120,13 @@ const candidateNavItems: NavItem[] = [
     path: ROUTES.CANDIDATE.DASHBOARD,
   },
   {
-    label: "Resume",
-    icon: <FileText size={18} />,
-    path: ROUTES.CANDIDATE.RESUME,
-  },
-  {
     label: "Job Events",
     icon: <BookOpen size={18} />,
     path: ROUTES.CANDIDATE.EVENTS,
   },
   {
-    label: "Applications",
+    // Where a candidate follows the jobs they have applied to.
+    label: "Applied Jobs",
     icon: <FileText size={18} />,
     path: ROUTES.CANDIDATE.APPLICATIONS,
   },
@@ -147,6 +144,11 @@ const candidateNavItems: NavItem[] = [
     label: "Results",
     icon: <Award size={18} />,
     path: ROUTES.CANDIDATE.RESULTS,
+  },
+  {
+    label: "Resume Management",
+    icon: <FileText size={18} />,
+    path: ROUTES.CANDIDATE.RESUME,
   },
 ];
 
