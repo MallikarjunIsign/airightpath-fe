@@ -267,18 +267,29 @@ export function CandidateDetailsPage() {
     a.remove();
   }
 
-  // Applied candidates are screened via ATS to become shortlisted.
+  /**
+   * Hands the ATS page the job and, when rows are ticked, exactly which
+   * candidates to screen — screening the whole job when the admin picked three
+   * people is what made ATS feel like it ignored the selection.
+   */
   function handleScreenAts() {
     if (!selectedPrefix) {
       showToast(MESSAGES.admin.common.selectJobFirst, 'warning');
       return;
     }
     writePersistentValue('ats:selectedPrefix', selectedPrefix);
+    writePersistentValue('ats:scopeEmails', Array.from(selectedEmails));
     navigate(ROUTES.ADMIN.ATS);
   }
 
   // Manually shortlist candidates (Applied → Shortlisted) without ATS screening.
-  async function handleShortlist(emails: string[]) {
+  /**
+   * Manually shortlist. `override` reopens a REJECTED application — the backend
+   * treats REJECTED as terminal without it, so "Shortlist Anyway" would fail on
+   * exactly the case it exists for. It also clears the rejection server-side,
+   * so the candidate can be screened again afterwards.
+   */
+  async function handleShortlist(emails: string[], override = false) {
     if (!selectedPrefix) {
       showToast(MESSAGES.admin.common.selectJobFirst, 'warning');
       return;
@@ -289,7 +300,7 @@ export function CandidateDetailsPage() {
     }
     setShortlisting(true);
     try {
-      await jobApplicationService.shortlist({ jobPrefix: selectedPrefix, emails });
+      await jobApplicationService.shortlist({ jobPrefix: selectedPrefix, emails, override });
 
       // The endpoint can partially succeed, so trust the read state rather than
       // assuming all requested emails were shortlisted: after success a candidate
@@ -577,9 +588,11 @@ export function CandidateDetailsPage() {
             </CardContent>
           </Card>
 
-          {/* Bulk Actions — stage-relevant: Applied → ATS screening, Shortlisted → Assign */}
+          {/* Bulk Actions — stage-relevant: Applied → ATS screening, Shortlisted →
+              Assign, Rejected → put a candidate back in the running. */}
           {(availableActions.length > 0 ||
             activeStage === ('APPLIED' as JobApplicationStatus) ||
+            activeStage === ('REJECTED' as JobApplicationStatus) ||
             activeStage === ASSIGN_STAGE) && (
             <div className="flex flex-wrap gap-2">
               {activeStage === ('APPLIED' as JobApplicationStatus) && (
@@ -590,7 +603,9 @@ export function CandidateDetailsPage() {
                     leftIcon={<FileText size={16} />}
                     onClick={handleScreenAts}
                   >
-                    Screen with ATS
+                    {selectedEmails.size > 0
+                      ? `Screen ${selectedEmails.size} Selected with ATS`
+                      : 'Screen with ATS'}
                   </Button>
                   <Button
                     variant="outline"
@@ -600,6 +615,32 @@ export function CandidateDetailsPage() {
                     onClick={() => handleShortlist(Array.from(selectedEmails))}
                   >
                     Shortlist Selected
+                  </Button>
+                </>
+              )}
+
+              {/* An ATS rejection is a judgement, not a dead end — the admin can
+                  overrule it or send the candidate back through screening. */}
+              {activeStage === ('REJECTED' as JobApplicationStatus) && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    leftIcon={<CheckCircle size={16} />}
+                    isLoading={shortlisting}
+                    onClick={() => handleShortlist(Array.from(selectedEmails), true)}
+                  >
+                    Shortlist Anyway
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    leftIcon={<RefreshCw size={16} />}
+                    onClick={handleScreenAts}
+                  >
+                    {selectedEmails.size > 0
+                      ? `Re-screen ${selectedEmails.size} with ATS`
+                      : 'Re-screen with ATS'}
                   </Button>
                 </>
               )}

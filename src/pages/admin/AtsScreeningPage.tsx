@@ -30,9 +30,10 @@ import { useToast } from '@/components/ui/Toast';
 import { usePersistentState } from '@/hooks/usePersistentState';
 import { AtsCandidateDetailModal } from '@/components/admin/AtsCandidateDetailModal';
 import { AtsResultsTable } from '@/components/admin/AtsResultsTable';
+import { ScreeningRunReport } from '@/components/admin/ScreeningRunReport';
 import { getAppEmail } from '@/utils/application.utils';
 import { MESSAGES } from '@/config/messages';
-import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
+import type { JobPostDTO, JobApplicationDTO, ScreeningRun } from '@/types/job.types';
 
 type FilterTab = 'all' | 'shortlisted' | 'rejected';
 type SortField = 'matchPercent' | 'firstName' | 'experience';
@@ -48,10 +49,22 @@ export function AtsScreeningPage() {
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [screening, setScreening] = useState(false);
   const [screened, setScreened] = useState(false);
+  const [loadingResults, setLoadingResults] = useState(false);
+  /** Report from the last screening run — per-candidate outcomes and counts. */
+  const [run, setRun] = useState<ScreeningRun | null>(null);
+  /** After a scoped run, show just those candidates until the admin widens it. */
+  const [resultsView, setResultsView] = useState<'run' | 'all'>('all');
   const [activeTab, setActiveTab] = usePersistentState<FilterTab>('ats:activeTab', 'all');
   const [sortField, setSortField] = usePersistentState<SortField>('ats:sortField', 'matchPercent');
   const [sortDirection, setSortDirection] = usePersistentState<SortDirection>('ats:sortDirection', 'desc');
   const [searchQuery, setSearchQuery] = usePersistentState('ats:searchQuery', '');
+
+  // Candidates ticked on the Candidates page before coming here. Screening
+  // defaults to just these — the admin already said who they meant.
+  const [scopeEmails, setScopeEmails] = usePersistentState<string[]>('ats:scopeEmails', []);
+  const [scope, setScope] = useState<'all' | 'selected'>(
+    scopeEmails.length > 0 ? 'selected' : 'all',
+  );
 
   // Candidate detail modal
   const [selectedCandidate, setSelectedCandidate] = useState<JobApplicationDTO | null>(null);
@@ -117,6 +130,13 @@ export function AtsScreeningPage() {
     }
   }, [jobs, selectedPrefix]);
 
+  // Show what is already stored for the job on arrival. The read is safe now
+  // that it no longer re-screens, so the page is useful before pressing
+  // anything — including when the admin lands here from the Candidates page.
+  useEffect(() => {
+    if (selectedPrefix) loadStoredResults(selectedPrefix);
+  }, [selectedPrefix]);
+
   async function fetchJobs() {
     setLoadingJobs(true);
     try {
@@ -130,13 +150,32 @@ export function AtsScreeningPage() {
   }
 
   function onJobSelected(prefix: string) {
+    const changed = prefix !== selectedPrefix;
     setSelectedPrefix(prefix);
     const job = jobs.find((j) => j.jobPrefix === prefix) ?? null;
     setSelectedJob(job);
     setCandidates([]);
     setScreened(false);
+    setRun(null);
+    setResultsView('all');
     setActiveTab('all');
     setSearchQuery('');
+    // A selection handed over for one job means nothing on another.
+    if (changed) clearScope();
+    // The [selectedPrefix] effect loads the stored results.
+  }
+
+  /** Reads what is stored for the job — no scoring, no status changes. */
+  async function loadStoredResults(prefix: string) {
+    setLoadingResults(true);
+    try {
+      const res = await jobApplicationService.getByPrefix(prefix);
+      setCandidates(res.data ?? []);
+    } catch {
+      // Error toast auto-handled
+    } finally {
+      setLoadingResults(false);
+    }
   }
 
   async function handleScreenCandidates() {
@@ -144,51 +183,89 @@ export function AtsScreeningPage() {
       showToast(MESSAGES.admin.common.selectJobFirst, 'warning');
       return;
     }
+    const screenSelectedOnly = scope === 'selected' && scopeEmails.length > 0;
 
     setScreening(true);
-    setCandidates([]);
-    setScreened(false);
+    setRun(null);
     try {
-      const res = await jobApplicationService.filterByPrefix(selectedPrefix);
-      const data = res.data ?? [];
-      setCandidates(data);
-      setScreened(true);
+      // Passing emails screens only those; omitting them screens the whole job.
+      const res = await jobApplicationService.screen({
+        jobPrefix: selectedPrefix,
+        ...(screenSelectedOnly ? { emails: scopeEmails } : {}),
+      });
+      const report = res.data;
+      setRun(report ?? null);
+      // Land on just-screened when the run was scoped; a job-wide run is
+      // everyone anyway.
+      setResultsView(report?.scope === 'SELECTED' ? 'run' : 'all');
 
-      const shortlisted = data.filter((c) => c.status === 'SHORTLISTED').length;
-      const rejected = data.filter((c) => c.status === 'REJECTED').length;
-
-      if (data.length === 0) {
-        showToast(MESSAGES.admin.ats.noApplicants, 'info');
-      } else {
+      if (report) {
         showToast(
-          MESSAGES.admin.ats.screeningComplete(shortlisted, rejected, data.length),
-          'success'
+          report.message ||
+            MESSAGES.admin.ats.screeningComplete(
+              report.shortlistedCount,
+              report.rejectedCount,
+              report.screenedCount,
+            ),
+          report.screenedCount === 0 ? 'info' : 'success',
         );
       }
+
+      // The report carries outcomes, not full applications — re-read for the
+      // table so scores, resumes and statuses all come from stored data.
+      await loadStoredResults(selectedPrefix);
+      setScreened(true);
     } catch {
-      // Error toast auto-handled
+      // Error toast auto-handled by the interceptor (400/404/409 are explained
+      // by the server's own message).
     } finally {
       setScreening(false);
     }
   }
 
-  // Stats
+  /** Drops the hand-off from the Candidates page and screens everyone instead. */
+  function clearScope() {
+    setScopeEmails([]);
+    setScope('all');
+  }
+
+  /**
+   * Emails touched by the last run, when that run was scoped. A job-wide run
+   * covers everyone, so there is nothing to narrow down to.
+   */
+  const runEmails = useMemo(() => {
+    if (!run || run.scope !== 'SELECTED') return null;
+    return new Set((run.results ?? []).map((r) => r.email.toLowerCase()));
+  }, [run]);
+
+  /**
+   * Straight after a scoped run the table shows just those candidates — the
+   * admin asked to screen one person and wants to see what happened to them,
+   * not the other applicants that the run deliberately left alone.
+   */
+  const visibleCandidates = useMemo(() => {
+    if (resultsView !== 'run' || !runEmails) return candidates;
+    return candidates.filter((c) => runEmails.has(getAppEmail(c).toLowerCase()));
+  }, [candidates, runEmails, resultsView]);
+
+  // Stats — describe whatever set is on screen.
   const stats = useMemo(() => {
-    const total = candidates.length;
-    const shortlisted = candidates.filter((c) => c.status === 'SHORTLISTED').length;
-    const rejected = candidates.filter((c) => c.status === 'REJECTED').length;
+    const list = visibleCandidates;
+    const total = list.length;
+    const shortlisted = list.filter((c) => c.status === 'SHORTLISTED').length;
+    const rejected = list.filter((c) => c.status === 'REJECTED').length;
     const avgScore = total > 0
-      ? candidates.reduce((sum, c) => sum + (c.matchPercent ?? 0), 0) / total
+      ? list.reduce((sum, c) => sum + (c.matchPercent ?? 0), 0) / total
       : 0;
     const topScore = total > 0
-      ? Math.max(...candidates.map((c) => c.matchPercent ?? 0))
+      ? Math.max(...list.map((c) => c.matchPercent ?? 0))
       : 0;
     return { total, shortlisted, rejected, avgScore, topScore };
-  }, [candidates]);
+  }, [visibleCandidates]);
 
   // Filter + Search + Sort
   const filteredCandidates = useMemo(() => {
-    let list = [...candidates];
+    let list = [...visibleCandidates];
 
     // Tab filter
     if (activeTab === 'shortlisted') {
@@ -223,7 +300,7 @@ export function AtsScreeningPage() {
     });
 
     return list;
-  }, [candidates, activeTab, searchQuery, sortField, sortDirection]);
+  }, [visibleCandidates, activeTab, searchQuery, sortField, sortDirection]);
 
   function toggleSort(field: SortField) {
     if (sortField === field) {
@@ -323,6 +400,69 @@ export function AtsScreeningPage() {
                     </Badge>
                   ))}
                 </div>
+                {/* Who gets screened — spelled out, because screening writes
+                    shortlist/reject statuses onto whoever it touches. */}
+                <div className="rounded-xl border border-[var(--border)] p-3 space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-[var(--textTertiary)]">
+                    Screen
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setScope('all')}
+                      className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+                        scope === 'all'
+                          ? 'border-[var(--primary)] text-[var(--primary)] bg-[var(--primaryMuted,var(--primaryLight))]'
+                          : 'border-[var(--border)] text-[var(--textSecondary)] hover:text-[var(--text)]'
+                      }`}
+                    >
+                      All applicants
+                    </button>
+                    <button
+                      type="button"
+                      disabled={scopeEmails.length === 0}
+                      onClick={() => setScope('selected')}
+                      className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                        scope === 'selected' && scopeEmails.length > 0
+                          ? 'border-[var(--primary)] text-[var(--primary)] bg-[var(--primaryMuted,var(--primaryLight))]'
+                          : 'border-[var(--border)] text-[var(--textSecondary)] hover:text-[var(--text)]'
+                      }`}
+                    >
+                      Selected ({scopeEmails.length})
+                    </button>
+                    {scopeEmails.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={clearScope}
+                        className="px-2 py-1.5 text-sm text-[var(--textTertiary)] hover:text-[var(--error)] transition-colors"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+
+                  {scopeEmails.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {scopeEmails.map((email) => (
+                        <Badge key={email} variant="secondary" size="sm">
+                          {email}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-[var(--textSecondary)]">
+                      Tick candidates on the Candidates page and choose &ldquo;Screen with
+                      ATS&rdquo; to screen only those.
+                    </p>
+                  )}
+
+                  <p className="text-xs text-[var(--textSecondary)]">
+                    {scope === 'selected' && scopeEmails.length > 0
+                      ? `Only these ${scopeEmails.length} candidate${scopeEmails.length === 1 ? '' : 's'} will be scored and have their status updated.`
+                      : 'Everyone still in the screening phase is re-scored, and their shortlist status overwritten. Candidates already past shortlisting are skipped.'}
+                  </p>
+                </div>
+
                 <Button
                   onClick={handleScreenCandidates}
                   isLoading={screening}
@@ -330,7 +470,13 @@ export function AtsScreeningPage() {
                   className="w-full"
                   size="lg"
                 >
-                  {screening ? 'Screening Candidates...' : 'Screen All Candidates'}
+                  {(() => {
+                    if (screening) return 'Screening Candidates...';
+                    if (scope === 'selected' && scopeEmails.length > 0) {
+                      return `Screen ${scopeEmails.length} Selected Candidate${scopeEmails.length === 1 ? '' : 's'}`;
+                    }
+                    return 'Screen All Candidates';
+                  })()}
                 </Button>
               </div>
             ) : (
@@ -343,6 +489,18 @@ export function AtsScreeningPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Reading stored results */}
+      {loadingResults && !screening && candidates.length === 0 && (
+        <Card>
+          <CardContent>
+            <div className="flex items-center justify-center gap-3 py-10">
+              <Loader2 size={20} className="animate-spin text-[var(--primary)]" />
+              <p className="text-sm text-[var(--textSecondary)]">Loading screening results...</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Screening in Progress */}
       {screening && (
@@ -359,8 +517,11 @@ export function AtsScreeningPage() {
         </Card>
       )}
 
+      {/* Last run report — what actually changed, and what didn't */}
+      {run && !screening && <ScreeningRunReport run={run} onDismiss={() => setRun(null)} />}
+
       {/* Results Section */}
-      {screened && !screening && (
+      {(screened || candidates.length > 0) && !screening && (
         <>
           {/* Statistics Cards */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
@@ -369,7 +530,10 @@ export function AtsScreeningPage() {
                 <div className="text-center py-2">
                   <Users size={24} className="mx-auto text-[var(--primary)] mb-1" />
                   <p className="text-2xl font-bold text-[var(--text)]">{stats.total}</p>
-                  <p className="text-xs text-[var(--textSecondary)]">Total Candidates</p>
+                  {/* The tiles describe whatever the table is showing. */}
+                  <p className="text-xs text-[var(--textSecondary)]">
+                    {resultsView === 'run' && runEmails ? 'Just Screened' : 'Total Candidates'}
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -447,10 +611,44 @@ export function AtsScreeningPage() {
           {/* Results Table */}
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <CardTitle>
-                  Screening Results ({filteredCandidates.length})
+                  {resultsView === 'run' && runEmails
+                    ? `Just Screened (${filteredCandidates.length})`
+                    : `Screening Results (${filteredCandidates.length})`}
                 </CardTitle>
+
+                {/* After a scoped run the table is narrowed to those
+                    candidates — say so, and offer the way back. */}
+                {runEmails && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-[var(--textSecondary)]">Showing</span>
+                    <div className="flex rounded-xl border border-[var(--border)] overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setResultsView('run')}
+                        className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                          resultsView === 'run'
+                            ? 'bg-[var(--primary)] text-white'
+                            : 'text-[var(--textSecondary)] hover:text-[var(--text)]'
+                        }`}
+                      >
+                        Just screened ({runEmails.size})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setResultsView('all')}
+                        className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                          resultsView === 'all'
+                            ? 'bg-[var(--primary)] text-white'
+                            : 'text-[var(--textSecondary)] hover:text-[var(--text)]'
+                        }`}
+                      >
+                        All applicants ({candidates.length})
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </CardHeader>
             <CardContent>

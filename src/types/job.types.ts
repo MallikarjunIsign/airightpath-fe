@@ -20,6 +20,39 @@ export interface JobPostDTO {
   updatedAt?: string;
 }
 
+// ── ATS screening run (POST /api/job-applications/screen) ────────────
+
+/**
+ * One candidate's outcome from a screening run.
+ *
+ * `screened: false` is an outcome, not a failure — the row was scored but not
+ * saved, and `reason` explains why in words meant to be shown as-is.
+ * `status: null` with `screened: false` means no application exists for that
+ * email.
+ */
+export interface ScreeningResultRow {
+  email: string;
+  fullName?: string;
+  matchPercent?: number;
+  status?: JobApplicationStatus | null;
+  screened: boolean;
+  reason?: string | null;
+}
+
+export interface ScreeningRun {
+  jobPrefix: string;
+  /** Shortlist cut-off the run used, as a percentage. */
+  threshold?: number;
+  scope?: 'ALL' | 'SELECTED';
+  screenedCount: number;
+  skippedCount: number;
+  notFoundCount: number;
+  shortlistedCount: number;
+  rejectedCount: number;
+  message?: string;
+  results: ScreeningResultRow[];
+}
+
 export type JobApplicationStatus =
   | 'APPLIED'
   | 'SHORTLISTED'

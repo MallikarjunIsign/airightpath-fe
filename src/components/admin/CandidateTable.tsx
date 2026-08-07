@@ -3,7 +3,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { getAppEmail } from '@/utils/application.utils';
-import { referralDisplay } from '@/utils/referral.utils';
+import { ReferralTag } from './ReferralTag';
 import type { JobApplicationDTO } from '@/types/job.types';
 
 interface CandidateTableProps {
@@ -98,9 +98,9 @@ export function CandidateTable({
                   <dd className="text-[var(--text)] break-words">{candidate.jobRole || '-'}</dd>
                 </div>
                 <div className="min-w-0">
-                  <dt className="text-xs text-[var(--textTertiary)]">Referral</dt>
-                  <dd className="text-[var(--text)] break-words">
-                    {referralDisplay(candidate.referralName, candidate.referralId)}
+                  <dt className="text-xs text-[var(--textTertiary)]">Source</dt>
+                  <dd className="mt-0.5">
+                    <ReferralTag candidate={candidate} />
                   </dd>
                 </div>
               </dl>
@@ -138,7 +138,7 @@ export function CandidateTable({
               <TableHead className="px-3 w-[13%]">Mobile</TableHead>
               <TableHead className="px-3 w-[11%]">Experience</TableHead>
               <TableHead className="px-3 w-[14%]">Role</TableHead>
-              <TableHead className="px-3 w-[14%]">Referral</TableHead>
+              <TableHead className="px-3 w-[14%]">Source</TableHead>
               <TableHead className="px-3 w-[13%]">Status</TableHead>
               <TableHead className="px-3 w-[8%]">Actions</TableHead>
             </TableRow>
@@ -178,8 +178,8 @@ export function CandidateTable({
                   <TableCell className="px-3 py-3 align-top break-words">
                     {candidate.jobRole || '-'}
                   </TableCell>
-                  <TableCell className="px-3 py-3 align-top break-words">
-                    {referralDisplay(candidate.referralName, candidate.referralId)}
+                  <TableCell className="px-3 py-3 align-top">
+                    <ReferralTag candidate={candidate} />
                   </TableCell>
 
                   <TableCell className="px-3 py-3 align-top">

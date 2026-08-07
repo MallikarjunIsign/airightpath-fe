@@ -1,7 +1,7 @@
 import api from './api.service';
 import { ENDPOINTS } from '@/config/api.endpoints';
 import type { ApiResponse } from '@/types/api.types';
-import type { JobApplicationDTO } from '@/types/job.types';
+import type { JobApplicationDTO, ScreeningRun } from '@/types/job.types';
 
 export const jobApplicationService = {
   apply(data: FormData) {
@@ -28,8 +28,26 @@ export const jobApplicationService = {
     return api.get<JobApplicationDTO>(ENDPOINTS.JOB_APPLICATIONS.GET_BY_PREFIX_AND_EMAIL(prefix, email));
   },
 
+  /**
+   * @deprecated Screens the whole job as a side effect of a GET. Use `screen()`.
+   */
   filterByPrefix(prefix: string) {
     return api.get<JobApplicationDTO[]>(ENDPOINTS.JOB_APPLICATIONS.FILTER_BY_PREFIX(prefix));
+  },
+
+  /**
+   * Runs ATS screening and returns a per-candidate report.
+   *
+   * Pass `emails` to screen only those candidates — everyone else on the job
+   * keeps their status. Omit it (or pass an empty list) to screen the whole
+   * job. Results come back in the order the emails were sent.
+   *
+   * Rows come back with `screened: false` when they were scored but not saved
+   * (already past shortlisting, never ATS-screened, or a finalised rejection);
+   * `reason` says which, in words meant to be shown to the admin as-is.
+   */
+  screen(data: { jobPrefix: string; emails?: string[] }) {
+    return api.post<ScreeningRun>(ENDPOINTS.JOB_APPLICATIONS.SCREEN, data);
   },
 
   sendAckMail(data: { emails: string[]; jobPrefix: string; dateTime?: string; content?: string }) {
@@ -56,8 +74,16 @@ export const jobApplicationService = {
     return api.post<ApiResponse<unknown>>(ENDPOINTS.JOB_APPLICATIONS.SEND_FAILURE_MAIL, data);
   },
 
-  /** Manually move candidates to SHORTLISTED without running ATS screening. */
-  shortlist(data: { jobPrefix: string; emails: string[] }) {
+  /**
+   * Manually shortlist candidates, skipping ATS.
+   *
+   * `override: true` reopens a REJECTED application — the backend treats
+   * REJECTED as terminal otherwise, so "Shortlist Anyway" fails on exactly the
+   * case it exists for without it. The override also clears the rejection
+   * status server-side, so the candidate can be screened again afterwards.
+   * It applies only to REJECTED; SELECTED and mid-pipeline still throw.
+   */
+  shortlist(data: { jobPrefix: string; emails: string[]; override?: boolean }) {
     return api.patch<ApiResponse<unknown>>(ENDPOINTS.JOB_APPLICATIONS.SHORTLIST, data);
   },
 

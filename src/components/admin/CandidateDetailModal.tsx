@@ -12,7 +12,8 @@ interface CandidateDetailModalProps {
   /** Maps a raw status to its display label (falls back to the raw status). */
   statusLabels: Record<string, string>;
   onClose: () => void;
-  onShortlist: (emails: string[]) => void;
+  /** `override` reopens a REJECTED application (Shortlist Anyway). */
+  onShortlist: (emails: string[], override?: boolean) => void;
   shortlisting: boolean;
   onSetReferralStatus: (candidate: JobApplicationDTO, status: 'VERIFIED' | 'REJECTED') => void;
   validatingReferral: boolean;
@@ -59,13 +60,17 @@ export function CandidateDetailModal({
           <Button variant="ghost" onClick={onClose}>
             Close
           </Button>
-          {candidate.status === 'APPLIED' && (
+          {/* Rejected candidates can be overruled — an ATS score is advice, and
+              the admin needs a way back without re-applying. */}
+          {(candidate.status === 'APPLIED' || candidate.status === 'REJECTED') && (
             <Button
               leftIcon={<CheckCircle size={16} />}
               isLoading={shortlisting}
-              onClick={() => onShortlist([getAppEmail(candidate)])}
+              onClick={() =>
+                onShortlist([getAppEmail(candidate)], candidate.status === 'REJECTED')
+              }
             >
-              Shortlist
+              {candidate.status === 'REJECTED' ? 'Shortlist Anyway' : 'Shortlist'}
             </Button>
           )}
         </div>

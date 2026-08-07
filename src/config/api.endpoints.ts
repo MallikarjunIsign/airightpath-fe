@@ -34,8 +34,11 @@ export const ENDPOINTS = {
       `/api/job-applications/byJobPrefix/${prefix}`,
     GET_BY_PREFIX_AND_EMAIL: (prefix: string, email: string) =>
       `/api/job-applications/byJobPrefixAndEmail/${prefix}/${email}`,
+    /** @deprecated Screens the whole job on every GET — use SCREEN instead. */
     FILTER_BY_PREFIX: (prefix: string) =>
       `/api/job-applications/filterByPrefix/${prefix}`,
+    // Screening run: whole job, or only the emails passed in.
+    SCREEN: "/api/job-applications/screen",
     SEND_ACK_MAIL: "/api/job-applications/send-ack-mail",
     SEND_REJECTION_MAIL: "/api/job-applications/send-rejection-mail",
     SEND_RECONFIRMATION_MAIL: "/api/job-applications/send-reconfirmation-mail",
