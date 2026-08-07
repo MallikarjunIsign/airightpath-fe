@@ -3,11 +3,12 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Send, Upload, FileText, X, Loader2, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Send, Upload, FileText, X, Loader2, AlertTriangle, CheckCircle, Eye } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/Toast';
 import { jobApplicationService } from '@/services/job-application.service';
 import { jobService } from '@/services/job.service';
+import { resumeService } from '@/services/resume.service';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -15,7 +16,12 @@ import { Badge } from '@/components/ui/Badge';
 import { ROUTES } from '@/config/routes';
 import { jobApplicationSchema } from '@/config/validation';
 import { MESSAGES } from '@/config/messages';
-import { validateResumeFile } from '@/utils/file.utils';
+import {
+  validateResumeFile,
+  filenameFromContentDisposition,
+  resumeExtensionForType,
+} from '@/utils/file.utils';
+import { formatFileSize } from '@/utils/format.utils';
 import { digitsOnly } from '@/utils/input.utils';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
 
@@ -44,6 +50,10 @@ export function JobApplicationPage() {
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(false);
   const [resumeFile, setResumeFile] = useState<File | null>(null);
+  /** The resume already held for this candidate, if any. */
+  const [storedResume, setStoredResume] = useState<File | null>(null);
+  const [checkingStored, setCheckingStored] = useState(false);
+  const [resumeSource, setResumeSource] = useState<'existing' | 'upload'>('upload');
   const [isEditMode, setIsEditMode] = useState(false);
   const [existingApplication, setExistingApplication] = useState<JobApplicationDTO | null>(null);
   const [isDeadlinePassed, setIsDeadlinePassed] = useState(false);
@@ -158,6 +168,63 @@ export function JobApplicationPage() {
     checkExisting();
   }, [job?.jobPrefix, user?.email, reset, passedApplication]);
 
+  /**
+   * Look for a resume already held for this candidate (uploaded on the Resume
+   * page or with an earlier application) so they can reuse it instead of
+   * hunting for the file again.
+   *
+   * There is no metadata endpoint, so this fetches the file itself — which is
+   * also what lets the form submit it without a second round trip. Capped at
+   * 2 MB by the upload rules. A 400/404 just means nothing is stored.
+   */
+  useEffect(() => {
+    // Captured so the async closure keeps the narrowed value.
+    const email = user?.email;
+    if (!email) return;
+    let cancelled = false;
+
+    (async () => {
+      setCheckingStored(true);
+      try {
+        const res = await resumeService.view(email, { _skipErrorToast: true });
+        const blob = res.data;
+        if (cancelled || !blob || blob.size === 0) return;
+
+        const headers = res.headers as Record<string, string> | undefined;
+        const name =
+          filenameFromContentDisposition(headers?.['content-disposition']) ??
+          `${email}-resume${resumeExtensionForType(blob.type)}`;
+
+        setStoredResume(new File([blob], name, { type: blob.type || 'application/pdf' }));
+      } catch {
+        // No resume on file — the upload box is the only option.
+      } finally {
+        // Cleared even if this run was superseded, otherwise the "checking..."
+        // line sticks around forever.
+        setCheckingStored(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.email]);
+
+  // Reusing the saved resume is the common case when applying fresh. Kept out
+  // of the fetch so it can't fire before edit mode is known.
+  useEffect(() => {
+    if (!isEditMode && storedResume && !resumeFile) setResumeSource('existing');
+  }, [isEditMode, storedResume, resumeFile]);
+
+  /** Opens the stored resume in a new tab; no await, so no popup blocking. */
+  const previewStoredResume = () => {
+    if (!storedResume) return;
+    const url = URL.createObjectURL(storedResume);
+    window.open(url, '_blank', 'noopener');
+    // The tab keeps its own reference; release ours once it has loaded.
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  };
+
   const handleResumeSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -167,6 +234,7 @@ export function JobApplicationPage() {
       return;
     }
     setResumeFile(file);
+    setResumeSource('upload');
   };
 
   const onSubmit = async (data: JobApplicationFormData) => {
@@ -175,7 +243,12 @@ export function JobApplicationPage() {
       return;
     }
 
-    if (!isEditMode && !resumeFile) {
+    // Either the file just picked, or the one already on file. Editing only
+    // ever sends a deliberately picked file — the stored one stays put.
+    const chosenResume =
+      !isEditMode && resumeSource === 'existing' ? storedResume : resumeFile;
+
+    if (!isEditMode && !chosenResume) {
       showToast(MESSAGES.application.resumeRequired, 'warning');
       return;
     }
@@ -196,8 +269,8 @@ export function JobApplicationPage() {
       const formData = new FormData();
       formData.append('jobApplication', new Blob([jobApplication], { type: 'application/json' }));
 
-      if (resumeFile) {
-        formData.append('resume', resumeFile);
+      if (chosenResume) {
+        formData.append('resume', chosenResume);
       }
 
       // Optional referral — sent as separate form parts (keys are case-sensitive),
@@ -403,7 +476,7 @@ export function JobApplicationPage() {
 
               {/* Show existing resume info in edit mode */}
               {isEditMode && !resumeFile && existingApplication?.resumeFileName && (
-                <div className="flex items-center gap-3 p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
+                <div className="flex flex-wrap items-center gap-3 p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
                   <CheckCircle className="w-5 h-5 text-green-500 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-green-700 dark:text-green-400">
@@ -413,11 +486,110 @@ export function JobApplicationPage() {
                       {existingApplication.resumeFileName}
                     </p>
                   </div>
+                  {/* The saved file is fetched in the background; the button
+                      waits for it rather than pretending to be inert. */}
+                  <button
+                    type="button"
+                    onClick={previewStoredResume}
+                    disabled={!storedResume}
+                    className="inline-flex items-center gap-1.5 text-sm font-medium text-green-700 dark:text-green-400 hover:underline disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline flex-shrink-0"
+                  >
+                    {storedResume ? (
+                      <>
+                        <Eye size={14} />
+                        View
+                      </>
+                    ) : (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        Loading
+                      </>
+                    )}
+                  </button>
                 </div>
               )}
 
-              <div
-                className="border-2 border-dashed border-[var(--border)] rounded-lg p-6 text-center cursor-pointer hover:border-[var(--primary)] transition-colors"
+              {/* Checking whether a resume is already on file */}
+              {checkingStored && !isEditMode && (
+                <p className="flex items-center gap-2 text-sm text-[var(--textSecondary)]">
+                  <Loader2 size={14} className="animate-spin" />
+                  Checking for a saved resume...
+                </p>
+              )}
+
+              {/* Reuse the resume already held, or upload a fresh one */}
+              {!isEditMode && storedResume && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setResumeSource('existing')}
+                    className={`text-left p-3 rounded-xl border-2 transition-colors ${
+                      resumeSource === 'existing'
+                        ? 'border-[var(--primary)] bg-[var(--primaryMuted,var(--primaryLight))]'
+                        : 'border-[var(--border)] hover:border-[var(--borderHover,var(--border))]'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <FileText size={16} className="text-[var(--primary)] flex-shrink-0" />
+                      <span className="text-sm font-medium text-[var(--text)]">
+                        Use my Rightpath resume
+                      </span>
+                    </span>
+                    <span className="block text-xs text-[var(--textSecondary)] mt-1 truncate">
+                      {storedResume.name}
+                    </span>
+                    <span className="block text-xs text-[var(--textTertiary)]">
+                      {formatFileSize(storedResume.size)}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setResumeSource('upload')}
+                    className={`text-left p-3 rounded-xl border-2 transition-colors ${
+                      resumeSource === 'upload'
+                        ? 'border-[var(--primary)] bg-[var(--primaryMuted,var(--primaryLight))]'
+                        : 'border-[var(--border)] hover:border-[var(--borderHover,var(--border))]'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Upload size={16} className="text-[var(--primary)] flex-shrink-0" />
+                      <span className="text-sm font-medium text-[var(--text)]">
+                        Upload a different file
+                      </span>
+                    </span>
+                    <span className="block text-xs text-[var(--textSecondary)] mt-1">
+                      From this device (PDF, DOC, DOCX)
+                    </span>
+                  </button>
+                </div>
+              )}
+
+              {/* Confirmation of the saved resume, with a way to check it */}
+              {!isEditMode && storedResume && resumeSource === 'existing' && (
+                <div className="flex flex-wrap items-center justify-between gap-2 p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <CheckCircle size={16} className="text-[var(--success)] flex-shrink-0" />
+                    <span className="text-sm text-[var(--text)] truncate">
+                      Applying with <strong>{storedResume.name}</strong>
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={previewStoredResume}
+                    className="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--primary)] hover:underline flex-shrink-0"
+                  >
+                    <Eye size={14} />
+                    Preview
+                  </button>
+                </div>
+              )}
+
+              {/* Upload box — the only option when nothing is on file */}
+              {(isEditMode || !storedResume || resumeSource === 'upload') && (
+                <>
+                  <div
+                    className="border-2 border-dashed border-[var(--border)] rounded-lg p-6 text-center cursor-pointer hover:border-[var(--primary)] transition-colors"
                 onClick={() => document.getElementById('app-resume-input')?.click()}
               >
                 <input
@@ -436,18 +608,24 @@ export function JobApplicationPage() {
               </div>
               {resumeFile && (
                 <div className="flex items-center justify-between p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
-                  <div className="flex items-center gap-2">
-                    <FileText className="w-4 h-4 text-[var(--primary)]" />
-                    <span className="text-sm text-[var(--text)]">{resumeFile.name}</span>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <FileText className="w-4 h-4 text-[var(--primary)] flex-shrink-0" />
+                    <span className="text-sm text-[var(--text)] truncate">{resumeFile.name}</span>
                   </div>
                   <button
                     type="button"
-                    onClick={() => setResumeFile(null)}
-                    className="text-[var(--textSecondary)] hover:text-[var(--text)]"
+                    onClick={() => {
+                      setResumeFile(null);
+                      // Fall back to the saved resume rather than to nothing.
+                      if (storedResume) setResumeSource('existing');
+                    }}
+                    className="text-[var(--textSecondary)] hover:text-[var(--text)] flex-shrink-0"
                   >
                     <X size={16} />
                   </button>
                 </div>
+                  )}
+                </>
               )}
             </div>
 

@@ -1,10 +1,22 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Loader2, ClipboardList, Send, Sparkles, Upload, Eye, FileText, X, FileCog } from 'lucide-react';
+import {
+  Loader2,
+  ClipboardList,
+  Send,
+  Sparkles,
+  Upload,
+  Eye,
+  Download,
+  FileText,
+  X,
+  FileCog,
+} from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { DateTimeField } from '@/components/ui/DateTimeField';
 import { BackLink } from '@/components/ui/BackLink';
+import { QuestionPaperExportDialog } from '@/components/admin/QuestionPaperExportDialog';
 import { Select } from '@/components/ui/Select';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
@@ -49,6 +61,8 @@ export function AssignAssessmentPage() {
   // File state for each type
   const [aptitudeFile, setAptitudeFile] = useState<FileState>({ file: null, source: null });
   const [codingFile, setCodingFile] = useState<FileState>({ file: null, source: null });
+  /** Paper being exported, with the heading its document should carry. */
+  const [exporting, setExporting] = useState<{ file: File; title: string } | null>(null);
 
   // Loading states
   const [loadingJobs, setLoadingJobs] = useState(true);
@@ -498,9 +512,22 @@ export function AssignAssessmentPage() {
                       type="button"
                       onClick={() => viewFile(aptitudeFile.file!)}
                       className="p-1 hover:bg-[var(--surface2)] rounded text-[var(--primary)]"
-                      title="View file"
+                      title="View raw file"
                     >
                       <Eye size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExporting({
+                          file: aptitudeFile.file!,
+                          title: `${selectedPrefix} — Aptitude Question Paper`,
+                        })
+                      }
+                      className="p-1 hover:bg-[var(--surface2)] rounded text-[var(--primary)]"
+                      title="Download as PDF, Word or JSON"
+                    >
+                      <Download size={14} />
                     </button>
                     <button
                       type="button"
@@ -582,9 +609,22 @@ export function AssignAssessmentPage() {
                       type="button"
                       onClick={() => viewFile(codingFile.file!)}
                       className="p-1 hover:bg-[var(--surface2)] rounded text-[var(--primary)]"
-                      title="View file"
+                      title="View raw file"
                     >
                       <Eye size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExporting({
+                          file: codingFile.file!,
+                          title: `${selectedPrefix} — Coding Question Paper`,
+                        })
+                      }
+                      className="p-1 hover:bg-[var(--surface2)] rounded text-[var(--primary)]"
+                      title="Download as PDF, Word or JSON"
+                    >
+                      <Download size={14} />
                     </button>
                     <button
                       type="button"
@@ -685,6 +725,15 @@ export function AssignAssessmentPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Format picker for downloading a generated paper */}
+      {exporting && (
+        <QuestionPaperExportDialog
+          file={exporting.file}
+          title={exporting.title}
+          onClose={() => setExporting(null)}
+        />
+      )}
     </div>
   );
 }
