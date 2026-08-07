@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { usePersistentState } from './usePersistentState';
+import { canonicalJobType } from '@/utils/job.utils';
 import type { JobPostDTO } from '@/types/job.types';
 
 /**
@@ -32,13 +33,6 @@ export function isJobExpired(job: Pick<JobPostDTO, 'applicationDeadline'>): bool
   return new Date(job.applicationDeadline) < new Date(new Date().toDateString());
 }
 
-/**
- * Job types are free text, so the same type arrives with inconsistent
- * casing/whitespace ("Full-time" vs "Full-Time"). Title-case it for display.
- */
-function formatJobType(value: string): string {
-  return value.trim().toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
-}
 
 export interface JobListing {
   searchQuery: string;
@@ -76,15 +70,14 @@ export function useJobListing(jobs: JobPostDTO[], storagePrefix: string): JobLis
   );
   const [page, setPage] = useState(1);
 
+  // Keyed on the canonical type, so "Full-time" and "Full-Time" are one option.
   const jobTypes = useMemo(() => {
-    const seen = new Map<string, string>(); // lowercased key -> display label
+    const seen = new Set<string>();
     for (const job of jobs) {
-      const raw = job.jobType?.trim();
-      if (!raw) continue;
-      const key = raw.toLowerCase();
-      if (!seen.has(key)) seen.set(key, formatJobType(raw));
+      if (!job.jobType?.trim()) continue;
+      seen.add(canonicalJobType(job.jobType));
     }
-    return Array.from(seen, ([value, label]) => ({ value, label }));
+    return Array.from(seen, (label) => ({ value: label, label }));
   }, [jobs]);
 
   // Search + type first, so the status counts describe the current search.
@@ -100,8 +93,7 @@ export function useJobListing(jobs: JobPostDTO[], storagePrefix: string): JobLis
         job.location?.toLowerCase().includes(q) ||
         job.jobPrefix?.toLowerCase().includes(q);
 
-      const matchesType =
-        !filterType || job.jobType?.trim().toLowerCase() === filterType.toLowerCase();
+      const matchesType = !filterType || canonicalJobType(job.jobType) === filterType;
 
       return matchesSearch && matchesType;
     });

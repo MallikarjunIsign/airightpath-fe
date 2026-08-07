@@ -4,6 +4,8 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { StatsCard } from '@/components/ui/StatsCard';
 import { Badge } from '@/components/ui/Badge';
 import { jobService } from '@/services/job.service';
+import { canonicalJobType } from '@/utils/job.utils';
+import { isJobExpired } from '@/hooks/useJobListing';
 import type { JobPostDTO } from '@/types/job.types';
 
 export function AdminDashboardPage() {
@@ -102,7 +104,9 @@ export function AdminDashboardPage() {
           ) : (
             <div className="space-y-3">
               {jobs.slice(0, 8).map((job) => {
-                const isExpired = new Date(job.applicationDeadline) < new Date();
+                // Same day-granularity rule as the Job Events page, so a job
+                // never reads Active there and Expired here.
+                const isExpired = isJobExpired(job);
                 return (
                   <div
                     key={job.id ?? job.jobPrefix}
@@ -140,12 +144,16 @@ export function AdminDashboardPage() {
           </CardHeader>
           <CardContent>
             {(() => {
-              const typeCounts: Record<string, number> = {};
-              jobs.forEach((j) => {
-                const t = j.jobType || 'Other';
-                typeCounts[t] = (typeCounts[t] || 0) + 1;
-              });
-              const entries = Object.entries(typeCounts);
+              // Count only live jobs — the card says "Active" — and bucket by the
+              // canonical type so "Full-time" and "Full-Time" are one entry.
+              const typeCounts = new Map<string, number>();
+              jobs
+                .filter((j) => !isJobExpired(j))
+                .forEach((j) => {
+                  const t = canonicalJobType(j.jobType);
+                  typeCounts.set(t, (typeCounts.get(t) ?? 0) + 1);
+                });
+              const entries = [...typeCounts.entries()].sort((a, b) => b[1] - a[1]);
               if (entries.length === 0) {
                 return (
                   <p className="text-sm text-[var(--textSecondary)] text-center py-4">
@@ -174,7 +182,7 @@ export function AdminDashboardPage() {
           <CardContent>
             {(() => {
               const upcoming = jobs
-                .filter((j) => new Date(j.applicationDeadline) >= new Date())
+                .filter((j) => !isJobExpired(j))
                 .sort(
                   (a, b) =>
                     new Date(a.applicationDeadline).getTime() -

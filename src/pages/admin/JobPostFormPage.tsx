@@ -16,16 +16,15 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { ShareJobLink } from '@/components/admin/ShareJobLink';
 import { MESSAGES } from '@/config/messages';
 import { ROUTES } from '@/config/routes';
+import { JOB_TYPES, canonicalJobType } from '@/utils/job.utils';
 import type { JobPostDTO } from '@/types/job.types';
 
 type JobPostFormData = z.infer<typeof jobPostSchema>;
 
+// Single source of truth — the same list the dashboard and filters group by.
 const JOB_TYPE_OPTIONS = [
   { value: '', label: 'Select job type' },
-  { value: 'Full-Time', label: 'Full-Time' },
-  { value: 'Part-Time', label: 'Part-Time' },
-  { value: 'Contract', label: 'Contract' },
-  { value: 'Internship', label: 'Internship' },
+  ...JOB_TYPES.map((t) => ({ value: t, label: t })),
 ];
 
 /** Today's local date as `YYYY-MM-DD` for a date input `min`. */
@@ -73,7 +72,9 @@ function toFormValues(job: JobPostDTO): JobPostFormData {
     experience: job.experience ?? '',
     education: job.education ?? '',
     salaryRange: job.salaryRange ?? '',
-    jobType: job.jobType ?? '',
+    // Canonicalised so a legacy "Full-time" preselects the "Full-Time" option
+    // and saving writes the standard spelling back.
+    jobType: job.jobType?.trim() ? canonicalJobType(job.jobType) : '',
     industry: job.industry ?? '',
     department: job.department ?? '',
     role: job.role ?? '',
@@ -104,6 +105,16 @@ export function JobPostFormPage() {
     (location.state as { job?: JobPostDTO } | null)?.job ?? null,
   );
   const [loadingJob, setLoadingJob] = useState(isEdit && !job);
+
+  // A job saved with a type outside the standard list keeps it as an extra
+  // option — otherwise the select would silently blank an unrecognised value.
+  const jobTypeOptions = useMemo(() => {
+    const current = job?.jobType?.trim() ? canonicalJobType(job.jobType) : '';
+    const isCustom = !!current && !JOB_TYPES.some((t) => t === current);
+    return isCustom
+      ? [...JOB_TYPE_OPTIONS, { value: current, label: `${current} (existing)` }]
+      : JOB_TYPE_OPTIONS;
+  }, [job?.jobType]);
 
   // An expired posting keeps its original deadline so a typo fix doesn't force
   // the admin to reopen applications.
@@ -370,7 +381,7 @@ export function JobPostFormPage() {
               <Select
                 label="Job Type"
                 required
-                options={JOB_TYPE_OPTIONS}
+                options={jobTypeOptions}
                 error={errors.jobType?.message}
                 {...register('jobType')}
               />
