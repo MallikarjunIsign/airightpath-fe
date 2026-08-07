@@ -332,7 +332,7 @@ export function AtsScreeningPage() {
 
       {/* Page Header */}
       <div>
-        <h1 className="text-2xl sm:text-3xl font-bold text-[var(--text)]">ATS Screening</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-[var(--text)]">Screen with ATS</h1>
         <p className="text-[var(--textSecondary)] mt-1">
           Screen and shortlist candidates by matching their resumes against job requirements
         </p>

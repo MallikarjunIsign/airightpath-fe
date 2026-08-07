@@ -2,6 +2,16 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
 
 /**
+ * Segments whose title-cased spelling reads like a URL fragment ("Ats", "Batch")
+ * rather than the name people see in the sidebar. Anything not listed here falls
+ * back to the generic title-casing below.
+ */
+const SEGMENT_LABELS: Record<string, string> = {
+  ats: 'Screen with ATS',
+  batch: 'Bulk ATS Check',
+};
+
+/**
  * Breadcrumb trail derived from the current pathname.
  * Rendered inside the page content (the outlet), not the header.
  */
@@ -11,7 +21,9 @@ export function PageBreadcrumbs() {
 
   const segments = location.pathname.split('/').filter(Boolean);
   const crumbs = segments.map((segment, i) => ({
-    label: segment.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+    label:
+      SEGMENT_LABELS[segment.toLowerCase()] ??
+      segment.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
     path: '/' + segments.slice(0, i + 1).join('/'),
     isLast: i === segments.length - 1,
   }));

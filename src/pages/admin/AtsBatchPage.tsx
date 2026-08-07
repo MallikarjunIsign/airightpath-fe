@@ -57,9 +57,9 @@ export function AtsBatchPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-[var(--text)]">ATS Batch Screening</h1>
+        <h1 className="text-3xl font-bold text-[var(--text)]">Bulk ATS Check</h1>
         <p className="text-[var(--textSecondary)] mt-1">
-          Upload multiple resumes to screen and rank candidates against a job description
+          Upload a batch of resumes, paste any job description, and see who fits best — ranked in seconds
         </p>
       </div>
 
