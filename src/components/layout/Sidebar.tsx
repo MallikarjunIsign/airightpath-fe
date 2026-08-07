@@ -4,7 +4,6 @@ import {
   LayoutDashboard,
   Users,
   Calendar,
-  Briefcase,
   FileText,
   ClipboardList,
   Upload,
@@ -49,11 +48,13 @@ const adminNavItems: NavItem[] = [
     icon: <BookOpen size={18} />,
     path: ROUTES.ADMIN.JOBS,
   },
-  {
-    label: "Create Job",
-    icon: <Briefcase size={18} />,
-    path: ROUTES.ADMIN.JOBS_CREATE,
-  },
+  // Create Job — reached from the "Create Job" button on the Job Events page,
+  // so it does not need its own sidebar entry. Route and page are unchanged.
+  // {
+  //   label: "Create Job",
+  //   icon: <Briefcase size={18} />,   // re-add the Briefcase import to restore
+  //   path: ROUTES.ADMIN.JOBS_CREATE,
+  // },
   {
     label: "Candidates",
     icon: <UserCheck size={18} />,
