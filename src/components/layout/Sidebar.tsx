@@ -67,7 +67,7 @@ const adminNavItems: NavItem[] = [
     path: ROUTES.ADMIN.ATS,
   },
   {
-    label: "Manage Prompts",
+    label: "Manage AI Prompts",
     icon: <MessageSquare size={18} />,
     path: ROUTES.ADMIN.PROMPTS,
   },
@@ -92,9 +92,9 @@ const adminNavItems: NavItem[] = [
     path: ROUTES.ADMIN.INTERVIEWS_RESULTS,
   },
   {
-    // Paste any job description, upload resumes, get ATS scores — no job post
-    // and no applicants involved.
-    label: "Resume Match (Custom JD)",
+    // A scoring sandbox: paste any job description, upload resumes, read the
+    // scores. No job post, no applicants, nothing written to the pipeline.
+    label: "Bulk ATS Check",
     icon: <Layers size={18} />,
     path: ROUTES.ADMIN.ATS_BATCH,
   },
