@@ -105,7 +105,15 @@ export function useJobListing(jobs: JobPostDTO[], storagePrefix: string): JobLis
   }, [matches]);
 
   const filtered = useMemo(() => {
-    if (status === 'all') return matches;
+    // "All" puts every live job ahead of every expired one — interleaving them
+    // buries the jobs that can still be acted on. Order within each group is
+    // left as the server sent it.
+    if (status === 'all') {
+      const active: JobPostDTO[] = [];
+      const expired: JobPostDTO[] = [];
+      for (const job of matches) (isJobExpired(job) ? expired : active).push(job);
+      return [...active, ...expired];
+    }
     const wantExpired = status === 'expired';
     return matches.filter((job) => isJobExpired(job) === wantExpired);
   }, [matches, status]);

@@ -5,7 +5,6 @@ import {
   Moon,
   Sun,
   Monitor,
-  Search,
   LogOut,
   Settings,
   Menu,
@@ -110,20 +109,6 @@ export function Navbar() {
             Right: Actions — ghost buttons with micro-interactions
             ---------------------------------------------------------------- */}
         <div className="flex items-center gap-0.5 ml-auto">
-          {/* Search trigger */}
-          <button
-            className="navbar-action-btn"
-            title="Search (Ctrl+K)"
-          >
-            <Search size={18} />
-            <span className="hidden lg:inline text-[0.75rem] text-[var(--textQuaternary,var(--textTertiary))] ml-2 mr-1">
-              Search
-            </span>
-            <kbd className="hidden lg:inline text-[0.625rem] px-1.5 py-0.5 rounded-lg bg-[var(--bgOverlay,var(--surface2))] text-[var(--textQuaternary,var(--textTertiary))]">
-              /
-            </kbd>
-          </button>
-
           {/* Theme toggle */}
           <div ref={themeRef} className="relative">
             <button

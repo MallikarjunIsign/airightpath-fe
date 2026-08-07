@@ -2,7 +2,6 @@ import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Pagination } from '@/components/ui/Pagination';
-import { JOB_PAGE_SIZES } from '@/hooks/useJobListing';
 import type { JobListing, JobStatusFilter } from '@/hooks/useJobListing';
 
 const STATUS_OPTIONS: { value: JobStatusFilter; label: string }[] = [
@@ -70,29 +69,20 @@ export function JobListCount({ listing }: { listing: JobListing }) {
   );
 }
 
-/** Page-size picker + pager, rendered under the grid. */
+/**
+ * Centred pager under the grid — arrows and page numbers only. The counts live
+ * in `JobListCount` above the grid, so repeating them here would be noise.
+ */
 export function JobListPager({ listing }: { listing: JobListing }) {
   if (listing.filtered.length === 0) return null;
 
   return (
-    <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-4 pt-2">
-      <div className="flex items-center gap-2">
-        <span className="text-sm text-[var(--textSecondary)] whitespace-nowrap">Per page</span>
-        <div className="w-24">
-          <Select
-            options={JOB_PAGE_SIZES.map((size) => ({ value: String(size), label: String(size) }))}
-            value={String(listing.pageSize)}
-            onChange={(e) => listing.setPageSize(Number(e.target.value))}
-          />
-        </div>
-      </div>
-
+    <div className="pt-2">
       <Pagination
+        variant="minimal"
         currentPage={listing.page}
         totalPages={listing.totalPages}
         onPageChange={listing.setPage}
-        totalItems={listing.filtered.length}
-        pageSize={listing.pageSize}
       />
     </div>
   );
