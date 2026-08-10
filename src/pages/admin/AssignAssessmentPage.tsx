@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/Button';
 import { DateTimeField } from '@/components/ui/DateTimeField';
 import { BackLink } from '@/components/ui/BackLink';
 import { QuestionPaperExportDialog } from '@/components/admin/QuestionPaperExportDialog';
+import { ExamDurationFields } from '@/components/admin/ExamDurationFields';
 import { Select } from '@/components/ui/Select';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
@@ -27,12 +28,60 @@ import { assessmentService } from '@/services/assessment.service';
 import { promptService } from '@/services/prompt.service';
 import { ROUTES } from '@/config/routes';
 import { nowDateTimeLocal } from '@/utils/datetime.utils';
+import { parseQuestionPaper } from '@/utils/question-paper.utils';
+import {
+  clampMinutesPerQuestion,
+  defaultMinutesPerQuestion,
+  effectiveQuestionCount,
+} from '@/utils/exam-duration.utils';
 import { MESSAGES } from '@/config/messages';
+import { APP_CONFIG } from '@/config/app.config';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
 
 interface FileState {
   file: File | null;
   source: 'ai' | 'upload' | null;
+}
+
+/**
+ * Questions in a paper, or null when the file isn't readable as one.
+ *
+ * Generated papers are JSON and count exactly; a PDF or Word upload doesn't,
+ * and the admin types the number instead. Either way this only drives the total
+ * shown on screen — the candidate's clock is recomputed from the real paper
+ * when the exam opens, so a wrong guess here cannot shorten anyone's exam.
+ */
+async function countQuestionsInPaper(file: File): Promise<number | null> {
+  try {
+    const paper = parseQuestionPaper(await file.text());
+    return paper.kind === 'raw' ? null : paper.items.length;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Adds the timing config for one assessment type to the assign payload.
+ *
+ * `minutesPerQuestion` is the authoritative field — it is what the exam clock is
+ * built from. The count and the total go along as `estimated*` so nobody
+ * downstream mistakes an admin's typed guess for a duration the exam must obey.
+ */
+function appendTiming(
+  form: FormData,
+  prefix: 'aptitude' | 'coding',
+  minutesPerQuestion: number,
+  detectedCount: number | null,
+  manualCount: string
+): void {
+  const minutes = clampMinutesPerQuestion(minutesPerQuestion);
+  form.append(`${prefix}MinutesPerQuestion`, String(minutes));
+
+  const count = effectiveQuestionCount(detectedCount, manualCount);
+  if (count) {
+    form.append(`${prefix}QuestionCount`, String(count));
+    form.append(`${prefix}EstimatedDurationMinutes`, String(count * minutes));
+  }
 }
 
 export function AssignAssessmentPage() {
@@ -61,6 +110,14 @@ export function AssignAssessmentPage() {
   // File state for each type
   const [aptitudeFile, setAptitudeFile] = useState<FileState>({ file: null, source: null });
   const [codingFile, setCodingFile] = useState<FileState>({ file: null, source: null });
+
+  // Per-question time, and the question counts used to show the resulting total.
+  const [aptitudeMinutes, setAptitudeMinutes] = useState(defaultMinutesPerQuestion('APTITUDE'));
+  const [codingMinutes, setCodingMinutes] = useState(defaultMinutesPerQuestion('CODING'));
+  const [aptitudeCount, setAptitudeCount] = useState<number | null>(null);
+  const [codingCount, setCodingCount] = useState<number | null>(null);
+  const [aptitudeCountManual, setAptitudeCountManual] = useState('');
+  const [codingCountManual, setCodingCountManual] = useState('');
   /** Paper being exported, with the heading its document should carry. */
   const [exporting, setExporting] = useState<{ file: File; title: string } | null>(null);
 
@@ -177,6 +234,38 @@ export function AssignAssessmentPage() {
   useEffect(() => {
     if (!codingChecked) setCodingFile({ file: null, source: null });
   }, [codingChecked]);
+
+  // Count each paper as it arrives so the admin sees the total exam time change
+  // with the paper rather than having to work it out.
+  useEffect(() => {
+    const file = aptitudeFile.file;
+    if (!file) {
+      setAptitudeCount(null);
+      return;
+    }
+    let cancelled = false;
+    countQuestionsInPaper(file).then((count) => {
+      if (!cancelled) setAptitudeCount(count);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [aptitudeFile.file]);
+
+  useEffect(() => {
+    const file = codingFile.file;
+    if (!file) {
+      setCodingCount(null);
+      return;
+    }
+    let cancelled = false;
+    countQuestionsInPaper(file).then((count) => {
+      if (!cancelled) setCodingCount(count);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [codingFile.file]);
 
   async function fetchJobs() {
     setLoadingJobs(true);
@@ -312,6 +401,18 @@ export function AssignAssessmentPage() {
       showToast(MESSAGES.admin.common.selectCandidate, 'warning');
       return;
     }
+    // Catch a mistyped allowance here rather than silently clamping it — the
+    // number decides how long every candidate gets.
+    const minPerQ = APP_CONFIG.EXAM_MIN_MINUTES_PER_QUESTION;
+    const maxPerQ = APP_CONFIG.EXAM_MAX_MINUTES_PER_QUESTION;
+    const outOfRange = (minutes: number) => minutes < minPerQ || minutes > maxPerQ;
+    if (
+      (aptitudeChecked && outOfRange(aptitudeMinutes)) ||
+      (codingChecked && outOfRange(codingMinutes))
+    ) {
+      showToast(MESSAGES.admin.assign.minutesPerQuestionInvalid(minPerQ, maxPerQ), 'warning');
+      return;
+    }
     if (!startTime) {
       showToast(MESSAGES.admin.assign.startTimeRequired, 'warning');
       return;
@@ -346,9 +447,11 @@ export function AssignAssessmentPage() {
 
       if (aptitudeChecked && aptitudeFile.file) {
         formData.append('aptitudeQuestionPaper', aptitudeFile.file);
+        appendTiming(formData, 'aptitude', aptitudeMinutes, aptitudeCount, aptitudeCountManual);
       }
       if (codingChecked && codingFile.file) {
         formData.append('codingQuestionPaper', codingFile.file);
+        appendTiming(formData, 'coding', codingMinutes, codingCount, codingCountManual);
       }
 
       await assessmentService.assignMultipart(formData);
@@ -362,6 +465,10 @@ export function AssignAssessmentPage() {
       setCodingChecked(false);
       setAptitudeFile({ file: null, source: null });
       setCodingFile({ file: null, source: null });
+      setAptitudeMinutes(defaultMinutesPerQuestion('APTITUDE'));
+      setCodingMinutes(defaultMinutesPerQuestion('CODING'));
+      setAptitudeCountManual('');
+      setCodingCountManual('');
 
       // Refresh candidate list so assigned candidates (now EXAM_SENT) disappear
       if (selectedPrefix) fetchCandidates();
@@ -539,6 +646,16 @@ export function AssignAssessmentPage() {
                     </button>
                   </div>
                 )}
+
+                <ExamDurationFields
+                  type="APTITUDE"
+                  minutesPerQuestion={aptitudeMinutes}
+                  onMinutesPerQuestionChange={setAptitudeMinutes}
+                  detectedCount={aptitudeCount}
+                  manualCount={aptitudeCountManual}
+                  onManualCountChange={setAptitudeCountManual}
+                  disabled={submitting}
+                />
               </div>
             )}
 
@@ -636,6 +753,16 @@ export function AssignAssessmentPage() {
                     </button>
                   </div>
                 )}
+
+                <ExamDurationFields
+                  type="CODING"
+                  minutesPerQuestion={codingMinutes}
+                  onMinutesPerQuestionChange={setCodingMinutes}
+                  detectedCount={codingCount}
+                  manualCount={codingCountManual}
+                  onManualCountChange={setCodingCountManual}
+                  disabled={submitting}
+                />
               </div>
             )}
 

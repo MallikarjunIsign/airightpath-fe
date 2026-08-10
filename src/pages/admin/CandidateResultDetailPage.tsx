@@ -21,6 +21,7 @@ import {
   Percent,
   TrendingDown,
   Terminal,
+  Download,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -45,6 +46,10 @@ import {
   SubmittedCodeModal,
   TestOutputModal,
 } from '@/components/admin/result/ResultModals';
+import { ProctoringCaptures } from '@/components/admin/result/ProctoringCaptures';
+import { AnswerSheetExportDialog } from '@/components/admin/result/AnswerSheetExportDialog';
+import { QuestionPaperExportDialog } from '@/components/admin/QuestionPaperExportDialog';
+import type { AnswerSheetData } from '@/utils/answer-sheet.utils';
 import {
   statusVariant,
   aptitudeScorePercent,
@@ -88,6 +93,16 @@ interface ExamWindows {
   coding?: string | null;
 }
 
+/**
+ * Assessment ids per type. Proctoring captures are keyed by attempt, so the
+ * aptitude tab can only show the aptitude photo once we know which attempt it
+ * belongs to.
+ */
+interface AssessmentIds {
+  aptitude?: number;
+  coding?: number;
+}
+
 const ALL_BANDS = '__all__';
 
 /** Best-effort parse of a `resultsJson` / question-paper payload into an array. */
@@ -113,7 +128,9 @@ export function CandidateResultDetailPage() {
   const [codingQuestions, setCodingQuestions] = useState<RawCodingQuestion[]>([]);
   const [aptitudePaper, setAptitudePaper] = useState<RawQuestion[]>([]);
   const [examWindows, setExamWindows] = useState<ExamWindows>({});
+  const [assessmentIds, setAssessmentIds] = useState<AssessmentIds>({});
   const [activeTab, setActiveTab] = useState<DetailTab>('overview');
+  const [exportingSheet, setExportingSheet] = useState(false);
 
   useEffect(() => {
     if (jobPrefix && email) fetchData();
@@ -153,6 +170,7 @@ export function CandidateResultDetailPage() {
         aptitude: formatDurationBetween(aptitude?.startTime, aptitude?.deadline),
         coding: formatDurationBetween(coding?.startTime, coding?.deadline),
       });
+      setAssessmentIds({ aptitude: aptitude?.id, coding: coding?.id });
 
       const [aptPaper, codePaper] = await Promise.all([
         aptitude?.id ? assessmentService.fetchQuestions(aptitude.id).catch(() => null) : null,
@@ -223,6 +241,44 @@ export function CandidateResultDetailPage() {
   const hasAptitude = !!aptitudeResult;
   const hasCoding = !!codingResult || codingRows.length > 0;
 
+  // Everything the export needs, assembled from what the tabs already render so
+  // the file and the screen can never disagree.
+  const answerSheet: AnswerSheetData = useMemo(
+    () => ({
+      candidateEmail: email ?? '',
+      jobPrefix: jobPrefix ?? '',
+      submittedAt: aptitudeResult?.submittedAt ?? codingResult?.submittedAt,
+      overallStatus,
+      overallScore,
+      aptitude: aptitudeResult
+        ? {
+            score: aptitudeScore,
+            status: aptitudeResult.status,
+            marksLabel: `${aptitudeResult.score}${aptitudeResult.totalMarks ? `/${aptitudeResult.totalMarks}` : ''} marks`,
+            answers: aptitudeAnswers,
+            paper: aptitudePaper,
+          }
+        : undefined,
+      coding: hasCoding
+        ? { score: codingScore, status: codingResult?.status, rows: codingRows }
+        : undefined,
+    }),
+    [
+      email,
+      jobPrefix,
+      aptitudeResult,
+      codingResult,
+      overallStatus,
+      overallScore,
+      aptitudeScore,
+      aptitudeAnswers,
+      aptitudePaper,
+      hasCoding,
+      codingScore,
+      codingRows,
+    ],
+  );
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -275,9 +331,22 @@ export function CandidateResultDetailPage() {
                 </div>
               </div>
             </div>
-            <Badge variant={statusVariant(overallStatus)} size="lg">
-              {overallStatus}
-            </Badge>
+            <div className="flex items-center gap-3">
+              {/* The record of what the candidate actually wrote — for a hiring
+                  decision, or for answering a disputed score. */}
+              <Button
+                variant="secondary"
+                size="sm"
+                leftIcon={<Download size={15} />}
+                onClick={() => setExportingSheet(true)}
+                disabled={!hasAptitude && !hasCoding}
+              >
+                Download Answer Sheet
+              </Button>
+              <Badge variant={statusVariant(overallStatus)} size="lg">
+                {overallStatus}
+              </Badge>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -417,6 +486,8 @@ export function CandidateResultDetailPage() {
           answers={aptitudeAnswers}
           paper={aptitudePaper}
           examWindow={examWindows.aptitude}
+          assessmentId={assessmentIds.aptitude}
+          jobPrefix={jobPrefix ?? ''}
         />
       )}
       {activeTab === 'coding' && (
@@ -425,10 +496,70 @@ export function CandidateResultDetailPage() {
           score={codingScore}
           rows={codingRows}
           examWindow={examWindows.coding}
+          assessmentId={assessmentIds.coding}
+          paper={codingQuestions}
+          jobPrefix={jobPrefix ?? ''}
         />
+      )}
+
+      {exportingSheet && (
+        <AnswerSheetExportDialog data={answerSheet} onClose={() => setExportingSheet(false)} />
       )}
     </div>
   );
+}
+
+/**
+ * Wraps a parsed question paper back into a File so it can go through the same
+ * export dialog the Assign screen uses — one download flow, one set of formats.
+ */
+function paperAsFile(paper: unknown[], name: string): File {
+  const json = JSON.stringify(paper, null, 2);
+  return new File([new Blob([json], { type: 'application/json' })], `${name}.json`, {
+    type: 'application/json',
+  });
+}
+
+/**
+ * The aptitude paper as stored, or a reconstruction from the result when the
+ * original could not be loaded.
+ *
+ * The result rows carry the question text, the correct answer and the marks —
+ * everything except the answer options, which are only in the paper. That is a
+ * worse document than the real paper, but it is a usable one, and it matches
+ * what the "View Question Paper" modal already falls back to. A dead download
+ * button next to a working preview is just confusing.
+ */
+function aptitudePaperForExport(paper: RawQuestion[], answers: AptitudeAnswer[]): RawQuestion[] {
+  if (paper.length > 0) return paper;
+  return answers.map((answer, i) => ({
+    id: answer.questionId ?? i + 1,
+    question: answer.questionText || answer.question || '',
+    // Empty rather than absent: the parser reads "has options" as "is aptitude".
+    options: {},
+    correctAnswer: answer.correctAnswer,
+    Difficulty: answer.Difficulty || answer.category,
+    marks: answer.marks,
+  }));
+}
+
+/** The coding paper as stored, else rebuilt from the merged per-question rows. */
+function codingPaperForExport(
+  paper: RawCodingQuestion[],
+  rows: CodingRow[],
+): RawCodingQuestion[] {
+  if (paper.length > 0) return paper;
+  return rows.map((row, i) => ({
+    id: row.question?.id ?? i + 1,
+    title: rowTitle(row),
+    description: row.question?.description ?? '',
+    sampleInput: row.question?.sampleInput,
+    sampleOutput: row.question?.sampleOutput,
+    // Present (even if empty) so the parser treats this as a coding paper.
+    testCases: row.question?.testCases ?? [],
+    Difficulty: row.question?.Difficulty,
+    marks: row.question?.marks,
+  }));
 }
 
 // ── KPI Tile ──────────────────────────────────────────────────────────
@@ -744,20 +875,27 @@ function AptitudeTab({
   answers,
   paper,
   examWindow,
-}: {
+  assessmentId,
+  jobPrefix,
+}: Readonly<{
   result: Result;
   score: number | null;
   answers: AptitudeAnswer[];
   paper: RawQuestion[];
   examWindow?: string | null;
-}) {
+  /** Attempt these proctoring captures belong to. */
+  assessmentId?: number;
+  jobPrefix: string;
+}>) {
   const [filter, setFilter] = useState<AptitudeFilter>('all');
   const [band, setBand] = useState<string>(ALL_BANDS);
   const [paperOpen, setPaperOpen] = useState(false);
+  const [paperDownload, setPaperDownload] = useState(false);
   const [highlight, setHighlight] = useState<number | null>(null);
 
   const stats = useMemo(() => summarizeAptitude(answers), [answers]);
   const bands = useMemo(() => groupAptitudeByBand(answers), [answers]);
+  const exportPaper = useMemo(() => aptitudePaperForExport(paper, answers), [paper, answers]);
 
   // Chips in the band cards jump straight to the question they describe.
   const jumpToQuestion = useCallback((index: number) => {
@@ -816,14 +954,34 @@ function AptitudeTab({
                 caption="Aptitude summary"
                 detail={`${result.score}${result.totalMarks ? `/${result.totalMarks}` : ''} marks · ${stats.correct}/${stats.total} correct`}
               />
-              <Button
-                variant="secondary"
-                size="sm"
-                leftIcon={<FileText size={15} />}
-                onClick={() => setPaperOpen(true)}
-              >
-                View Question Paper
-              </Button>
+              <div className="flex flex-col items-end gap-1.5">
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    leftIcon={<FileText size={15} />}
+                    onClick={() => setPaperOpen(true)}
+                  >
+                    View Question Paper
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    leftIcon={<Download size={15} />}
+                    disabled={exportPaper.length === 0}
+                    onClick={() => setPaperDownload(true)}
+                  >
+                    Download Paper
+                  </Button>
+                </div>
+                {/* Say when the download is a reconstruction, not the original. */}
+                {paper.length === 0 && exportPaper.length > 0 && (
+                  <p className="text-[11px] text-[var(--textTertiary)] text-right max-w-xs">
+                    Original paper unavailable — rebuilt from the stored result, without the
+                    answer options.
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
@@ -852,6 +1010,9 @@ function AptitudeTab({
           </div>
         </CardContent>
       </Card>
+
+      {/* Who sat this exam, and the room they sat it in */}
+      <ProctoringCaptures assessmentId={assessmentId} moduleLabel="Aptitude" />
 
       {/* Difficulty bands */}
       <AptitudeBandCards bands={bands} onSelectQuestion={jumpToQuestion} />
@@ -988,6 +1149,14 @@ function AptitudeTab({
         paper={paper}
         answers={answers}
       />
+
+      {paperDownload && (
+        <QuestionPaperExportDialog
+          file={paperAsFile(exportPaper, `${jobPrefix}_aptitude_questions`)}
+          title={`${jobPrefix} — Aptitude Question Paper`}
+          onClose={() => setPaperDownload(false)}
+        />
+      )}
     </div>
   );
 }
@@ -999,20 +1168,29 @@ function CodingTab({
   score,
   rows,
   examWindow,
-}: {
+  assessmentId,
+  paper,
+  jobPrefix,
+}: Readonly<{
   result?: Result;
   score: number | null;
   rows: CodingRow[];
   examWindow?: string | null;
-}) {
+  /** Attempt these proctoring captures belong to. */
+  assessmentId?: number;
+  paper: RawCodingQuestion[];
+  jobPrefix: string;
+}>) {
   const [expandedQ, setExpandedQ] = useState<string | null>(null);
   const [filter, setFilter] = useState<CodingFilter>('all');
   const [paperOpen, setPaperOpen] = useState(false);
+  const [paperDownload, setPaperDownload] = useState(false);
   const [codeRow, setCodeRow] = useState<CodingRow | null>(null);
   const [outputRow, setOutputRow] = useState<CodingRow | null>(null);
 
   const stats = useMemo(() => summarizeCoding(rows), [rows]);
   const bands = useMemo(() => groupCodingByBand(rows), [rows]);
+  const exportPaper = useMemo(() => codingPaperForExport(paper, rows), [paper, rows]);
 
   const visible = useMemo(
     () =>
@@ -1050,14 +1228,34 @@ function CodingTab({
                 caption="Programming summary"
                 detail={`${stats.passedTests}/${stats.totalTests} test cases · ${stats.solved}/${stats.totalQ} solved`}
               />
-              <Button
-                variant="secondary"
-                size="sm"
-                leftIcon={<FileText size={15} />}
-                onClick={() => setPaperOpen(true)}
-              >
-                View Programming Question Paper
-              </Button>
+              <div className="flex flex-col items-end gap-1.5">
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    leftIcon={<FileText size={15} />}
+                    onClick={() => setPaperOpen(true)}
+                  >
+                    View Programming Question Paper
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    leftIcon={<Download size={15} />}
+                    disabled={exportPaper.length === 0}
+                    onClick={() => setPaperDownload(true)}
+                  >
+                    Download Paper
+                  </Button>
+                </div>
+                {/* Say when the download is a reconstruction, not the original. */}
+                {paper.length === 0 && exportPaper.length > 0 && (
+                  <p className="text-[11px] text-[var(--textTertiary)] text-right max-w-xs">
+                    Original paper unavailable — rebuilt from the stored result, so problem
+                    statements may be partial.
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
@@ -1092,6 +1290,9 @@ function CodingTab({
           </div>
         </CardContent>
       </Card>
+
+      {/* Who sat this exam, and the room they sat it in */}
+      <ProctoringCaptures assessmentId={assessmentId} moduleLabel="Coding" />
 
       {/* Difficulty bands */}
       <CodingBandCards bands={bands} onViewCode={setCodeRow} onViewOutput={setOutputRow} />
@@ -1149,6 +1350,14 @@ function CodingTab({
       <CodingPaperModal isOpen={paperOpen} onClose={() => setPaperOpen(false)} rows={rows} />
       <SubmittedCodeModal row={codeRow} onClose={() => setCodeRow(null)} />
       <TestOutputModal row={outputRow} onClose={() => setOutputRow(null)} />
+
+      {paperDownload && (
+        <QuestionPaperExportDialog
+          file={paperAsFile(exportPaper, `${jobPrefix}_coding_questions`)}
+          title={`${jobPrefix} — Coding Question Paper`}
+          onClose={() => setPaperDownload(false)}
+        />
+      )}
     </div>
   );
 }

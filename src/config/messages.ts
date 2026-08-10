@@ -47,6 +47,16 @@ export const MESSAGES = {
     permissionsFailed: 'Failed to access camera/microphone. Please allow permissions.',
     agreeRequired: 'Please agree to the terms and conditions.',
     enableDevicesRequired: 'Please enable camera and microphone before starting.',
+    photoRequired: 'Please take your photo before starting the exam.',
+    photoCaptured: 'Photo captured.',
+    photoUploadFailed: "We couldn't save your photo. Please try again.",
+    photoNoFace: 'No face detected. Please centre your face in the frame and try again.',
+    photoMultipleFaces: 'More than one person is visible. Only you may be in frame.',
+    secondPersonPresent: 'Another person is visible in your camera. Please sit alone to continue.',
+    tooNoisy: 'Your surroundings are too noisy. Please move somewhere quieter and try again.',
+    roomScanRequired: 'Please complete the room scan before starting the exam.',
+    roomScanDone: 'Room scan captured. Thank you.',
+    roomScanFailed: "We couldn't save your room scan. Please try again.",
   },
 
   application: {
@@ -124,6 +134,8 @@ export const MESSAGES = {
       startInPast: 'Start time cannot be in the past.',
       deadlineInPast: 'Deadline cannot be in the past.',
       deadlineBeforeStart: 'Deadline must be after the start time.',
+      minutesPerQuestionInvalid: (min: number, max: number) =>
+        `Time per question must be between ${min} and ${max} minutes.`,
       assigned: 'Assessment assigned successfully!',
     },
     atsBatch: {

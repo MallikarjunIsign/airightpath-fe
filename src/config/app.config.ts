@@ -20,7 +20,17 @@ export const APP_CONFIG = {
     { value: "cpp", label: "C++" },
     { value: "javascript", label: "JavaScript" },
   ],
+  // Fallback exam length, used only when the question count is unknown (the
+  // paper failed to load, or a legacy assignment carries no timing config).
+  // The real duration is per-question — see the three values below.
   EXAM_TIMER_MINUTES: 120,
+  // Per-question time. The exam clock is questionCount x these minutes, so the
+  // duration follows the paper: add questions and the exam grows to match.
+  // Admins can override per assignment on the Assign Assessment screen.
+  APTITUDE_MINUTES_PER_QUESTION: 1,
+  CODING_MINUTES_PER_QUESTION: 25,
+  EXAM_MIN_MINUTES_PER_QUESTION: 1,
+  EXAM_MAX_MINUTES_PER_QUESTION: 180,
   INTERVIEW_TIMER_MINUTES: 60,
   INTERVIEW_QUESTION_TIMER_MINUTES: 5,
   FACE_DETECTION_MAX_WARNINGS: 999999,

@@ -66,6 +66,17 @@ export const ENDPOINTS = {
     GENERATE_CODING_QUESTIONS: "/api/generate-coding-questions",
     FETCH_QUESTIONS: (id: number) => `/api/fetchAssessment/${id}`,
   },
+  // Pre-exam proctoring captures (identity photo, room scan). Writes are
+  // candidate-facing; the reads below require ASSESSMENT_READ.
+  EXAM_PROCTORING: {
+    IDENTITY_PHOTO: "/api/exam-proctoring/identity-photo",
+    ROOM_SCAN: "/api/exam-proctoring/room-scan",
+    ASSESSMENT_CAPTURES: (assessmentId: number) =>
+      `/api/exam-proctoring/assessments/${assessmentId}/captures`,
+    CANDIDATE_CAPTURES: "/api/exam-proctoring/captures",
+    CAPTURE_IMAGE: (captureId: number) =>
+      `/api/exam-proctoring/captures/${captureId}/image`,
+  },
   INTERVIEWS: {
     ASSIGN: "/api/interview/assign-interview",
     ASSIGN_BULK: "/api/interview/assign-interview-bulk",

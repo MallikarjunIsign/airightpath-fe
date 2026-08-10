@@ -26,6 +26,7 @@ import { MESSAGES } from '@/config/messages';
 import { CameraRequiredOverlay, FullscreenRequiredOverlay } from '@/components/exam/ExamOverlays';
 import { ROUTES } from '@/config/routes';
 import { formatTimer } from '@/utils/format.utils';
+import { computeExamMinutes } from '@/utils/exam-duration.utils';
 import type { Assessment, Question, RawQuestion } from '@/types/assessment.types';
 
 /** Normalise raw BE question (object options, "question" field) → clean UI shape */
@@ -63,7 +64,13 @@ export function AptitudeAssessmentPage() {
   const { user } = useAuth();
   const { showToast } = useToast();
 
-  const assessment = (location.state as { assessment?: Assessment })?.assessment;
+  const navState = location.state as
+    | { assessment?: Assessment; durationMinutes?: number }
+    | null;
+  const assessment = navState?.assessment;
+  // The instructions screen already counted the paper and told the candidate
+  // how long they get; honour that number rather than deriving a second one.
+  const agreedDurationMinutes = navState?.durationMinutes;
 
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -106,8 +113,9 @@ export function AptitudeAssessmentPage() {
   questionsRef.current = questions;
   answersRef.current = answers;
 
-  // Timer
-  const { secondsLeft, start: startTimer } = useTimer({
+  // Timer. The real duration is per-question, so it is only known once the
+  // paper has loaded — init below resets the clock to it before starting.
+  const { secondsLeft, start: startTimer, reset: resetTimer } = useTimer({
     initialSeconds: APP_CONFIG.EXAM_TIMER_MINUTES * 60,
     autoStart: false,
     onExpire: () => handleAutoSubmit('Time is up!'),
@@ -201,6 +209,16 @@ export function AptitudeAssessmentPage() {
         }
 
         setQuestions(normalizeQuestions(parsed));
+
+        // Now that the paper is counted, set the clock: per-question time x
+        // questions, unless the instructions screen already fixed a duration.
+        const minutes = computeExamMinutes({
+          type: assessment.assessmentType,
+          questionCount: parsed.length,
+          minutesPerQuestion: assessment.minutesPerQuestion,
+          durationMinutes: agreedDurationMinutes ?? assessment.durationMinutes,
+        });
+        resetTimer(minutes * 60);
 
         // Proctoring init: fullscreen → face models → camera (config-driven).
         await beginProctoring();

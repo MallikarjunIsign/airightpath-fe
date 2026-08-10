@@ -14,6 +14,15 @@ export interface Assessment {
   jobPrefix: string;
   containerName?: string;
   fileName?: string;
+  /**
+   * Timing chosen by the admin when this assessment was assigned. Both are
+   * optional: assignments made before per-question timing existed carry
+   * neither, and the exam falls back to the configured default for its type.
+   * See utils/exam-duration.utils.ts for how they combine.
+   */
+  minutesPerQuestion?: number;
+  /** A fixed whole-exam duration, which overrides the per-question maths. */
+  durationMinutes?: number;
 }
 
 // Raw question shape from BE — options is Map<String,String> e.g. {"A":"…","B":"…"}
@@ -74,6 +83,10 @@ export interface AssignAssessmentDto {
   assessmentType: 'APTITUDE' | 'CODING';
   startTime: string;
   deadline: string;
+  /** Per-question allowance; the exam clock is this times the question count. */
+  minutesPerQuestion?: number;
+  /** The resulting whole-exam duration, sent so the backend need not recompute. */
+  durationMinutes?: number;
 }
 
 export interface AssessmentSubmission {
