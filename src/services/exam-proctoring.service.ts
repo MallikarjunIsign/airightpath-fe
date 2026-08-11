@@ -25,8 +25,13 @@ interface RoomScanUpload {
   frames: Blob[];
 }
 
+/**
+ * No Content-Type here on purpose. multipart bodies need a boundary, and only
+ * the browser can generate one — naming the type by hand produces a header with
+ * no boundary that the server cannot parse. Leaving it unset lets the browser
+ * write the full header itself.
+ */
 const uploadConfig = {
-  headers: { 'Content-Type': 'multipart/form-data' },
   _skipErrorToast: true,
 } as never;
 

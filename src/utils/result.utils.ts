@@ -7,6 +7,7 @@ import type { RawCodingQuestion, RawQuestion } from '@/types/assessment.types';
 import type { CodeSubmissionResponse } from '@/types/compiler.types';
 import type { AptitudeAnswer, CodingAnswer, Result } from '@/types/result.types';
 import { isSkeletonCode } from './code.utils';
+import { isGraded, isPassed } from './compiler.utils';
 
 // ── Shared display helpers ─────────────────────────────────────────────
 
@@ -201,18 +202,29 @@ const idOf = (v: unknown) => (v == null || v === '' ? null : String(v));
  */
 export const codeOf = (r: CodingRow) => r.answer?.code?.trim() || r.sub?.script?.trim() || '';
 
-export const testsOf = (r: CodingRow) => r.sub?.testResults ?? [];
+/**
+ * Only graded tests count towards a score.
+ *
+ * The stored submission is whatever the candidate last ran, which may have been
+ * a plain Run with no test cases. Those come back with `passed: null` — there
+ * was no expected output to compare against — so they are neither passes nor
+ * failures and must be excluded rather than counted as failures, which would
+ * otherwise drag the pass rate down by one phantom test per question.
+ */
+export const testsOf = (r: CodingRow) => (r.sub?.testResults ?? []).filter(isGraded);
 
 /** Executed tests when there are any, otherwise what the paper would have run. */
-export const plannedTestCount = (r: CodingRow) =>
-  r.sub?.testResults?.length ?? r.question?.testCases?.length ?? 0;
+export const plannedTestCount = (r: CodingRow) => {
+  const graded = testsOf(r);
+  return graded.length > 0 ? graded.length : (r.question?.testCases?.length ?? 0);
+};
 
-export const passedTestCount = (r: CodingRow) => testsOf(r).filter((t) => t.passed).length;
+export const passedTestCount = (r: CodingRow) => testsOf(r).filter(isPassed).length;
 
-/** Solved = every executed test passed (and at least one ran). */
+/** Solved = every graded test passed (and at least one ran). */
 export const isRowSolved = (r: CodingRow) => {
   const tests = testsOf(r);
-  return tests.length > 0 && tests.every((t) => t.passed);
+  return tests.length > 0 && tests.every(isPassed);
 };
 
 /** Attempted = the starter template was actually changed. */

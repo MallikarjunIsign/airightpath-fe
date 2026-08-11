@@ -23,11 +23,13 @@ import {
   Code2,
   Lock,
   FileWarning,
+  Lightbulb,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/Toast';
 import { assessmentService } from '@/services/assessment.service';
 import { compilerService } from '@/services/compiler.service';
+import { extractApiError } from '@/services/api.service';
 import { useTimer } from '@/hooks/useTimer';
 import { useExamProctoring } from '@/hooks/useExamProctoring';
 import axios from 'axios';
@@ -42,6 +44,14 @@ import { CameraRequiredOverlay, FullscreenRequiredOverlay } from '@/components/e
 import { ROUTES } from '@/config/routes';
 import { formatTimer } from '@/utils/format.utils';
 import { computeExamMinutes } from '@/utils/exam-duration.utils';
+import {
+  errorKind,
+  isGraded,
+  isPassed,
+  ranCleanly,
+  statusLabel,
+  statusTone,
+} from '@/utils/compiler.utils';
 import type { Assessment, CodingQuestion, RawCodingQuestion } from '@/types/assessment.types';
 import type { CodeSubmissionResponse, CodeErrorInfo } from '@/types/compiler.types';
 
@@ -244,8 +254,8 @@ export function CodingAssessmentPage() {
     const line = errorInfo.line ?? 1;
     const safeLine = Math.max(1, Math.min(line, model.getLineCount()));
 
-    const isCompilation = errorInfo.type?.toLowerCase().includes('compilation') ||
-                          errorInfo.type?.toLowerCase().includes('syntax');
+    const kind = errorKind(errorInfo).toLowerCase();
+    const isCompilation = kind.includes('compilation') || kind.includes('syntax');
 
     monaco.editor.setModelMarkers(model, 'compiler', [{
       startLineNumber: safeLine,
@@ -276,7 +286,7 @@ export function CodingAssessmentPage() {
       );
       if (runtimeErr) {
         const errInfo: CodeErrorInfo = {
-          type: 'RuntimeError',
+          exception: 'RuntimeError',
           message: runtimeErr.actualOutput.replace('Runtime Error: ', ''),
           fullTrace: runtimeErr.actualOutput,
         };
@@ -514,12 +524,33 @@ export function CodingAssessmentPage() {
       );
       processCompilerResponse(res.data);
     } catch (err) {
-      // A client-side timeout (compilation ran past the 120s limit) surfaces as a
-      // Timeout in the output panel; other failures show a generic run error.
+      // Three different failures, told apart because they need different
+      // reactions: a timeout means fix the code, an unsupported language means
+      // pick another, and an unavailable runner means wait — that last one is
+      // our infrastructure, so it must not be presented as the candidate's bug.
       const timedOut = axios.isAxiosError(err) && err.code === 'ECONNABORTED';
-      const message = timedOut ? MESSAGES.exam.compileTimeout : MESSAGES.exam.compileFailed;
-      setCurrentError({ type: timedOut ? 'Timeout' : 'Error', message, fullTrace: message });
-      showToast(message, timedOut ? 'warning' : 'error');
+      const { code } = extractApiError(err);
+
+      let message: string = MESSAGES.exam.compileFailed;
+      let kind = 'Error';
+      let tone: 'warning' | 'error' = 'error';
+
+      if (timedOut) {
+        message = MESSAGES.exam.compileTimeout;
+        kind = 'Timeout';
+        tone = 'warning';
+      } else if (code === 'COMPILER_UNAVAILABLE') {
+        message = MESSAGES.exam.compilerUnavailable;
+        kind = 'Unavailable';
+        tone = 'warning';
+      } else if (code === 'COMPILER_UNSUPPORTED_LANGUAGE') {
+        message = MESSAGES.exam.compilerUnsupportedLanguage(language);
+        kind = 'Unsupported';
+        tone = 'warning';
+      }
+
+      setCurrentError({ exception: kind, message, fullTrace: message });
+      showToast(message, tone);
     } finally {
       setRunning(false);
     }
@@ -662,10 +693,10 @@ export function CodingAssessmentPage() {
 
   // Derive error display info
   const hasError = !!currentError;
-  const isCompilationError = currentError?.type?.toLowerCase().includes('compilation') ||
-                             currentError?.type?.toLowerCase().includes('syntax');
-  const isRuntimeError = currentError?.type?.toLowerCase().includes('runtime');
-  const isTimeout = currentError?.type?.toLowerCase().includes('timeout');
+  const errorName = currentError ? errorKind(currentError).toLowerCase() : '';
+  const isCompilationError = errorName.includes('compilation') || errorName.includes('syntax');
+  const isRuntimeError = errorName.includes('runtime');
+  const isTimeout = errorName.includes('timeout');
 
   return (
     <div className="min-h-screen bg-[var(--background)] flex flex-col">
@@ -931,8 +962,13 @@ export function CodingAssessmentPage() {
               >
                 <Terminal size={14} />
                 Output
-                {compilerResponse?.passed === true && <CheckCircle size={12} className="text-green-400" />}
-                {compilerResponse?.passed === false && hasError && <XCircle size={12} className="text-red-400" />}
+                {/* Driven by status, not `passed` — an ungraded run reports
+                    passed: null, and reading that as false marked a clean run
+                    as a failure. */}
+                {compilerResponse && ranCleanly(compilerResponse) && (
+                  <CheckCircle size={12} className="text-green-400" />
+                )}
+                {compilerResponse && hasError && <XCircle size={12} className="text-red-400" />}
               </button>
               <button
                 onClick={() => setActiveOutputTab('input')}
@@ -1009,40 +1045,60 @@ export function CodingAssessmentPage() {
                     </div>
                   )}
 
-                  {/* Success output (no test cases) */}
-                  {!hasError && compilerResponse.testResults?.length > 0 && !compilerResponse.testResults[0].expectedOutput && (
+                  {/* Plain output — an ungraded run, so there is nothing to
+                      compare and no pass/fail to report. */}
+                  {!hasError && compilerResponse.testResults?.length > 0 && !isGraded(compilerResponse.testResults[0]) && (
                     <pre className="text-sm font-mono whitespace-pre-wrap text-green-400">
                       {compilerResponse.testResults[0].actualOutput || 'No output'}
                     </pre>
                   )}
 
                   {/* Test case results */}
-                  {compilerResponse.testResults?.some((tr) => tr.expectedOutput) && !hasError && (
+                  {compilerResponse.testResults?.some(isGraded) && !hasError && (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <h4 className="text-sm font-semibold text-gray-400">Test Results</h4>
-                        {compilerResponse.passed !== undefined && (
-                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                            compilerResponse.passed ? 'bg-green-900/50 text-green-400' : 'bg-red-900/50 text-red-400'
-                          }`}>
-                            {compilerResponse.passed ? 'All Passed' : 'Some Failed'}
+                        {/* Explicit true/false — `passed` is null on ungraded
+                            runs, which a truthiness test reads as "Some Failed". */}
+                        {compilerResponse.passed === true && (
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-green-900/50 text-green-400">
+                            All Passed
+                          </span>
+                        )}
+                        {compilerResponse.passed === false && (
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-900/50 text-red-400">
+                            Some Failed
                           </span>
                         )}
                       </div>
-                      {compilerResponse.testResults.filter((tr) => tr.expectedOutput).map((tr, idx) => (
+                      {compilerResponse.testResults.filter(isGraded).map((tr, idx) => (
                         <div
-                          key={idx}
+                          key={`${tr.questionId ?? 'case'}-${idx}`}
                           className={`p-3 rounded-lg border ${
-                            tr.passed ? 'border-green-800/50 bg-green-950/30' : 'border-red-800/50 bg-red-950/30'
+                            isPassed(tr) ? 'border-green-800/50 bg-green-950/30' : 'border-red-800/50 bg-red-950/30'
                           }`}
                         >
-                          <div className="flex items-center gap-2 mb-1">
-                            {tr.passed ? <CheckCircle className="w-4 h-4 text-green-400" /> : <XCircle className="w-4 h-4 text-red-400" />}
-                            <span className={`text-sm font-medium ${tr.passed ? 'text-green-400' : 'text-red-400'}`}>
-                              Test {idx + 1}: {tr.passed ? 'Passed' : 'Failed'}
+                          <div className="flex flex-wrap items-center gap-2 mb-1">
+                            {isPassed(tr)
+                              ? <CheckCircle className="w-4 h-4 text-green-400" />
+                              : <XCircle className="w-4 h-4 text-red-400" />}
+                            <span className={`text-sm font-medium ${isPassed(tr) ? 'text-green-400' : 'text-red-400'}`}>
+                              Test {idx + 1}
                             </span>
+                            {/* A timeout, a crash and a wrong answer are
+                                different problems — badge them differently. */}
+                            {tr.status && (
+                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${statusTone(tr.status)}`}>
+                                {statusLabel(tr.status)}
+                              </span>
+                            )}
+                            {tr.errorInfo?.line != null && (
+                              <span className="text-xs text-gray-400 bg-gray-800 px-2 py-0.5 rounded-full">
+                                Line {tr.errorInfo.line}
+                              </span>
+                            )}
                           </div>
-                          {!tr.passed && (
+                          {!isPassed(tr) && (
                             <div className="mt-2 space-y-1 pl-6">
                               <div className="flex gap-2 text-xs font-mono">
                                 <span className="text-gray-500 w-20 shrink-0">Input:</span>
@@ -1057,8 +1113,27 @@ export function CodingAssessmentPage() {
                                 <span className="text-red-300">{tr.actualOutput}</span>
                               </div>
                               {tr.errorInfo && (
-                                <div className="mt-1 text-xs text-red-400 font-mono">
-                                  {tr.errorInfo.type}: {tr.errorInfo.message}
+                                <div className="mt-1 space-y-1">
+                                  <div className="text-xs text-red-400 font-mono">
+                                    {errorKind(tr.errorInfo)}: {tr.errorInfo.message}
+                                  </div>
+                                  {tr.errorInfo.hint && (
+                                    <p className="text-xs text-amber-300 flex items-start gap-1.5">
+                                      <Lightbulb size={12} className="mt-0.5 flex-shrink-0" />
+                                      {tr.errorInfo.hint}
+                                    </p>
+                                  )}
+                                  {tr.errorInfo.fullTrace &&
+                                    tr.errorInfo.fullTrace !== tr.errorInfo.message && (
+                                      <details>
+                                        <summary className="text-xs text-red-500 cursor-pointer hover:text-red-400">
+                                          Details
+                                        </summary>
+                                        <pre className="mt-1 text-xs font-mono whitespace-pre-wrap text-red-400/80">
+                                          {tr.errorInfo.fullTrace}
+                                        </pre>
+                                      </details>
+                                    )}
                                 </div>
                               )}
                             </div>

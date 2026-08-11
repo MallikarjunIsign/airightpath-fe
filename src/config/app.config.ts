@@ -2,8 +2,11 @@ export const APP_CONFIG = {
   HTTP_TIMEOUT_MS: 30000,
   AI_GENERATION_TIMEOUT_MS: 330000,
   ASSIGN_TIMEOUT_MS: 120000,
-  // Compilation is terminated after this long; the run request waits up to here.
-  COMPILE_TIMEOUT_MS: 120000,
+  // The backend now kills a runaway program in ~5s and answers, so the old
+  // 2-minute ceiling only meant a candidate sat watching a spinner when the
+  // request itself was lost. Kept well above the execution limit so a cold
+  // container or slow network is not mistaken for an infinite loop.
+  COMPILE_TIMEOUT_MS: 30000,
   TOKEN_EXPIRY_SKEW_SECONDS: 30,
   MAX_FILE_SIZE_MB: 2,
   MAX_FILE_SIZE_BYTES: 2 * 1024 * 1024,

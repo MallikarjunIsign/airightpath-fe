@@ -37,8 +37,14 @@ export const MESSAGES = {
     codingSubmitted: 'Coding exam submitted successfully!',
     questionSaved: (n: number) => `Question ${n} saved!`,
     questionSubmitted: (n: number) => `Question ${n} submitted!`,
-    compileTimeout: 'Compilation timed out after 120 seconds. Please simplify your code and try again.',
+    compileTimeout: 'Your code took too long to run. Check for an infinite loop and try again.',
     compileFailed: 'Could not run your code. Please try again.',
+    // Our compiler host is missing a toolchain — the candidate's code is fine,
+    // so this must not read as a mistake they made.
+    compilerUnavailable:
+      'The code runner is temporarily unavailable. Your code has not been lost — please try again in a moment.',
+    compilerUnsupportedLanguage: (language: string) =>
+      `${language} is not supported by the code runner. Please pick another language.`,
   },
 
   // Exam instructions / system-check page.

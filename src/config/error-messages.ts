@@ -8,6 +8,12 @@ const ERROR_MESSAGES: Record<string, string> = {
   AUTH_FORBIDDEN: "You don't have permission to do that.",
   INTERNAL_ERROR: 'Something went wrong on our end. Please try again in a moment.',
   AI_SERVICE_ERROR: 'The AI service is temporarily unavailable. Please try again in a moment.',
+  // Compiler host problems, not candidate mistakes — worded so nobody reads
+  // them as an error in their own code.
+  COMPILER_UNAVAILABLE:
+    'The code runner is temporarily unavailable. Your code has not been lost — please try again in a moment.',
+  COMPILER_UNSUPPORTED_LANGUAGE:
+    'That language is not supported by the code runner. Please pick another one.',
   // Domain
   USER_NOT_FOUND: "We couldn't find an account with that email address.",
   USER_ALREADY_EXISTS: 'An account with this email already exists. Try signing in instead.',
