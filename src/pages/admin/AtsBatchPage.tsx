@@ -138,34 +138,67 @@ export function AtsBatchPage() {
             <CardTitle>Ranked Results ({results.length})</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Rank</TableHead>
-                  <TableHead>File / Candidate</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Score</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {results.map((r, idx) => (
-                  <TableRow key={idx}>
-                    <TableCell>
-                      <span className="text-sm font-bold text-[var(--text)]">#{idx + 1}</span>
-                    </TableCell>
-                    <TableCell className="font-medium">
-                      {r.candidateName || r.fileName || `Resume ${idx + 1}`}
-                    </TableCell>
-                    <TableCell>{r.email || '--'}</TableCell>
-                    <TableCell>
-                      <Badge variant={getScoreVariant(r.score)} size="md">
-                        {r.score}%
-                      </Badge>
-                    </TableCell>
+            {/* Mobile: one card per result. Filenames and emails are long free
+                text, so on a phone the table scrolled sideways and pushed the
+                score — the reason to read this screen — out of view. */}
+            <div className="md:hidden space-y-3">
+              {results.map((r, idx) => (
+                <div
+                  key={r.fileName ?? idx}
+                  className="rounded-2xl border border-[var(--borderMuted,var(--border))] bg-[var(--cardBg)] p-4"
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="flex-shrink-0 w-8 h-8 rounded-xl bg-[var(--bgSubtle,var(--surface1))] flex items-center justify-center text-xs font-bold text-[var(--text)]">
+                      {idx + 1}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-[var(--text)] break-words">
+                        {r.candidateName || r.fileName || `Resume ${idx + 1}`}
+                      </p>
+                      <p className="text-sm text-[var(--textSecondary)] break-all">
+                        {r.email || '--'}
+                      </p>
+                    </div>
+                    <Badge variant={getScoreVariant(r.score)} size="md">
+                      {r.score}%
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop: fixed layout so the two free-text columns wrap instead
+                of stretching the table past the card. */}
+            <div className="hidden md:block">
+              <Table className="table-fixed">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-16">Rank</TableHead>
+                    <TableHead className="w-[38%]">File / Candidate</TableHead>
+                    <TableHead className="w-[38%]">Email</TableHead>
+                    <TableHead className="w-24">Score</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {results.map((r, idx) => (
+                    <TableRow key={r.fileName ?? idx}>
+                      <TableCell className="align-top">
+                        <span className="text-sm font-bold text-[var(--text)]">#{idx + 1}</span>
+                      </TableCell>
+                      <TableCell className="font-medium align-top break-words">
+                        {r.candidateName || r.fileName || `Resume ${idx + 1}`}
+                      </TableCell>
+                      <TableCell className="align-top break-all">{r.email || '--'}</TableCell>
+                      <TableCell className="align-top">
+                        <Badge variant={getScoreVariant(r.score)} size="md">
+                          {r.score}%
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
       )}

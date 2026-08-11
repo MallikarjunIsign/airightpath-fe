@@ -87,7 +87,9 @@ export const jobPostSchema = z.object({
   salaryRange: z.string().optional(),
   jobType: z.string().min(1, 'Please select a job type'),
   industry: z.string().optional(),
-  department: z.string().optional(),
+  // Required: every post is categorised by department for reporting and
+  // candidate search, so an uncategorised one leaves gaps in both.
+  department: z.string().trim().min(1, 'Department is required'),
   // Required: the role is what the job lists are keyed on visually, so a post
   // without one shows up unidentifiable.
   role: z.string().trim().min(1, 'Job role is required'),

@@ -398,8 +398,9 @@ export function JobPostFormPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
                 label="Department"
+                required
                 placeholder="e.g. Engineering"
-                helperText="Optional"
+                helperText="Used to categorise the job in reporting and candidate search"
                 error={errors.department?.message}
                 {...register('department')}
               />
