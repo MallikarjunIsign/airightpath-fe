@@ -28,6 +28,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ROUTES } from '@/config/routes';
 import { assessmentService } from '@/services/assessment.service';
+import { extractApiError } from '@/services/api.service';
 import { compilerService } from '@/services/compiler.service';
 import {
   RadialScore,
@@ -79,7 +80,7 @@ import {
 import type { CodingRow } from '@/utils/result.utils';
 import type { Result, AptitudeAnswer, CodingAnswer } from '@/types/result.types';
 import type { CodeSubmissionResponse } from '@/types/compiler.types';
-import type { RawCodingQuestion, RawQuestion } from '@/types/assessment.types';
+import type { Assessment, RawCodingQuestion, RawQuestion } from '@/types/assessment.types';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -129,6 +130,8 @@ export function CandidateResultDetailPage() {
   const [aptitudePaper, setAptitudePaper] = useState<RawQuestion[]>([]);
   const [examWindows, setExamWindows] = useState<ExamWindows>({});
   const [assessmentIds, setAssessmentIds] = useState<AssessmentIds>({});
+  /** Why the assessment lookup failed, when it did — see fetchPapers. */
+  const [papersError, setPapersError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>('overview');
   const [exportingSheet, setExportingSheet] = useState(false);
 
@@ -161,8 +164,25 @@ export function CandidateResultDetailPage() {
    */
   async function fetchPapers() {
     try {
-      const res = await assessmentService.getCandidateAssessments(email!);
-      const mine = (res.data ?? []).filter((a) => a.jobPrefix === jobPrefix);
+      setPapersError(null);
+      // Deliberately NOT getCandidateAssessments: that endpoint filters to
+      // examAttended = false, and this page only exists because the candidate
+      // sat the exam. It returned an empty list every time, which read as
+      // "no assessment record" and cost us both the paper and the captures.
+      const res = await assessmentService.getAllAssessmentsForCandidate(email!);
+      // Tolerate both a bare array and an { data: [...] } envelope — the same
+      // defence the rest of this codebase applies to list endpoints. Calling
+      // .filter on an envelope throws, and the catch below would then report a
+      // lookup failure for what is really a shape mismatch.
+      const body = res.data as unknown;
+      let list: Assessment[] = [];
+      if (Array.isArray(body)) {
+        list = body;
+      } else if (Array.isArray((body as { data?: unknown })?.data)) {
+        list = (body as { data: Assessment[] }).data;
+      }
+
+      const mine = list.filter((a) => a.jobPrefix === jobPrefix);
       const aptitude = mine.find((a) => a.assessmentType === 'APTITUDE');
       const coding = mine.find((a) => a.assessmentType === 'CODING');
 
@@ -179,8 +199,12 @@ export function CandidateResultDetailPage() {
 
       setAptitudePaper(parseArray<RawQuestion>(aptPaper?.data?.questions));
       setCodingQuestions(parseArray<RawCodingQuestion>(codePaper?.data?.questions));
-    } catch {
-      // Question papers are optional context — ignore failures.
+    } catch (err) {
+      // The papers themselves are optional context, but this same call is what
+      // supplies the assessment ids the capture cards are keyed on. Swallowing
+      // it made a failed lookup look identical to "this candidate has no
+      // assessment record", which is a different problem with a different fix.
+      setPapersError(extractApiError(err).message);
     }
   }
 
@@ -487,6 +511,7 @@ export function CandidateResultDetailPage() {
           paper={aptitudePaper}
           examWindow={examWindows.aptitude}
           assessmentId={assessmentIds.aptitude}
+          lookupError={papersError}
           jobPrefix={jobPrefix ?? ''}
         />
       )}
@@ -497,6 +522,7 @@ export function CandidateResultDetailPage() {
           rows={codingRows}
           examWindow={examWindows.coding}
           assessmentId={assessmentIds.coding}
+          lookupError={papersError}
           paper={codingQuestions}
           jobPrefix={jobPrefix ?? ''}
         />
@@ -876,6 +902,7 @@ function AptitudeTab({
   paper,
   examWindow,
   assessmentId,
+  lookupError,
   jobPrefix,
 }: Readonly<{
   result: Result;
@@ -885,6 +912,8 @@ function AptitudeTab({
   examWindow?: string | null;
   /** Attempt these proctoring captures belong to. */
   assessmentId?: number;
+  /** Set when the assessment lookup failed, so absence isn't reported as fact. */
+  lookupError?: string | null;
   jobPrefix: string;
 }>) {
   const [filter, setFilter] = useState<AptitudeFilter>('all');
@@ -1012,7 +1041,11 @@ function AptitudeTab({
       </Card>
 
       {/* Who sat this exam, and the room they sat it in */}
-      <ProctoringCaptures assessmentId={assessmentId} moduleLabel="Aptitude" />
+      <ProctoringCaptures
+        assessmentId={assessmentId}
+        lookupError={lookupError}
+        moduleLabel="Aptitude"
+      />
 
       {/* Difficulty bands */}
       <AptitudeBandCards bands={bands} onSelectQuestion={jumpToQuestion} />
@@ -1169,6 +1202,7 @@ function CodingTab({
   rows,
   examWindow,
   assessmentId,
+  lookupError,
   paper,
   jobPrefix,
 }: Readonly<{
@@ -1178,6 +1212,8 @@ function CodingTab({
   examWindow?: string | null;
   /** Attempt these proctoring captures belong to. */
   assessmentId?: number;
+  /** Set when the assessment lookup failed, so absence isn't reported as fact. */
+  lookupError?: string | null;
   paper: RawCodingQuestion[];
   jobPrefix: string;
 }>) {
@@ -1292,7 +1328,11 @@ function CodingTab({
       </Card>
 
       {/* Who sat this exam, and the room they sat it in */}
-      <ProctoringCaptures assessmentId={assessmentId} moduleLabel="Coding" />
+      <ProctoringCaptures
+        assessmentId={assessmentId}
+        lookupError={lookupError}
+        moduleLabel="Coding"
+      />
 
       {/* Difficulty bands */}
       <CodingBandCards bands={bands} onViewCode={setCodeRow} onViewOutput={setOutputRow} />

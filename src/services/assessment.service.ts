@@ -37,6 +37,13 @@ export const assessmentService = {
   },
 
   /**
+   * Assessments the candidate has still to sit.
+   *
+   * The server filters out anything expired or already attended, so this is the
+   * candidate's to-do list and nothing else. To look at a finished attempt use
+   * {@link getAllAssessmentsForCandidate} — this one returns an empty list for
+   * exactly the assessments a reviewer cares about.
+   *
    * `silent` suppresses the global error toast — for background reads like the
    * sidebar/notification badge, where a failure should cost a badge rather than
    * put a red toast on a screen the candidate did not ask to load.
@@ -46,6 +53,13 @@ export const assessmentService = {
       ENDPOINTS.ASSESSMENTS.GET_CANDIDATE_ASSESSMENTS(email),
       opts?.silent ? ({ _skipErrorToast: true } as never) : undefined
     );
+  },
+
+  /** Every assessment for a candidate, including attended and expired ones. */
+  getAllAssessmentsForCandidate(email: string) {
+    return api.get<Assessment[]>(ENDPOINTS.ASSESSMENTS.GET_ASSESSMENTS, {
+      params: { candidateEmail: email },
+    });
   },
 
   submit(assessmentId: number, data: FormData) {

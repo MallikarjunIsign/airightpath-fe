@@ -29,6 +29,15 @@ import type { ProctoringCapture } from '@/types/proctoring.types';
 interface ProctoringCapturesProps {
   /** The attempt to show captures for. Nothing is fetched without it. */
   assessmentId?: number;
+  /**
+   * Why the caller could not determine the assessment id, when it could not.
+   *
+   * Without this, a failed lookup and a genuinely unlinked result both arrive
+   * as `assessmentId === undefined`, and the card would state the second as
+   * fact — sending the reader after missing data when the real problem is a
+   * request that failed.
+   */
+  lookupError?: string | null;
   /** "Aptitude" or "Coding" — used in the copy only. */
   moduleLabel: string;
 }
@@ -58,7 +67,11 @@ function describeFailure(err: unknown): string {
   return extractApiError(err).message;
 }
 
-export function ProctoringCaptures({ assessmentId, moduleLabel }: Readonly<ProctoringCapturesProps>) {
+export function ProctoringCaptures({
+  assessmentId,
+  lookupError,
+  moduleLabel,
+}: Readonly<ProctoringCapturesProps>) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<LoadedCapture[]>([]);
@@ -149,8 +162,21 @@ export function ProctoringCaptures({ assessmentId, moduleLabel }: Readonly<Proct
         </div>
       </CardHeader>
       <CardContent>
+        {/* The lookup failed, so we do not know whether an attempt exists. Say
+            that, rather than claiming the record is missing. */}
+        {!hasAssessment && lookupError && (
+          <div className="py-3 space-y-1.5">
+            <p className="flex items-start gap-2 text-sm text-[var(--error)]">
+              <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" />
+              Couldn&apos;t look up the {moduleLabel.toLowerCase()} assessment for this
+              candidate, so its captures can&apos;t be shown.
+            </p>
+            <p className="text-xs text-[var(--textTertiary)] pl-6">{lookupError}</p>
+          </div>
+        )}
+
         {/* No assessment record — we cannot even ask which attempt to show. */}
-        {!hasAssessment && (
+        {!hasAssessment && !lookupError && (
           <EmptyRow
             text={`This result isn't linked to a ${moduleLabel.toLowerCase()} assessment record, so no pre-exam capture can be looked up.`}
           />

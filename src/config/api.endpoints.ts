@@ -55,8 +55,14 @@ export const ENDPOINTS = {
     ASSIGN: "/api/assign",
     ASSIGN_BLOB: "/api/assign-blob",
     GET_CONTENT: (id: number) => `/api/assessment-content/${id}`,
+    // Only assessments still to be sat — the backing query filters out
+    // expired = true and examAttended = true. Right for the candidate's
+    // "what do I have to do" list; useless for reviewing a finished attempt.
     GET_CANDIDATE_ASSESSMENTS: (email: string) =>
       `/api/getCandidateAssessments/${email}`,
+    // Every assessment for a candidate, attended ones included. What review
+    // screens need, since an attempt worth reviewing is attended by definition.
+    GET_ASSESSMENTS: "/api/getAssessments",
     SUBMIT: (id: number) => `/api/submit/${id}`,
     MARK_ATTENDED: "/api/markExamAttended",
     SAVE_RESULT: "/api/result",
