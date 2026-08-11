@@ -4,6 +4,7 @@ import { useFullscreen } from '@/hooks/useFullscreen';
 import { usePageVisibility } from '@/hooks/usePageVisibility';
 import { useFaceDetection } from '@/hooks/useFaceDetection';
 import { useExamCamera } from '@/hooks/useExamCamera';
+import { useBeforeUnload } from '@/hooks/useBeforeUnload';
 import { PROCTORING_CONFIG } from '@/config/proctoring.config';
 import { MESSAGES } from '@/config/messages';
 
@@ -44,6 +45,11 @@ export function useExamProctoring({ loading, onAutoSubmit }: UseExamProctoringOp
     },
   });
 
+  // Confirm before a reload/close once the exam is live. Reloading restarts the
+  // paper with a fresh clock, so this is worth guarding even though the browser
+  // dialog is only a confirmation the candidate can click through.
+  useBeforeUnload(() => proctoringActiveRef.current);
+
   usePageVisibility({
     onHidden: () => {
       if (!config.tabSwitch.enabled || !proctoringActiveRef.current) return;
@@ -51,7 +57,11 @@ export function useExamProctoring({ loading, onAutoSubmit }: UseExamProctoringOp
         const next = prev + 1;
         const max = config.tabSwitch.maxBeforeAutoSubmit;
         if (max > 0 && next >= max) {
-          onAutoSubmitRef.current('Too many tab switches.');
+          // With a limit of 1 there was no earlier warning, so "too many" would
+          // misdescribe what happened — state the rule instead.
+          onAutoSubmitRef.current(
+            max === 1 ? 'Switching tabs is not allowed.' : 'Too many tab switches.'
+          );
         } else {
           const counter = max > 0 ? `${next}/${max}` : `${next}`;
           showToast(MESSAGES.proctoring.tabSwitch(counter), 'warning');
@@ -113,6 +123,13 @@ export function useExamProctoring({ loading, onAutoSubmit }: UseExamProctoringOp
     proctoringActiveRef.current = true;
   }, []);
 
+  // Turns it back off. Call when a submit starts, so the paper being sent isn't
+  // itself read as a violation and the reload prompt doesn't block the redirect
+  // to results. Re-arm with markActive() if the submit fails and the exam goes on.
+  const markInactive = useCallback(() => {
+    proctoringActiveRef.current = false;
+  }, []);
+
   // Release detection loop + camera tracks on unmount.
   useEffect(() => {
     return () => {
@@ -139,5 +156,6 @@ export function useExamProctoring({ loading, onAutoSubmit }: UseExamProctoringOp
     stopDetection,
     begin,
     markActive,
+    markInactive,
   };
 }

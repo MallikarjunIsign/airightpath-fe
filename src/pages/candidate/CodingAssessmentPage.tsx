@@ -208,6 +208,7 @@ export function CodingAssessmentPage() {
     stopDetection,
     begin: beginProctoring,
     markActive,
+    markInactive,
   } = proctor;
 
   // ── Timer ──────────────────────────────────────────────────────────
@@ -294,6 +295,7 @@ export function CodingAssessmentPage() {
     setSubmitting(true);
     setShowConfirmSubmit(false);
     stopDetection();
+    markInactive();
 
     try {
       if (!assessment || !user?.email) return;
@@ -334,6 +336,10 @@ export function CodingAssessmentPage() {
     } finally {
       setSubmitting(false);
       isSubmittingRef.current = false;
+      // Submit failed (or was skipped) — the exam continues, so re-arm the
+      // counters and the reload prompt. Harmless on the success path: the
+      // redirect to results has already unmounted this page.
+      markActive();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assessment, user?.email, currentIndex, code, language]);
@@ -769,7 +775,8 @@ export function CodingAssessmentPage() {
                   {proctoring.fullscreen.enabled && <p>Fullscreen exits: {fullscreenExitCount}</p>}
                 </div>
                 <p className="mt-1.5 text-[10px] text-[var(--textSecondary)] border-t border-[var(--border)] pt-1.5">
-                  Reaching a limit auto-submits your exam.
+                  Reaching a limit auto-submits your exam. Do not reload this page — the
+                  exam restarts from the beginning.
                 </p>
               </div>
             </div>

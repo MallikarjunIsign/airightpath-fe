@@ -105,6 +105,7 @@ export function AptitudeAssessmentPage() {
     stopDetection,
     begin: beginProctoring,
     markActive,
+    markInactive,
   } = proctor;
 
   // Refs for stable access in callbacks
@@ -127,6 +128,7 @@ export function AptitudeAssessmentPage() {
     setSubmitting(true);
     setShowConfirmSubmit(false);
     stopDetection();
+    markInactive();
 
     try {
       if (!assessment || !user?.email) return;
@@ -165,6 +167,10 @@ export function AptitudeAssessmentPage() {
     } finally {
       setSubmitting(false);
       isSubmittingRef.current = false;
+      // Submit failed (or was skipped) — the exam continues, so re-arm the
+      // counters and the reload prompt. Harmless on the success path: the
+      // redirect to results has already unmounted this page.
+      markActive();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assessment, user?.email]);
@@ -364,7 +370,8 @@ export function AptitudeAssessmentPage() {
                   {proctoring.fullscreen.enabled && <p>Fullscreen exits: {fullscreenExitCount}</p>}
                 </div>
                 <p className="mt-2 text-[11px] text-[var(--textSecondary)] border-t border-[var(--border)] pt-2">
-                  Reaching a limit auto-submits your exam.
+                  Reaching a limit auto-submits your exam. Do not reload this page — the
+                  exam restarts from the beginning.
                 </p>
               </div>
             </div>
