@@ -6,7 +6,6 @@ import {
   Mail,
   XCircle,
   RefreshCw,
-  LinkIcon,
   CheckCircle,
   AlertTriangle,
   ChevronRight,
@@ -26,7 +25,6 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { BackLink } from '@/components/ui/BackLink';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
-import { assessmentService } from '@/services/assessment.service';
 import { resumeService } from '@/services/resume.service';
 import axios from 'axios';
 import { usePersistentState, writePersistentValue } from '@/hooks/usePersistentState';
@@ -67,11 +65,14 @@ const STAGE_LABELS: Record<string, string> = {
   REJECTED: 'Rejected',
 };
 
+// "Send Exam Link" used to live here. Assigning an assessment is the single way
+// an exam reaches a candidate now, so a second route that only mailed a link —
+// and had to pre-check that an assessment existed before it could safely send —
+// was a way to get the two out of step.
 type BulkAction =
   | 'ack'
   | 'rejection'
   | 'reconfirmation'
-  | 'examLink'
   | 'success'
   | 'failure';
 
@@ -82,7 +83,6 @@ const BULK_ACTION_CONFIG: Record<
   ack: { label: 'Send Ack Mail', hasDateTime: true, icon: <Mail size={16} /> },
   rejection: { label: 'Send Rejection', hasDateTime: false, icon: <XCircle size={16} /> },
   reconfirmation: { label: 'Send Reconfirmation', hasDateTime: false, icon: <RefreshCw size={16} /> },
-  examLink: { label: 'Send Exam Link', hasDateTime: true, icon: <LinkIcon size={16} /> },
   success: { label: 'Send Success', hasDateTime: false, icon: <CheckCircle size={16} /> },
   failure: { label: 'Send Failure', hasDateTime: false, icon: <AlertTriangle size={16} /> },
 };
@@ -93,7 +93,8 @@ const STAGE_ACTIONS: Record<string, BulkAction[]> = {
   SHORTLISTED: ['ack', 'rejection'],
   ACKNOWLEDGED: [],
   ACKNOWLEDGED_BACK: ['reconfirmation', 'rejection'],
-  RECONFIRMED: ['examLink', 'rejection'],
+  // Exams reach candidates via Assign Assessment, not from here.
+  RECONFIRMED: ['rejection'],
   EXAM_SENT: [],
   EXAM_COMPLETED: ['rejection'],
   INTERVIEW_SCHEDULED: [],
@@ -401,36 +402,6 @@ export function CandidateDetailsPage() {
 
     const emails = Array.from(selectedEmails);
 
-    // Guard: an exam link is meaningless unless each candidate actually has an
-    // assessment assigned for this job. Without this, the server would mark them
-    // EXAM_SENT with no exam to take. Block and point the admin to the Assign step.
-    if (modalAction === 'examLink') {
-      try {
-        const checks = await Promise.all(
-          emails.map(async (email) => {
-            try {
-              const res = await assessmentService.getCandidateAssessments(email);
-              const hasExam = (res.data ?? []).some((a) => a.jobPrefix === selectedPrefix);
-              return { email, hasExam };
-            } catch {
-              return { email, hasExam: false };
-            }
-          })
-        );
-        const missing = checks.filter((c) => !c.hasExam).map((c) => c.email);
-        if (missing.length > 0) {
-          showToast(
-            MESSAGES.admin.candidates.noExamForCandidates(missing.length, missing.join(', ')),
-            'error'
-          );
-          setSending(false);
-          return;
-        }
-      } catch {
-        // If the pre-check itself fails, fall through and let the send proceed.
-      }
-    }
-
     const payload: {
       emails: string[];
       jobPrefix: string;
@@ -458,9 +429,6 @@ export function CandidateDetailsPage() {
           break;
         case 'reconfirmation':
           await jobApplicationService.sendReconfirmationMail(payload);
-          break;
-        case 'examLink':
-          await jobApplicationService.sendExamLink(payload);
           break;
         case 'success':
           await jobApplicationService.sendSuccessMail(payload);

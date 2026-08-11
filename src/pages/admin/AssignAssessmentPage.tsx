@@ -159,28 +159,42 @@ export function AssignAssessmentPage() {
     setSelectedEmails(new Set());
   }, [selectedPrefix]);
 
-  // Track which prompts this job already has, to label the button Edit vs Create.
-  const refreshConfiguredPrompts = useCallback(async (prefix: string) => {
-    if (!prefix) {
-      setConfiguredPromptTypes(new Set());
-      return;
+  /**
+   * Prompt types configured for a job, upper-cased.
+   *
+   * Throws if the read fails, so each caller can decide what a failure means —
+   * the label below treats it as "none", while the generate guard treats it as
+   * "don't block". Collapsing those into one silent empty set would make a
+   * network blip look like a missing prompt.
+   */
+  const fetchPromptTypes = useCallback(async (prefix: string): Promise<Set<string>> => {
+    const res = await promptService.getByJob(prefix, { silent: true });
+    // Tolerate both a raw array and an { data: [...] } envelope; normalize case.
+    const body = res.data as unknown;
+    let list: Array<{ promptType?: string }> = [];
+    if (Array.isArray(body)) {
+      list = body;
+    } else if (Array.isArray((body as { data?: unknown })?.data)) {
+      list = (body as { data: Array<{ promptType?: string }> }).data;
     }
-    try {
-      const res = await promptService.getByJob(prefix, { silent: true });
-      // Tolerate both a raw array and an { data: [...] } envelope; normalize case.
-      const body = res.data as unknown;
-      const list: Array<{ promptType?: string }> = Array.isArray(body)
-        ? body
-        : Array.isArray((body as { data?: unknown })?.data)
-          ? ((body as { data: Array<{ promptType?: string }> }).data)
-          : [];
-      setConfiguredPromptTypes(
-        new Set(list.map((p) => String(p.promptType ?? '').toUpperCase()).filter(Boolean))
-      );
-    } catch {
-      setConfiguredPromptTypes(new Set());
-    }
+    return new Set(list.map((p) => String(p.promptType ?? '').toUpperCase()).filter(Boolean));
   }, []);
+
+  // Track which prompts this job already has, to label the button Edit vs Create.
+  const refreshConfiguredPrompts = useCallback(
+    async (prefix: string) => {
+      if (!prefix) {
+        setConfiguredPromptTypes(new Set());
+        return;
+      }
+      try {
+        setConfiguredPromptTypes(await fetchPromptTypes(prefix));
+      } catch {
+        setConfiguredPromptTypes(new Set());
+      }
+    },
+    [fetchPromptTypes]
+  );
 
   useEffect(() => {
     refreshConfiguredPrompts(selectedPrefix);
@@ -310,6 +324,31 @@ export function AssignAssessmentPage() {
     }
   }
 
+  /**
+   * Whether this job has a prompt of the given type, checked before generating.
+   *
+   * Generation is driven by a per-job prompt; without one the server 404s and
+   * the admin is told the "requested item couldn't be found", which names
+   * neither the prompt nor the screen that fixes it. Asking first turns that
+   * into a specific instruction — and avoids a pointless AI call.
+   *
+   * Best-effort: if the lookup itself fails we return true and let the
+   * generate attempt proceed, so a blip in this check never blocks real work.
+   */
+  async function hasPromptFor(promptType: 'APTITUDE' | 'CODING'): Promise<boolean> {
+    try {
+      // Read fresh rather than trusting `configuredPromptTypes` — that is
+      // refreshed on job change and window focus, so a prompt created in
+      // another tab without refocusing this one would read as missing and
+      // block a generate that would have worked.
+      const types = await fetchPromptTypes(selectedPrefix);
+      setConfiguredPromptTypes(types);
+      return types.has(promptType);
+    } catch {
+      return true;
+    }
+  }
+
   async function handleGenerateAptitude() {
     if (!selectedPrefix) {
       showToast(MESSAGES.admin.common.selectJobFirst, 'warning');
@@ -317,6 +356,10 @@ export function AssignAssessmentPage() {
     }
     setGeneratingAptitude(true);
     try {
+      if (!(await hasPromptFor('APTITUDE'))) {
+        showToast(MESSAGES.admin.assign.promptMissing('aptitude'), 'warning');
+        return;
+      }
       const res = await assessmentService.generateQuestions(selectedPrefix);
       const json = JSON.stringify(res.data, null, 2);
       const blob = new Blob([json], { type: 'application/json' });
@@ -340,6 +383,10 @@ export function AssignAssessmentPage() {
     }
     setGeneratingCoding(true);
     try {
+      if (!(await hasPromptFor('CODING'))) {
+        showToast(MESSAGES.admin.assign.promptMissing('coding'), 'warning');
+        return;
+      }
       const res = await assessmentService.generateCodingQuestions(selectedPrefix);
       const json = JSON.stringify(res.data, null, 2);
       const blob = new Blob([json], { type: 'application/json' });
