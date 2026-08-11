@@ -26,12 +26,20 @@ interface RoomScanUpload {
 }
 
 /**
- * No Content-Type here on purpose. multipart bodies need a boundary, and only
- * the browser can generate one — naming the type by hand produces a header with
- * no boundary that the server cannot parse. Leaving it unset lets the browser
- * write the full header itself.
+ * This Content-Type is required, and is NOT the header that gets sent.
+ *
+ * The shared axios instance defaults every request to `application/json`. Axios
+ * v1's default transformRequest converts a FormData body into a JSON object
+ * whenever the content type says JSON — so without this line the photo is
+ * serialised to `{}` and the server answers 415.
+ *
+ * Naming multipart here only stops that conversion. The XHR adapter then clears
+ * the header for FormData bodies and lets the browser write the real one, with
+ * the boundary. Every other upload in this codebase does the same; do not
+ * "clean it up".
  */
 const uploadConfig = {
+  headers: { 'Content-Type': 'multipart/form-data' },
   _skipErrorToast: true,
 } as never;
 
