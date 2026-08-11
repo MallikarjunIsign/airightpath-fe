@@ -36,8 +36,16 @@ export const assessmentService = {
     return api.get<Assessment>(ENDPOINTS.ASSESSMENTS.GET_CONTENT(id));
   },
 
-  getCandidateAssessments(email: string) {
-    return api.get<Assessment[]>(ENDPOINTS.ASSESSMENTS.GET_CANDIDATE_ASSESSMENTS(email));
+  /**
+   * `silent` suppresses the global error toast — for background reads like the
+   * sidebar/notification badge, where a failure should cost a badge rather than
+   * put a red toast on a screen the candidate did not ask to load.
+   */
+  getCandidateAssessments(email: string, opts?: { silent?: boolean }) {
+    return api.get<Assessment[]>(
+      ENDPOINTS.ASSESSMENTS.GET_CANDIDATE_ASSESSMENTS(email),
+      opts?.silent ? ({ _skipErrorToast: true } as never) : undefined
+    );
   },
 
   submit(assessmentId: number, data: FormData) {

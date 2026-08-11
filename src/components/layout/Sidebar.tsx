@@ -18,6 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { useSidebar } from "@/contexts/SidebarContext";
+import { usePendingAssessments } from "@/contexts/PendingAssessmentsContext";
 import { useRbac } from "@/hooks/useRbac";
 import { ROUTES } from "@/config/routes";
 import { Badge } from "../ui/Badge";
@@ -31,6 +32,12 @@ interface NavItem {
   icon: React.ReactNode;
   path: string;
   badge?: string;
+  /**
+   * Marks the item that carries the outstanding-assessment count. Kept as a
+   * flag on the item rather than a path comparison at render time so the
+   * indicator moves with the route if it is ever renamed.
+   */
+  showsPendingAssessments?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -134,6 +141,7 @@ const candidateNavItems: NavItem[] = [
     label: "Assessments",
     icon: <ClipboardList size={18} />,
     path: ROUTES.CANDIDATE.ASSESSMENTS,
+    showsPendingAssessments: true,
   },
   {
     label: "Interviews",
@@ -189,6 +197,7 @@ export function Sidebar({ environment = "prod" }: SidebarProps) {
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
   const location = useLocation();
   const { hasAnyRole } = useRbac();
+  const { pending } = usePendingAssessments();
 
   const isAdmin = hasAnyRole(["ADMIN", "SUPER_ADMIN"]);
   const navItems = isAdmin ? adminNavItems : candidateNavItems;
@@ -307,6 +316,7 @@ export function Sidebar({ environment = "prod" }: SidebarProps) {
         >
           {navItems.map((item) => {
             const isActive = location.pathname === item.path;
+            const pendingCount = item.showsPendingAssessments ? pending.length : 0;
             return (
               <li
                 key={item.path}
@@ -335,11 +345,20 @@ export function Sidebar({ environment = "prod" }: SidebarProps) {
                 >
                   <span
                     className={`
-                      flex-shrink-0 transition-all duration-200
+                      relative flex-shrink-0 transition-all duration-200
                       ${isActive ? "text-[var(--sidebarTextActive)]" : "opacity-70 group-hover:opacity-100"}
                     `}
                   >
                     {item.icon}
+                    {/* Collapsed mode hides the label and so the count with it;
+                        a dot on the icon is the only thing left that can carry
+                        it. Ringed so it reads against the icon underneath. */}
+                    {pendingCount > 0 && !isExpanded && (
+                      <span
+                        className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[var(--error)] ring-2 ring-[var(--sidebarBg,var(--surface1))]"
+                        aria-hidden="true"
+                      />
+                    )}
                   </span>
 
                   {/* One line. The sidebar is wide enough for these labels; a
@@ -359,6 +378,15 @@ export function Sidebar({ environment = "prod" }: SidebarProps) {
                     <Badge variant="primary" size="sm">
                       {item.badge}
                     </Badge>
+                  )}
+
+                  {pendingCount > 0 && isExpanded && (
+                    <span
+                      className="flex-shrink-0 min-w-[1.25rem] h-5 px-1.5 rounded-full bg-[var(--error)] text-white text-[0.6875rem] font-semibold flex items-center justify-center"
+                      title={`${pendingCount} assessment${pendingCount === 1 ? '' : 's'} to complete`}
+                    >
+                      {pendingCount}
+                    </span>
                   )}
                 </Link>
 

@@ -7,6 +7,7 @@ import { ThemeProvider } from '@/contexts/ThemeContext';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { ProfileImageProvider } from '@/contexts/ProfileImageContext';
 import { SidebarProvider } from '@/contexts/SidebarContext';
+import { PendingAssessmentsProvider } from '@/contexts/PendingAssessmentsContext';
 import { ToastProvider } from '@/components/ui/Toast';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 
@@ -19,7 +20,9 @@ createRoot(document.getElementById('root')!).render(
             <ToastProvider>
               <ProfileImageProvider>
                 <SidebarProvider>
-                  <App />
+                  <PendingAssessmentsProvider>
+                    <App />
+                  </PendingAssessmentsProvider>
                 </SidebarProvider>
               </ProfileImageProvider>
             </ToastProvider>

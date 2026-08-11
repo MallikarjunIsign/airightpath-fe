@@ -8,16 +8,32 @@ import {
   LogOut,
   Settings,
   Menu,
+  ClipboardList,
 } from 'lucide-react';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfileImage } from '@/contexts/ProfileImageContext';
 import { useSidebar } from '@/contexts/SidebarContext';
+import { usePendingAssessments } from '@/contexts/PendingAssessmentsContext';
 import { useRbac } from '@/hooks/useRbac';
 import { ROUTES } from '@/config/routes';
-import { formatName } from '@/utils/format.utils';
+import { formatName, formatDate, formatRelativeTime } from '@/utils/format.utils';
 import { Avatar } from '../ui/Avatar';
 import { Badge } from '../ui/Badge';
+
+/** Absolute date plus the relative gap — "Aug 20, 2026" alone reads as trivia. */
+function deadlineLabel(deadline: string): string {
+  return `Due ${formatDate(deadline)} · ${formatRelativeTime(deadline)}`;
+}
+
+/** Inside two days, so the candidate has to act on it rather than note it. */
+const DUE_SOON_MS = 48 * 60 * 60 * 1000;
+
+function isDueSoon(deadline: string): boolean {
+  const time = new Date(deadline).getTime();
+  if (Number.isNaN(time)) return false;
+  return time - Date.now() <= DUE_SOON_MS;
+}
 
 // ---------------------------------------------------------------------------
 // Navbar Component — Floating, borderless, semi-transparent
@@ -31,6 +47,7 @@ export function Navbar() {
   const { user, logout } = useAuth();
   const { imageUrl } = useProfileImage();
   const { toggleMobile } = useSidebar();
+  const { pending } = usePendingAssessments();
   const { roles, hasAnyRole } = useRbac();
   const navigate = useNavigate();
 
@@ -144,18 +161,65 @@ export function Navbar() {
             <button
               onClick={() => { setShowNotifications(!showNotifications); setShowThemeMenu(false); setShowProfileMenu(false); }}
               className="navbar-action-btn relative"
-              title="Notifications"
+              title={pending.length > 0 ? `${pending.length} assessment${pending.length === 1 ? '' : 's'} to complete` : 'Notifications'}
+              aria-label={pending.length > 0 ? `Notifications, ${pending.length} unread` : 'Notifications'}
             >
               <Bell size={18} />
+              {pending.length > 0 && (
+                <span
+                  className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[var(--error)] ring-2 ring-[var(--navbarBg,var(--surface1))]"
+                  aria-hidden="true"
+                />
+              )}
             </button>
             {showNotifications && (
               <div className="dropdown-menu right-0 top-11 w-80">
-                <div className="px-4 py-3">
+                <div className="px-4 py-3 flex items-center justify-between gap-2">
                   <h3 className="text-[0.8125rem] font-semibold text-[var(--text)]">Notifications</h3>
+                  {pending.length > 0 && (
+                    <span className="text-[0.6875rem] font-semibold text-white bg-[var(--error)] rounded-full px-2 py-0.5">
+                      {pending.length}
+                    </span>
+                  )}
                 </div>
-                <div className="px-4 py-10 text-center text-[var(--textTertiary)] text-[0.8125rem]">
-                  All caught up
-                </div>
+
+                {pending.length === 0 ? (
+                  <div className="px-4 py-10 text-center text-[var(--textTertiary)] text-[0.8125rem]">
+                    All caught up
+                  </div>
+                ) : (
+                  <div className="max-h-80 overflow-y-auto py-1">
+                    {pending.map((assessment) => (
+                      <button
+                        key={assessment.id}
+                        onClick={() => { closeAll(); navigate(ROUTES.CANDIDATE.ASSESSMENTS); }}
+                        className="dropdown-item items-start text-left"
+                      >
+                        <ClipboardList size={16} className="mt-0.5 flex-shrink-0" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-[0.8125rem] font-medium text-[var(--text)]">
+                            {assessment.assessmentType === 'APTITUDE' ? 'Aptitude' : 'Coding'} assessment
+                          </span>
+                          <span className="block text-[0.6875rem] text-[var(--textTertiary)] truncate">
+                            {assessment.jobPrefix}
+                          </span>
+                          {/* The deadline is the reason this is a notification
+                              at all, so it gets the emphasis — and turns red
+                              once it is close enough to act on today. */}
+                          <span
+                            className={`block text-[0.6875rem] mt-0.5 ${
+                              isDueSoon(assessment.deadline)
+                                ? 'text-[var(--error)] font-semibold'
+                                : 'text-[var(--textSecondary)]'
+                            }`}
+                          >
+                            {deadlineLabel(assessment.deadline)}
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
