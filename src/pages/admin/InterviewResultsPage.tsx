@@ -80,6 +80,88 @@ function getCompletionReasonVariant(reason?: CompletionReason): 'success' | 'war
   }
 }
 
+function getRecommendationVariant(recommendation: string): 'success' | 'warning' | 'error' {
+  if (recommendation === 'STRONG_HIRE' || recommendation === 'HIRE') return 'success';
+  if (recommendation === 'NO_HIRE') return 'warning';
+  return 'error';
+}
+
+/** Warnings are reported under either field depending on interview vintage. */
+function warningCountOf(interview: InterviewSchedule): number {
+  return interview.warningCount ?? interview.proctoringWarnings ?? 0;
+}
+
+// ── Cells shared by the desktop row and the mobile card ────────────────
+
+function ScoreCell({ interview }: Readonly<{ interview: InterviewSchedule }>) {
+  const score = interview.evaluation?.overallScore;
+  if (score == null) return <span className="text-sm text-[var(--textTertiary)]">--</span>;
+  return <span className="font-semibold text-[var(--text)]">{score.toFixed(1)}/10</span>;
+}
+
+function WarningsCell({ interview }: Readonly<{ interview: InterviewSchedule }>) {
+  const count = warningCountOf(interview);
+  if (count === 0) return <span className="text-sm text-[var(--textTertiary)]">0</span>;
+  return (
+    <Badge variant={count >= 3 ? 'error' : 'warning'} size="sm">
+      {count}
+    </Badge>
+  );
+}
+
+function CompletionCell({ interview }: Readonly<{ interview: InterviewSchedule }>) {
+  if (!interview.completionReason) {
+    return <span className="text-sm text-[var(--textTertiary)]">--</span>;
+  }
+  return (
+    <Badge variant={getCompletionReasonVariant(interview.completionReason)} size="sm">
+      {getCompletionReasonLabel(interview.completionReason)}
+    </Badge>
+  );
+}
+
+function RecommendationCell({ interview }: Readonly<{ interview: InterviewSchedule }>) {
+  const recommendation = interview.evaluation?.recommendation;
+  if (!recommendation) return <span className="text-sm text-[var(--textTertiary)]">--</span>;
+  return (
+    <Badge variant={getRecommendationVariant(recommendation)} size="sm">
+      {recommendation.replace(/_/g, ' ')}
+    </Badge>
+  );
+}
+
+function InterviewActions({
+  interview,
+  onViewDetail,
+}: Readonly<{ interview: InterviewSchedule; onViewDetail: (i: InterviewSchedule) => void }>) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {interview.attemptStatus === 'COMPLETED' && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="px-2"
+          leftIcon={<Eye size={14} />}
+          onClick={() => onViewDetail(interview)}
+        >
+          Detail
+        </Button>
+      )}
+      {interview.recordReferences && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="px-2"
+          leftIcon={<ExternalLink size={14} />}
+          onClick={() => window.open(interview.recordReferences, '_blank')}
+        >
+          Recording
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function formatDuration(startedAt?: string, endedAt?: string): string {
   if (!startedAt || !endedAt) return '--';
   const start = new Date(startedAt).getTime();
@@ -258,7 +340,7 @@ export function InterviewResultsPage() {
 
       {/* Stats Row */}
       {stats && selectedPrefix && (
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <Card>
             <CardContent>
               <div className="flex items-center gap-3">
@@ -342,110 +424,124 @@ export function InterviewResultsPage() {
                 description="No interviews have been conducted for this job yet."
               />
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Candidate</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Result</TableHead>
-                    <TableHead>Score</TableHead>
-                    <TableHead>Duration</TableHead>
-                    <TableHead>Warnings</TableHead>
-                    <TableHead>Completion</TableHead>
-                    <TableHead>Recommendation</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
+              <>
+                {/* Mobile: one card per interview. Nine columns is far past what
+                    a phone can show, and the score and recommendation — the two
+                    things this page exists to convey — were the first to be
+                    pushed off the right edge. */}
+                <div className="xl:hidden space-y-3">
                   {interviews.map((interview) => (
-                    <TableRow key={interview.id}>
-                      <TableCell className="font-medium">{interview.email}</TableCell>
-                      <TableCell>
+                    <div
+                      key={interview.id}
+                      className="rounded-2xl border border-[var(--borderMuted,var(--border))] bg-[var(--cardBg)] p-4 space-y-3"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="font-medium text-[var(--text)] break-all min-w-0">
+                          {interview.email}
+                        </p>
+                        <div className="flex-shrink-0">
+                          <ScoreCell interview={interview} />
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
                         <Badge variant={getStatusVariant(interview.attemptStatus)} size="sm">
                           {interview.attemptStatus.replace(/_/g, ' ')}
                         </Badge>
-                      </TableCell>
-                      <TableCell>
                         <Badge variant={getResultVariant(interview.interviewResult)} size="sm">
                           {interview.interviewResult}
                         </Badge>
-                      </TableCell>
-                      <TableCell>
-                        {interview.evaluation?.overallScore != null ? (
-                          <span className="font-semibold text-[var(--text)]">
-                            {interview.evaluation.overallScore.toFixed(1)}/10
-                          </span>
-                        ) : (
-                          <span className="text-sm text-[var(--textTertiary)]">--</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-[var(--textSecondary)]">
-                        {formatDuration(interview.startedAt, interview.endedAt)}
-                      </TableCell>
-                      <TableCell>
-                        {(interview.warningCount ?? interview.proctoringWarnings ?? 0) > 0 ? (
-                          <Badge variant={(interview.warningCount ?? interview.proctoringWarnings ?? 0) >= 3 ? 'error' : 'warning'} size="sm">
-                            {interview.warningCount ?? interview.proctoringWarnings ?? 0}
-                          </Badge>
-                        ) : (
-                          <span className="text-sm text-[var(--textTertiary)]">0</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {interview.completionReason ? (
-                          <Badge variant={getCompletionReasonVariant(interview.completionReason)} size="sm">
-                            {getCompletionReasonLabel(interview.completionReason)}
-                          </Badge>
-                        ) : (
-                          <span className="text-sm text-[var(--textTertiary)]">--</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {interview.evaluation?.recommendation ? (
-                          <Badge
-                            variant={
-                              interview.evaluation.recommendation === 'STRONG_HIRE' || interview.evaluation.recommendation === 'HIRE'
-                                ? 'success'
-                                : interview.evaluation.recommendation === 'NO_HIRE'
-                                  ? 'warning'
-                                  : 'error'
-                            }
-                            size="sm"
-                          >
-                            {interview.evaluation.recommendation.replace(/_/g, ' ')}
-                          </Badge>
-                        ) : (
-                          <span className="text-sm text-[var(--textTertiary)]">--</span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          {interview.attemptStatus === 'COMPLETED' && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              leftIcon={<Eye size={14} />}
-                              onClick={() => handleViewDetail(interview)}
-                            >
-                              Detail
-                            </Button>
-                          )}
-                          {interview.recordReferences && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              leftIcon={<ExternalLink size={14} />}
-                              onClick={() => window.open(interview.recordReferences, '_blank')}
-                            >
-                              Recording
-                            </Button>
-                          )}
+                        <CompletionCell interview={interview} />
+                      </div>
+
+                      <dl className="grid grid-cols-3 gap-x-3 gap-y-2">
+                        <div className="min-w-0">
+                          <dt className="text-xs text-[var(--textTertiary)] mb-0.5">Duration</dt>
+                          <dd className="text-sm text-[var(--textSecondary)]">
+                            {formatDuration(interview.startedAt, interview.endedAt)}
+                          </dd>
                         </div>
-                      </TableCell>
-                    </TableRow>
+                        <div className="min-w-0">
+                          <dt className="text-xs text-[var(--textTertiary)] mb-0.5">Warnings</dt>
+                          <dd>
+                            <WarningsCell interview={interview} />
+                          </dd>
+                        </div>
+                        <div className="min-w-0">
+                          <dt className="text-xs text-[var(--textTertiary)] mb-0.5">
+                            Recommendation
+                          </dt>
+                          <dd>
+                            <RecommendationCell interview={interview} />
+                          </dd>
+                        </div>
+                      </dl>
+
+                      <InterviewActions interview={interview} onViewDetail={handleViewDetail} />
+                    </div>
                   ))}
-                </TableBody>
-              </Table>
+                </div>
+
+                {/* Desktop: fixed layout so the email column wraps instead of
+                    stretching the table past the card. */}
+                <div className="hidden xl:block">
+                  <Table className="table-fixed">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[19%]">Candidate</TableHead>
+                        <TableHead className="w-[10%]">Status</TableHead>
+                        <TableHead className="w-[9%]">Result</TableHead>
+                        <TableHead className="w-[8%]">Score</TableHead>
+                        <TableHead className="w-[8%]">Duration</TableHead>
+                        <TableHead className="w-[8%]">Warnings</TableHead>
+                        <TableHead className="w-[12%]">Completion</TableHead>
+                        <TableHead className="w-[12%]">Recommendation</TableHead>
+                        <TableHead className="w-[14%]">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {interviews.map((interview) => (
+                        <TableRow key={interview.id}>
+                          <TableCell className="font-medium align-top break-all">
+                            {interview.email}
+                          </TableCell>
+                          <TableCell className="align-top">
+                            <Badge variant={getStatusVariant(interview.attemptStatus)} size="sm">
+                              {interview.attemptStatus.replace(/_/g, ' ')}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="align-top">
+                            <Badge variant={getResultVariant(interview.interviewResult)} size="sm">
+                              {interview.interviewResult}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="align-top">
+                            <ScoreCell interview={interview} />
+                          </TableCell>
+                          <TableCell className="align-top text-[var(--textSecondary)]">
+                            {formatDuration(interview.startedAt, interview.endedAt)}
+                          </TableCell>
+                          <TableCell className="align-top">
+                            <WarningsCell interview={interview} />
+                          </TableCell>
+                          <TableCell className="align-top">
+                            <CompletionCell interview={interview} />
+                          </TableCell>
+                          <TableCell className="align-top">
+                            <RecommendationCell interview={interview} />
+                          </TableCell>
+                          <TableCell className="align-top">
+                            <InterviewActions
+                              interview={interview}
+                              onViewDetail={handleViewDetail}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>

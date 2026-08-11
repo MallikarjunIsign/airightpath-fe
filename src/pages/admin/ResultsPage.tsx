@@ -246,99 +246,112 @@ export function ResultsPage() {
                   description="No assessments have been completed for this job yet."
                 />
               ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Candidate Email</TableHead>
-                        <TableHead>Aptitude</TableHead>
-                        <TableHead>Coding</TableHead>
-                        <TableHead>Overall</TableHead>
-                        <TableHead>Submitted</TableHead>
-                        <TableHead>Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {candidateRows.map((row) => (
-                        <TableRow key={row.email}>
-                          <TableCell className="font-medium">{row.email}</TableCell>
-                          <TableCell>
-                            {row.aptitudeResult ? (
-                              <ScoreBadge
-                                score={row.aptitudeScore}
-                                status={row.aptitudeResult.status}
-                                detail={`${row.aptitudeResult.score}${
-                                  row.aptitudeResult.totalMarks
-                                    ? `/${row.aptitudeResult.totalMarks}`
-                                    : ''
-                                } marks`}
-                              />
-                            ) : (
-                              <span className="text-[var(--textTertiary)] text-sm">--</span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {row.codingResult || row.codeSubmissions.length > 0 ? (
-                              <div className="space-y-0.5">
-                                <ScoreBadge
-                                  score={row.codingScore}
-                                  status={row.codingResult?.status}
-                                />
-                                <CodingSubmissionSummary submissions={row.codeSubmissions} />
-                              </div>
-                            ) : (
-                              <span className="text-[var(--textTertiary)] text-sm">--</span>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <span
-                                className="text-sm font-bold tabular-nums"
-                                style={{
-                                  color:
-                                    row.overallScore === null
-                                      ? 'var(--textTertiary)'
-                                      : scoreColor(row.overallScore),
-                                }}
-                              >
-                                {row.overallScore === null ? '--' : `${row.overallScore}%`}
-                              </span>
-                              <Badge
-                                variant={
-                                  row.overallStatus === 'PASSED'
-                                    ? 'success'
-                                    : row.overallStatus === 'FAILED'
-                                      ? 'error'
-                                      : 'warning'
-                                }
-                                size="sm"
-                              >
-                                {row.overallStatus === 'PARTIAL' ? 'Pending' : row.overallStatus}
-                              </Badge>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-sm text-[var(--textSecondary)]">
+                <>
+                  {/* Mobile: one card per candidate. Six columns — one of them a
+                      full email address — cannot be read on a phone, and the
+                      overall score matters more than any of them, so it leads. */}
+                  <div className="lg:hidden space-y-3">
+                    {candidateRows.map((row) => (
+                      <div
+                        key={row.email}
+                        className="rounded-2xl border border-[var(--borderMuted,var(--border))] bg-[var(--cardBg)] p-4 space-y-3"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="font-medium text-[var(--text)] break-all min-w-0">
+                            {row.email}
+                          </p>
+                          <OverallScore row={row} className="flex-shrink-0" />
+                        </div>
+
+                        <dl className="grid grid-cols-2 gap-x-3 gap-y-2">
+                          <div className="min-w-0">
+                            <dt className="text-xs text-[var(--textTertiary)] mb-0.5">Aptitude</dt>
+                            <dd>
+                              <AptitudeCell row={row} />
+                            </dd>
+                          </div>
+                          <div className="min-w-0">
+                            <dt className="text-xs text-[var(--textTertiary)] mb-0.5">Coding</dt>
+                            <dd>
+                              <CodingCell row={row} />
+                            </dd>
+                          </div>
+                        </dl>
+
+                        <div className="flex items-center justify-between gap-2 pt-1">
+                          <span className="text-sm text-[var(--textSecondary)]">
                             {getSubmittedDate(row)}
-                          </TableCell>
-                          <TableCell>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              leftIcon={<Eye size={14} />}
-                              onClick={() =>
-                                navigate(
-                                  `/admin/assessments/results/${selectedPrefix}/${encodeURIComponent(row.email)}`
-                                )
-                              }
-                            >
-                              View
-                            </Button>
-                          </TableCell>
+                          </span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            leftIcon={<Eye size={14} />}
+                            onClick={() =>
+                              navigate(
+                                `/admin/assessments/results/${selectedPrefix}/${encodeURIComponent(row.email)}`
+                              )
+                            }
+                          >
+                            View
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Desktop: fixed layout so the email column wraps instead of
+                      stretching the table past the card. */}
+                  <div className="hidden lg:block">
+                    <Table className="table-fixed">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-[28%]">Candidate Email</TableHead>
+                          <TableHead className="w-[15%]">Aptitude</TableHead>
+                          <TableHead className="w-[16%]">Coding</TableHead>
+                          <TableHead className="w-[17%]">Overall</TableHead>
+                          <TableHead className="w-[12%]">Submitted</TableHead>
+                          <TableHead className="w-[12%]">Actions</TableHead>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
+                      </TableHeader>
+                      <TableBody>
+                        {candidateRows.map((row) => (
+                          <TableRow key={row.email}>
+                            <TableCell className="font-medium align-top break-all">
+                              {row.email}
+                            </TableCell>
+                            <TableCell className="align-top">
+                              <AptitudeCell row={row} />
+                            </TableCell>
+                            <TableCell className="align-top">
+                              <CodingCell row={row} />
+                            </TableCell>
+                            <TableCell className="align-top">
+                              <OverallScore row={row} />
+                            </TableCell>
+                            <TableCell className="align-top text-sm text-[var(--textSecondary)]">
+                              {getSubmittedDate(row)}
+                            </TableCell>
+                            <TableCell className="align-top">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="px-2"
+                                leftIcon={<Eye size={14} />}
+                                onClick={() =>
+                                  navigate(
+                                    `/admin/assessments/results/${selectedPrefix}/${encodeURIComponent(row.email)}`
+                                  )
+                                }
+                              >
+                                View
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
@@ -361,6 +374,57 @@ function StatCard({ label, value, color }: { label: string; value: number; color
         </p>
       </CardContent>
     </Card>
+  );
+}
+
+// The three value cells, shared by the desktop row and the mobile card so the
+// two renderings cannot drift apart.
+
+function AptitudeCell({ row }: { row: CandidateRow }) {
+  if (!row.aptitudeResult) {
+    return <span className="text-[var(--textTertiary)] text-sm">--</span>;
+  }
+  const { score, totalMarks } = row.aptitudeResult;
+  return (
+    <ScoreBadge
+      score={row.aptitudeScore}
+      status={row.aptitudeResult.status}
+      detail={`${score}${totalMarks ? `/${totalMarks}` : ''} marks`}
+    />
+  );
+}
+
+function CodingCell({ row }: { row: CandidateRow }) {
+  if (!row.codingResult && row.codeSubmissions.length === 0) {
+    return <span className="text-[var(--textTertiary)] text-sm">--</span>;
+  }
+  return (
+    <div className="space-y-0.5">
+      <ScoreBadge score={row.codingScore} status={row.codingResult?.status} />
+      <CodingSubmissionSummary submissions={row.codeSubmissions} />
+    </div>
+  );
+}
+
+function OverallScore({ row, className = '' }: { row: CandidateRow; className?: string }) {
+  let variant: 'success' | 'error' | 'warning' = 'warning';
+  if (row.overallStatus === 'PASSED') variant = 'success';
+  else if (row.overallStatus === 'FAILED') variant = 'error';
+
+  return (
+    <div className={`flex items-center gap-2 ${className}`}>
+      <span
+        className="text-sm font-bold tabular-nums"
+        style={{
+          color: row.overallScore === null ? 'var(--textTertiary)' : scoreColor(row.overallScore),
+        }}
+      >
+        {row.overallScore === null ? '--' : `${row.overallScore}%`}
+      </span>
+      <Badge variant={variant} size="sm">
+        {row.overallStatus === 'PARTIAL' ? 'Pending' : row.overallStatus}
+      </Badge>
+    </div>
   );
 }
 
