@@ -13,6 +13,9 @@ export const MESSAGES = {
   auth: {
     loginSuccess: 'Successfully logged in',
     registerSuccess: 'Account created successfully! Please sign in.',
+    // Shown against the field itself — the toast cannot name which one clashed.
+    emailTaken: 'This email is already registered. Sign in instead, or use another.',
+    mobileTaken: 'This mobile number is already registered. Use a different number.',
     passwordChanged: 'Password changed successfully',
     passwordUpdated: 'Password updated successfully',
     accountUnidentified: 'Unable to identify your account. Please log in again.',
@@ -61,6 +64,8 @@ export const MESSAGES = {
     secondPersonPresent: 'Another person is visible in your camera. Please sit alone to continue.',
     tooNoisy: 'Your surroundings are too noisy. Please move somewhere quieter and try again.',
     roomScanRequired: 'Please complete the room scan before starting the exam.',
+    desktopRequired:
+      'Please switch to a desktop or laptop with a webcam. This exam cannot be taken on a phone or tablet.',
     roomScanDone: 'Room scan captured. Thank you.',
     roomScanFailed: "We couldn't save your room scan. Please try again.",
   },

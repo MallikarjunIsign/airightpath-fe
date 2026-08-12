@@ -16,7 +16,12 @@ const ERROR_MESSAGES: Record<string, string> = {
     'That language is not supported by the code runner. Please pick another one.',
   // Domain
   USER_NOT_FOUND: "We couldn't find an account with that email address.",
-  USER_ALREADY_EXISTS: 'An account with this email already exists. Try signing in instead.',
+  // Deliberately does not name a field: the backend raises this code for a
+  // duplicate email AND a duplicate mobile number, and naming the wrong one
+  // sends people off to check details that are fine. Registration reads the
+  // server's message to mark the offending field — see RegisterPage.
+  USER_ALREADY_EXISTS:
+    'An account with these details already exists. Try signing in instead.',
   USER_INACTIVE: 'This account has been deactivated. Please contact support.',
   PASSWORD_POLICY: 'Password must be between 8 and 64 characters.',
   PASSWORD_MISMATCH: "The passwords you entered don't match.",

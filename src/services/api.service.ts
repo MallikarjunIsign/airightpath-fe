@@ -201,6 +201,15 @@ api.interceptors.response.use(
 export function extractApiError(error: unknown): {
   code: string;
   message: string;
+  /**
+   * The server's own wording, before it was mapped to our copy.
+   *
+   * Needed where one error code covers several causes and only the server can
+   * say which — a duplicate registration is USER_ALREADY_EXISTS whether the
+   * email or the mobile number clashed, and the mapped message cannot name
+   * either without being wrong half the time.
+   */
+  serverMessage?: string;
 } {
   if (axios.isAxiosError(error)) {
     const data = error.response?.data as ApiErrorEnvelope | undefined;
@@ -209,6 +218,7 @@ export function extractApiError(error: unknown): {
       return {
         code: data.code,
         message: getErrorMessage(data.code, data.message),
+        serverMessage: data.message,
       };
     }
     // Legacy format: { message, timestamp } — no code

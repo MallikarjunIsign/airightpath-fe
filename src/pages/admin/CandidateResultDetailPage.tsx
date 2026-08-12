@@ -384,7 +384,7 @@ export function CandidateResultDetailPage() {
           hint={overallBasis}
           chart={
             overallScore !== null ? (
-              <RadialScore score={overallScore} size={80} stroke={8} />
+              <RadialScore score={overallScore} size={80} stroke={8} status={overallStatus} />
             ) : (
               <KpiPlaceholder text="N/A" />
             )
@@ -401,7 +401,12 @@ export function CandidateResultDetailPage() {
           }
           chart={
             aptitudeScore !== null ? (
-              <RadialScore score={aptitudeScore} size={80} stroke={8} />
+              <RadialScore
+                score={aptitudeScore}
+                size={80}
+                stroke={8}
+                status={aptitudeResult?.status}
+              />
             ) : (
               <KpiPlaceholder text="N/A" />
             )
@@ -418,7 +423,12 @@ export function CandidateResultDetailPage() {
           }
           chart={
             codingScore !== null ? (
-              <RadialScore score={codingScore} size={80} stroke={8} />
+              <RadialScore
+                score={codingScore}
+                size={80}
+                stroke={8}
+                status={codingResult?.status}
+              />
             ) : codingRows.length > 0 ? (
               <KpiValue value={`${codingStats.solved}/${codingStats.totalQ}`} sub="Q Solved" />
             ) : (
@@ -687,7 +697,7 @@ function SummaryScore({
   return (
     <div className="flex items-center gap-4">
       {score !== undefined && score !== null ? (
-        <RadialScore score={score} size={76} stroke={8} />
+        <RadialScore score={score} size={76} stroke={8} status={status} />
       ) : (
         <div className="w-[76px] h-[76px] rounded-full border-[7px] border-[var(--borderMuted)] flex items-center justify-center flex-shrink-0">
           <span className="text-xs font-semibold text-[var(--textTertiary)]">N/A</span>

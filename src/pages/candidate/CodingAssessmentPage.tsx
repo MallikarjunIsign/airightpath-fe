@@ -40,7 +40,12 @@ import { Modal } from '@/components/ui/Modal';
 import { APP_CONFIG } from '@/config/app.config';
 import { PROCTORING_CONFIG } from '@/config/proctoring.config';
 import { MESSAGES } from '@/config/messages';
-import { CameraRequiredOverlay, FullscreenRequiredOverlay } from '@/components/exam/ExamOverlays';
+import {
+  CameraRequiredOverlay,
+  DesktopRequiredOverlay,
+  FullscreenRequiredOverlay,
+} from '@/components/exam/ExamOverlays';
+import { useIsDesktop } from '@/hooks/useIsDesktop';
 import { ROUTES } from '@/config/routes';
 import { formatTimer } from '@/utils/format.utils';
 import { computeExamMinutes } from '@/utils/exam-duration.utils';
@@ -179,6 +184,7 @@ export function CodingAssessmentPage() {
 
   // Refs
   const isSubmittingRef = useRef(false);
+  const isDesktop = useIsDesktop();
   const initRef = useRef(false);
   const proctoring = PROCTORING_CONFIG;
   const isDraggingRef = useRef(false);
@@ -708,6 +714,10 @@ export function CodingAssessmentPage() {
           camera.status === 'error') && (
           <CameraRequiredOverlay message={camera.message} onRetry={setupCamera} />
         )}
+
+      {/* Sits above the others: on a phone none of the rest can be satisfied,
+          and the editor has no keyboard to type into. */}
+      {!isDesktop && <DesktopRequiredOverlay />}
 
       {/* Fullscreen overlay */}
       {proctoring.fullscreen.enabled && !isFullscreen && !loading && (

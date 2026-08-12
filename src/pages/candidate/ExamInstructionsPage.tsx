@@ -12,7 +12,13 @@ import {
   Users,
   Volume2,
   ScanLine,
+  RotateCcw,
+  Wifi,
+  BatteryCharging,
+  BellOff,
+  Send,
 } from 'lucide-react';
+import { useIsDesktop } from '@/hooks/useIsDesktop';
 import { useToast } from '@/components/ui/Toast';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -61,6 +67,7 @@ export function ExamInstructionsPage() {
   const [permissionLoading, setPermissionLoading] = useState(false);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [photoStatus, setPhotoStatus] = useState<IdentityPhotoStatus>('idle');
+  const isDesktop = useIsDesktop();
   // True unless a required room scan is still outstanding — the check component
   // reports this, since it owns the scan.
   const [roomScanOk, setRoomScanOk] = useState(!PROCTORING_CONFIG.roomScan.required);
@@ -186,12 +193,18 @@ export function ExamInstructionsPage() {
   // Required means stored — a photo we never received is not a photo we have.
   const photoOk = !photoConfig.required || photoStatus === 'saved';
 
+  // Blocked rather than warned: starting on a phone means failing on a phone,
+  // and the attempt would still be recorded against the candidate.
+  const deviceOk = isDesktop;
+
   const secondPersonBlocking = faceCheckAvailable && faceStatus === 'multiple';
   const noiseBlocking = noiseConfig.enabled && noiseConfig.blocksStart && noise.band === 'loud';
 
   // Every reason the button is disabled, spelled out. A dead button with no
   // explanation is the fastest way to make a candidate think the exam is broken.
   const blockers: string[] = [];
+  // First in the list: on the wrong device nothing below it can be fixed.
+  if (!deviceOk) blockers.push(MESSAGES.examSetup.desktopRequired);
   if (!cameraReady || !micReady) blockers.push(MESSAGES.examSetup.enableDevicesRequired);
   if (!photoOk) {
     // Distinguish "you haven't taken it" from "we couldn't save the one you took".
@@ -282,6 +295,10 @@ export function ExamInstructionsPage() {
         <CardContent>
           <ul className="space-y-3">
             {[
+              {
+                icon: <Monitor size={18} />,
+                text: 'Take this exam on a desktop or laptop with a webcam. Phones and tablets are not supported.',
+              },
               { icon: <Clock size={18} />, text: durationRule },
               {
                 icon: <Camera size={18} />,
@@ -313,23 +330,58 @@ export function ExamInstructionsPage() {
               },
               {
                 icon: <Maximize size={18} />,
-                text: 'The exam will run in fullscreen mode. Exiting fullscreen is not allowed.',
+                text: 'The exam runs in fullscreen. Leaving fullscreen — including by switching tabs — is recorded as a warning.',
+              },
+              // The exact rule, read from config, so it cannot drift from what
+              // the proctoring actually does. Telling someone they get warnings
+              // when the first switch ends the exam is worse than saying nothing.
+              ...(PROCTORING_CONFIG.tabSwitch.enabled
+                ? [
+                    {
+                      icon: <Monitor size={18} />,
+                      text:
+                        PROCTORING_CONFIG.tabSwitch.maxBeforeAutoSubmit === 1
+                          ? 'Do not switch tabs, windows or applications. The first switch ends your exam immediately and submits your answers as they stand.'
+                          : PROCTORING_CONFIG.tabSwitch.maxBeforeAutoSubmit > 1
+                            ? `Do not switch tabs, windows or applications. Each switch is a warning, and ${PROCTORING_CONFIG.tabSwitch.maxBeforeAutoSubmit} switches submit your exam automatically.`
+                            : 'Do not switch tabs, windows or applications. Each switch is recorded as a warning.',
+                    },
+                  ]
+                : []),
+              ...(PROCTORING_CONFIG.eyeDetection.enabled
+                ? [
+                    {
+                      icon: <AlertTriangle size={18} />,
+                      text:
+                        PROCTORING_CONFIG.eyeDetection.maxBeforeAutoSubmit > 0
+                          ? `Stay facing the screen. Looking away for long, leaving the frame, or a second person appearing each raise a warning — ${PROCTORING_CONFIG.eyeDetection.maxBeforeAutoSubmit} warnings submit your exam automatically.`
+                          : 'Stay facing the screen. Looking away for long, leaving the frame, or a second person appearing are each recorded as a warning.',
+                    },
+                  ]
+                : []),
+              {
+                icon: <RotateCcw size={18} />,
+                text: 'Do not reload, close, or navigate away from the exam page. Reloading restarts the paper from the beginning and your remaining time is not restored.',
               },
               {
-                icon: <Monitor size={18} />,
-                text: 'Switching tabs or windows will trigger a warning. Repeated switches auto-submit your exam.',
+                icon: <Wifi size={18} />,
+                text: 'Use a stable internet connection. If it drops, your timer keeps running — reconnect on the same device and continue; do not open the exam in a second tab.',
               },
               {
-                icon: <AlertTriangle size={18} />,
-                text: 'If your face is repeatedly not detected, the exam will be auto-submitted.',
+                icon: <BatteryCharging size={18} />,
+                text: 'Keep your device plugged in and disable sleep. A device that sleeps or shuts down mid-exam is treated as leaving it.',
+              },
+              {
+                icon: <BellOff size={18} />,
+                text: 'Close other applications and silence notifications. A call or pop-up that takes focus counts as leaving the exam.',
               },
               {
                 icon: <Shield size={18} />,
-                text: 'Do not use any external resources, notes, or assistance during the exam.',
+                text: 'Do not use external resources, notes, phones, or assistance from another person.',
               },
               {
-                icon: <Shield size={18} />,
-                text: 'Ensure a stable internet connection before starting.',
+                icon: <Send size={18} />,
+                text: 'When the timer reaches zero your exam is submitted automatically, with whatever you have answered so far.',
               },
             ].map((rule) => (
               <li key={rule.text} className="flex items-start gap-3">

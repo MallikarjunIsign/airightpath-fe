@@ -16,17 +16,24 @@ export function RadialScore({
   size = 80,
   stroke = 8,
   label,
+  status,
 }: {
   score: number;
   size?: number;
   stroke?: number;
   /** Small caption under the number, e.g. "Score". */
   label?: string;
+  /**
+   * The module's recorded verdict, when it has one. Given it, the dial is
+   * coloured by pass/fail rather than by the generic score bands — otherwise a
+   * pass below the band threshold is drawn red next to its own PASSED badge.
+   */
+  status?: string;
 }) {
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (Math.min(Math.max(score, 0), 100) / 100) * circumference;
-  const color = scoreColor(score);
+  const color = scoreColor(score, status);
 
   return (
     <div className="relative flex-shrink-0" style={{ width: size, height: size }}>

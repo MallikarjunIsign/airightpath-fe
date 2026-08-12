@@ -12,7 +12,20 @@ import { isGraded, isPassed } from './compiler.utils';
 // ── Shared display helpers ─────────────────────────────────────────────
 
 /** CSS variable for a 0-100 score — green ≥80, amber ≥60, else red. */
-export function scoreColor(score: number): string {
+/**
+ * Colour for a score dial.
+ *
+ * A recorded verdict wins over the bands. The 80/60 split is a generic
+ * "how good is this number" heuristic and has nothing to do with the pass mark
+ * the exam was actually graded against — so a module that PASSED on 45% was
+ * drawn red directly beside its own green PASSED badge, telling the reviewer
+ * two opposite things about the same result.
+ *
+ * The bands remain the fallback for scores with no verdict attached.
+ */
+export function scoreColor(score: number, status?: string): string {
+  if (status === 'PASSED') return 'var(--success)';
+  if (status === 'FAILED') return 'var(--error)';
   if (score >= 80) return 'var(--success)';
   if (score >= 60) return 'var(--warning)';
   return 'var(--error)';

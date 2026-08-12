@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useAuth } from '@/contexts/AuthContext';
+import { extractApiError } from '@/services/api.service';
 import { useToast } from '@/components/ui/Toast';
 import { MESSAGES } from '@/config/messages';
 import { Input } from '@/components/ui/Input';
@@ -27,6 +28,8 @@ export function RegisterPage() {
     register,
     handleSubmit,
     setValue,
+    setError,
+    setFocus,
     formState: { errors, isSubmitting },
   } = useForm<RegisterFormValues>({
     resolver: zodResolver(registerSchema),
@@ -51,8 +54,24 @@ export function RegisterPage() {
       });
       showToast(MESSAGES.auth.registerSuccess, 'success');
       navigate(ROUTES.PUBLIC.LOGIN, { replace: true });
-    } catch {
-      // Error toast auto-handled by interceptor
+    } catch (err) {
+      // The toast itself is handled by the interceptor, but it can only say
+      // "these details are taken" — one code covers both a duplicate email and
+      // a duplicate mobile. The server's own wording is the only thing that
+      // says which, so use it to mark the field the candidate has to change.
+      const { code, serverMessage } = extractApiError(err);
+      if (code !== 'USER_ALREADY_EXISTS') return;
+
+      const said = (serverMessage ?? '').toLowerCase();
+      if (said.includes('mobile') || said.includes('phone')) {
+        setError('mobileNumber', { message: MESSAGES.auth.mobileTaken });
+        setFocus('mobileNumber');
+      } else if (said.includes('email')) {
+        setError('email', { message: MESSAGES.auth.emailTaken });
+        setFocus('email');
+      }
+      // Anything else keeps the interceptor's neutral toast — better than
+      // guessing a field and pointing at the wrong one.
     }
   };
 
