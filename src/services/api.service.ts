@@ -80,22 +80,48 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   return config;
 });
 
-// ── Response interceptor: handle 401 + refresh ───────────────────────
-let isRefreshing = false;
-let failedQueue: Array<{
-  resolve: (token: string) => void;
-  reject: (err: unknown) => void;
-}> = [];
+// ── Single-flight refresh ────────────────────────────────────────────
+//
+// The server rotates the refresh token on every use and treats a second
+// presentation of an already-rotated token as theft: it revokes the whole
+// session, not just that token. Two refreshes racing each other therefore log
+// the user out — which is what happened on every page load, because the app's
+// startup bootstrap and the 401 retry path each ran their own refresh (and in
+// StrictMode the bootstrap ran twice by itself).
+//
+// So there is exactly one in-flight refresh, and every caller awaits it.
+let refreshPromise: Promise<string> | null = null;
 
-function processQueue(error: unknown, token: string | null): void {
-  failedQueue.forEach((p) => {
-    if (error) {
-      p.reject(error);
-    } else {
-      p.resolve(token!);
-    }
-  });
-  failedQueue = [];
+export function refreshAccessToken(): Promise<string> {
+  // Bare axios, not `api`: the instance's own interceptor would try to refresh
+  // a failing refresh, and recurse.
+  refreshPromise ??= axios
+    .post<{ data?: { accessToken?: string } }>(
+      `${ENV.API_BASE_URL}${ENDPOINTS.AUTH.REFRESH}`,
+      {},
+      { withCredentials: true },
+    )
+    .then((response) => {
+      const newToken = response.data?.data?.accessToken;
+      if (!newToken) throw new Error('No token in refresh response');
+      setAccessToken(newToken);
+      return newToken;
+    })
+    .finally(() => {
+      // Cleared once settled so a later, genuine refresh can start. Callers
+      // already holding this promise are unaffected.
+      refreshPromise = null;
+    });
+
+  return refreshPromise;
+}
+
+/** Tears the session down locally and tells the app and other tabs. */
+function endSession(): void {
+  clearTokens();
+  broadcastAuthChange("logout");
+  dispatchErrorToast(getErrorMessage("AUTH_INVALID_REFRESH"));
+  window.dispatchEvent(new CustomEvent("auth:forceLogout"));
 }
 
 api.interceptors.response.use(
@@ -138,41 +164,17 @@ api.interceptors.response.use(
         errorCode === "AUTH_INVALID_TOKEN" ||
         errorCode === "AUTH_UNAUTHORIZED"
       ) {
-        if (isRefreshing) {
-          return new Promise<string>((resolve, reject) => {
-            failedQueue.push({ resolve, reject });
-          }).then((token) => {
-            originalRequest.headers.Authorization = `Bearer ${token}`;
-            return api(originalRequest);
-          });
-        }
-
         originalRequest._retry = true;
-        isRefreshing = true;
 
         try {
-          const response = await axios.post(
-            `${ENV.API_BASE_URL}${ENDPOINTS.AUTH.REFRESH}`,
-            {},
-            { withCredentials: true },
-          );
-          const newToken = response.data?.data?.accessToken;
-          if (newToken) {
-            setAccessToken(newToken);
-            originalRequest.headers.Authorization = `Bearer ${newToken}`;
-            processQueue(null, newToken);
-            return api(originalRequest);
-          }
-          throw new Error("No token in refresh response");
+          // Shared with any other 401 and with the startup bootstrap, so the
+          // rotated token is only ever spent once.
+          const newToken = await refreshAccessToken();
+          originalRequest.headers.Authorization = `Bearer ${newToken}`;
+          return api(originalRequest);
         } catch (refreshError) {
-          processQueue(refreshError, null);
-          clearTokens();
-          broadcastAuthChange("logout");
-          dispatchErrorToast(getErrorMessage("AUTH_INVALID_REFRESH"));
-          window.dispatchEvent(new CustomEvent("auth:forceLogout"));
+          endSession();
           return Promise.reject(refreshError);
-        } finally {
-          isRefreshing = false;
         }
       }
     }

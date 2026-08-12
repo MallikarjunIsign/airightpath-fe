@@ -1,6 +1,13 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
 import { authService } from '@/services/auth.service';
-import { setAccessToken, getAccessToken, clearTokens, broadcastAuthChange, authChannel } from '@/services/api.service';
+import {
+  setAccessToken,
+  getAccessToken,
+  clearTokens,
+  broadcastAuthChange,
+  refreshAccessToken,
+  authChannel,
+} from '@/services/api.service';
 import { isJwtExpired } from '@/utils/jwt.utils';
 import type { RoleName } from '@/config/roles';
 import type { PermissionName } from '@/config/permissions';
@@ -64,15 +71,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const refreshResponse = await authService.refresh();
-        const newToken = refreshResponse.data?.data?.accessToken;
-        if (newToken) {
-          setAccessToken(newToken);
-          await loadMe();
-          return;
-        }
+        // Shared single-flight refresh. Calling authService.refresh() directly
+        // here bypassed the interceptor's guard, so a page load could spend the
+        // rotated token twice — and the server reads a second use as theft and
+        // revokes the whole session, logging the user out on every refresh.
+        await refreshAccessToken();
+        await loadMe();
+        return;
       } catch {
-        // Refresh failed
+        // No usable refresh cookie — fall through to a signed-out state.
       }
 
       setUser(null);
