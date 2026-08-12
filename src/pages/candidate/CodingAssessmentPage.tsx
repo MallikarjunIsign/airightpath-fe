@@ -705,7 +705,12 @@ export function CodingAssessmentPage() {
   const isTimeout = errorName.includes('timeout');
 
   return (
-    <div className="min-h-screen bg-[var(--background)] flex flex-col">
+    // h-screen, not min-h-screen: the page must be exactly the viewport so the
+    // question panel and the editor own their own scrolling. With min-h-screen
+    // the whole document grew instead, scrolling the editor and the timer out
+    // of view together and making it impossible to read the question while
+    // typing — which is the entire point of a two-pane layout.
+    <div className="h-screen overflow-hidden bg-[var(--background)] flex flex-col">
       {/* Camera Required Overlay — blocks the exam until the camera is live */}
       {proctoring.camera.required &&
         !loading &&
@@ -725,7 +730,10 @@ export function CodingAssessmentPage() {
       )}
 
       {/* ── Top Bar ──────────────────────────────────────────────── */}
-      <div className="sticky top-0 z-10 bg-[var(--cardBg)] border-b border-[var(--border)] px-4 py-2">
+      {/* flex-shrink-0 so the timer and warning count keep their height when
+          the panes below are short; `sticky` is redundant now that the page
+          itself no longer scrolls. */}
+      <div className="flex-shrink-0 z-10 bg-[var(--cardBg)] border-b border-[var(--border)] px-4 py-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Badge variant="warning">CODING</Badge>
@@ -837,11 +845,14 @@ export function CodingAssessmentPage() {
       </div>
 
       {/* ── Main Content ─────────────────────────────────────────── */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left: Question Description */}
-        <div className="w-[38%] border-r border-[var(--border)] overflow-y-auto flex flex-col">
+      {/* min-h-0 lets this row shrink inside the flex column. Without it a tall
+          question pushes the row past the viewport and the body scrolls again,
+          defeating the overflow-y-auto on the pane below. */}
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        {/* Left: Question Description — scrolls independently of the editor. */}
+        <div className="w-[38%] border-r border-[var(--border)] overflow-y-auto scrollbar-thin flex flex-col">
           {currentQuestion && (
-            <div className="flex-1 p-5 space-y-4">
+            <div className="p-5 space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Code2 size={18} className="text-[var(--primary)]" />
@@ -895,10 +906,10 @@ export function CodingAssessmentPage() {
           )}
         </div>
 
-        {/* Right: Editor + Output */}
-        <div className="flex-1 flex flex-col" ref={containerRef}>
+        {/* Right: Editor + Output — its own column, scrolling independently. */}
+        <div className="flex-1 flex flex-col min-w-0 min-h-0" ref={containerRef}>
           {/* Toolbar */}
-          <div className="flex items-center justify-between px-4 py-2 bg-[var(--cardBg)] border-b border-[var(--border)]">
+          <div className="flex-shrink-0 flex items-center justify-between px-4 py-2 bg-[var(--cardBg)] border-b border-[var(--border)]">
             <div className="flex items-center gap-3">
               <div className="w-36">
                 <Select options={APP_CONFIG.COMPILER_LANGUAGES} value={language} onChange={(e) => handleLanguageChange(e.target.value)} disabled={isQuestionLocked} />
@@ -956,12 +967,12 @@ export function CodingAssessmentPage() {
           </div>
 
           {/* Drag Handle */}
-          <div className="h-2 bg-[#2d2d2d] cursor-row-resize flex items-center justify-center hover:bg-[#3d3d3d] transition-colors" onMouseDown={handleDragStart}>
+          <div className="flex-shrink-0 h-2 bg-[#2d2d2d] cursor-row-resize flex items-center justify-center hover:bg-[#3d3d3d] transition-colors" onMouseDown={handleDragStart}>
             <GripHorizontal size={14} className="text-gray-500" />
           </div>
 
           {/* Output Panel */}
-          <div className="border-t border-[#333] bg-[#1e1e1e] overflow-hidden flex flex-col" style={{ height: outputHeight }}>
+          <div className="flex-shrink-0 border-t border-[#333] bg-[#1e1e1e] overflow-hidden flex flex-col" style={{ height: outputHeight }}>
             {/* Tabs */}
             <div className="flex items-center border-b border-[#333] bg-[#252526] px-2">
               <button

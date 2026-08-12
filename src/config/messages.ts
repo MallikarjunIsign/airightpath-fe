@@ -199,6 +199,13 @@ export const MESSAGES = {
       loadReuseFailed: 'Failed to load prompts to reuse.',
       contentEmpty: 'Prompt content cannot be empty',
       promptSaved: (label: string) => `${label} prompt saved successfully!`,
+      // Names the prompt that failed, because the page has several save buttons
+      // and a bare "something went wrong" leaves the admin unsure which — and
+      // whether the text they just typed is safe to navigate away from.
+      promptSaveFailed: (label: string) =>
+        `Failed to save the ${label} prompt. Your text has not been lost — please try again.`,
+      promptSaveFailedReason: (label: string, reason: string) =>
+        `Failed to save the ${label} prompt: ${reason}`,
       interviewPromptEmpty: 'Interview prompt cannot be empty',
       evaluationPromptEmpty: 'Evaluation prompt cannot be empty',
       weightsMustTotal: (total: number) =>

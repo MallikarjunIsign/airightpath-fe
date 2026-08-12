@@ -25,9 +25,17 @@ export const promptService = {
     );
   },
 
-  /** Create/update a single prompt for a job stage. */
-  save(data: { jobPrefix: string; promptType: string; promptStage: string | null; prompt: string }) {
-    return api.post<ApiResponse<unknown>>(ENDPOINTS.PROMPTS.SAVE, data);
+  /**
+   * Create/update a single prompt for a job stage.
+   *
+   * `silent` lets the caller own the failure message — the generic interceptor
+   * toast cannot say which of the page's several prompts failed to save.
+   */
+  save(
+    data: { jobPrefix: string; promptType: string; promptStage: string | null; prompt: string },
+    opts?: SilentOpts,
+  ) {
+    return api.post<ApiResponse<unknown>>(ENDPOINTS.PROMPTS.SAVE, data, silentConfig(opts));
   },
 
   /** Create/update the evaluation categories for a job. */

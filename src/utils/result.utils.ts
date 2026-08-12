@@ -226,10 +226,22 @@ export const codeOf = (r: CodingRow) => r.answer?.code?.trim() || r.sub?.script?
  */
 export const testsOf = (r: CodingRow) => (r.sub?.testResults ?? []).filter(isGraded);
 
-/** Executed tests when there are any, otherwise what the paper would have run. */
+/**
+ * How many test cases this question was worth — the score's denominator.
+ *
+ * The paper is the authority, not what the candidate happened to run. Counting
+ * executed tests instead let unattempted questions vanish from the denominator
+ * entirely: someone who opened one question of six, ran its 8 cases and passed
+ * 2, scored 2/8 = 25% rather than 2/48 = 4%. Skipping questions must not raise
+ * the mark.
+ *
+ * Executed tests are the fallback for when the paper is unavailable, and the
+ * larger of the two wins so a paper that under-reports its own cases can never
+ * push the pass rate above 100%.
+ */
 export const plannedTestCount = (r: CodingRow) => {
-  const graded = testsOf(r);
-  return graded.length > 0 ? graded.length : (r.question?.testCases?.length ?? 0);
+  const fromPaper = r.question?.testCases?.length ?? 0;
+  return Math.max(fromPaper, testsOf(r).length);
 };
 
 export const passedTestCount = (r: CodingRow) => testsOf(r).filter(isPassed).length;

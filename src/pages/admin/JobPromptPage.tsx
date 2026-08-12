@@ -11,6 +11,7 @@ import { useToast } from '@/components/ui/Toast';
 import { BackLink } from '@/components/ui/BackLink';
 import { jobService } from '@/services/job.service';
 import { promptService } from '@/services/prompt.service';
+import { extractApiError } from '@/services/api.service';
 import { MESSAGES } from '@/config/messages';
 import type { JobPostDTO } from '@/types/job.types';
 import type { EvaluationCategory } from '@/types/interview.types';
@@ -321,16 +322,30 @@ export function JobPromptPage() {
 
     setSaving(true);
     try {
-      await promptService.save({
-        jobPrefix: selectedPrefix,
-        promptType: tab.promptType,
-        promptStage: tab.promptStage,
-        prompt: content,
-      });
+      // Silent: the interceptor's generic toast cannot say which prompt failed,
+      // and on this page that is the only thing the admin needs to know.
+      await promptService.save(
+        {
+          jobPrefix: selectedPrefix,
+          promptType: tab.promptType,
+          promptStage: tab.promptStage,
+          prompt: content,
+        },
+        { silent: true },
+      );
       showToast(MESSAGES.admin.prompts.promptSaved(tab.label), 'success');
       setExistingPromptKeys((prev) => new Set([...prev, activeTab]));
-    } catch {
-      // Error toast auto-handled by interceptor
+    } catch (err) {
+      // Pass the server's reason through when it has one — "prompt too long" or
+      // "job not found" are actionable in a way "please try again" is not.
+      const { code, message } = extractApiError(err);
+      const hasReason = message && !code.startsWith('HTTP_');
+      showToast(
+        hasReason
+          ? MESSAGES.admin.prompts.promptSaveFailedReason(tab.label, message)
+          : MESSAGES.admin.prompts.promptSaveFailed(tab.label),
+        'error',
+      );
     } finally {
       setSaving(false);
     }
