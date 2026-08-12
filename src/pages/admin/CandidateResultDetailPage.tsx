@@ -326,20 +326,26 @@ export function CandidateResultDetailPage() {
       <Card variant="elevated">
         <CardContent>
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-5">
-            <div className="flex items-center gap-4">
+            <div className="flex items-start gap-3 sm:gap-4 min-w-0">
               <div
-                className="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-xl font-bold flex-shrink-0 shadow-sm"
+                className="w-11 h-11 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center text-white text-lg sm:text-xl font-bold flex-shrink-0 shadow-sm"
                 style={{ background: 'linear-gradient(135deg, var(--primary), var(--accent))' }}
               >
                 {(email ?? '?')[0].toUpperCase()}
               </div>
-              <div>
-                <h1 className="text-2xl font-bold text-[var(--text)] font-heading">{email}</h1>
-                <div className="flex items-center gap-3 mt-1">
+              <div className="min-w-0">
+                {/* break-all, because an email has no spaces to wrap at and
+                    would otherwise push the whole card wider than the phone. */}
+                <h1 className="text-lg sm:text-2xl font-bold text-[var(--text)] font-heading break-all">
+                  {email}
+                </h1>
+                {/* Wraps to two lines on a phone; the divider is a desktop-only
+                    flourish and is dropped rather than left dangling. */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
                   <span className="text-sm text-[var(--textSecondary)]">
                     Job: <span className="font-semibold text-[var(--text)]">{jobPrefix}</span>
                   </span>
-                  <span className="text-[var(--borderStrong)]">|</span>
+                  <span className="hidden sm:inline text-[var(--borderStrong)]">|</span>
                   <span className="text-sm text-[var(--textSecondary)]">
                     Submitted:{' '}
                     <span className="font-medium text-[var(--text)]">
@@ -355,7 +361,7 @@ export function CandidateResultDetailPage() {
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3 flex-shrink-0">
               {/* The record of what the candidate actually wrote — for a hiring
                   decision, or for answering a disputed score. */}
               <Button
@@ -487,14 +493,14 @@ export function CandidateResultDetailPage() {
               key={tab}
               disabled={disabled}
               onClick={() => setActiveTab(tab)}
-              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-xl transition-all duration-200
+              className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2.5 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200
                 ${isActive ? 'bg-[var(--primary)] text-white shadow-sm' : ''}
                 ${!isActive && !disabled ? 'text-[var(--textSecondary)] hover:text-[var(--text)] hover:bg-[var(--bgMuted)]' : ''}
                 ${disabled ? 'text-[var(--textQuaternary)] cursor-not-allowed' : ''}
               `}
             >
-              {icon}
-              <span className="capitalize">{tab}</span>
+              <span className="flex-shrink-0">{icon}</span>
+              <span className="capitalize truncate">{tab}</span>
             </button>
           );
         })}
@@ -993,8 +999,9 @@ function AptitudeTab({
                 caption="Aptitude summary"
                 detail={`${result.score}${result.totalMarks ? `/${result.totalMarks}` : ''} marks · ${stats.correct}/${stats.total} correct`}
               />
-              <div className="flex flex-col items-end gap-1.5">
-                <div className="flex flex-wrap gap-2">
+              {/* Stacked and full-width on a phone — see the coding tab. */}
+              <div className="flex flex-col items-stretch sm:items-end gap-1.5 w-full sm:w-auto">
+                <div className="flex flex-col sm:flex-row flex-wrap gap-2">
                   <Button
                     variant="secondary"
                     size="sm"
@@ -1015,7 +1022,7 @@ function AptitudeTab({
                 </div>
                 {/* Say when the download is a reconstruction, not the original. */}
                 {paper.length === 0 && exportPaper.length > 0 && (
-                  <p className="text-[11px] text-[var(--textTertiary)] text-right max-w-xs">
+                  <p className="text-[11px] text-[var(--textTertiary)] text-left sm:text-right sm:max-w-xs">
                     Original paper unavailable — rebuilt from the stored result, without the
                     answer options.
                   </p>
@@ -1274,8 +1281,10 @@ function CodingTab({
                 caption="Programming summary"
                 detail={`${stats.passedTests}/${stats.totalTests} test cases · ${stats.solved}/${stats.totalQ} solved`}
               />
-              <div className="flex flex-col items-end gap-1.5">
-                <div className="flex flex-wrap gap-2">
+              {/* Left-aligned and full-width on a phone: two right-aligned
+                  buttons with long labels overflowed the card. */}
+              <div className="flex flex-col items-stretch sm:items-end gap-1.5 w-full sm:w-auto">
+                <div className="flex flex-col sm:flex-row flex-wrap gap-2">
                   <Button
                     variant="secondary"
                     size="sm"
@@ -1296,7 +1305,7 @@ function CodingTab({
                 </div>
                 {/* Say when the download is a reconstruction, not the original. */}
                 {paper.length === 0 && exportPaper.length > 0 && (
-                  <p className="text-[11px] text-[var(--textTertiary)] text-right max-w-xs">
+                  <p className="text-[11px] text-[var(--textTertiary)] text-left sm:text-right sm:max-w-xs">
                     Original paper unavailable — rebuilt from the stored result, so problem
                     statements may be partial.
                   </p>
