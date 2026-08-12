@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Loader2,
@@ -27,9 +27,16 @@ import {
   scoreColor,
 } from '@/utils/result.utils';
 import type { JobPostDTO } from '@/types/job.types';
-import type { RawCodingQuestion } from '@/types/assessment.types';
+import type { Assessment, RawCodingQuestion } from '@/types/assessment.types';
 import type { Result, AptitudeAnswer, CodingAnswer } from '@/types/result.types';
 import type { CodeSubmissionResponse } from '@/types/compiler.types';
+
+/** Tolerate both a bare array and an `{ data: [...] }` envelope from the API. */
+function asAssessmentList(body: unknown): Assessment[] {
+  if (Array.isArray(body)) return body as Assessment[];
+  const inner = (body as { data?: unknown })?.data;
+  return Array.isArray(inner) ? (inner as Assessment[]) : [];
+}
 
 /** Results/answers are stored as a JSON string on the result row. */
 function parseAnswers<T>(raw?: string): T[] {
@@ -42,6 +49,12 @@ function parseAnswers<T>(raw?: string): T[] {
   }
 }
 
+/** A candidate's coding assessment on the selected job, if they were set one. */
+interface CodingAssignment {
+  email: string;
+  id?: number;
+}
+
 // ── Aggregated candidate row ─────────────────────────────────────────
 interface CandidateRow {
   email: string;
@@ -49,6 +62,8 @@ interface CandidateRow {
   codingResult?: Result;
   codeSubmissions: CodeSubmissionResponse[];
   overallStatus: 'PASSED' | 'FAILED' | 'PARTIAL';
+  /** Coding was part of this candidate's exam, whether or not they sat it. */
+  hasCoding: boolean;
   /** Percentages derived per module — `Result.score` is marks, not a percent. */
   aptitudeScore: number | null;
   codingScore: number | null;
@@ -63,8 +78,12 @@ export function ResultsPage() {
   const [codeSubmissions, setCodeSubmissions] = useState<CodeSubmissionResponse[]>([]);
   /** The job's coding paper; null until loaded, and null if it could not be. */
   const [codingPaper, setCodingPaper] = useState<RawCodingQuestion[] | null>(null);
+  /** Emails with a coding assessment on this job, whether or not they sat it. */
+  const [codingAssigned, setCodingAssigned] = useState<Set<string>>(new Set());
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [loadingResults, setLoadingResults] = useState(false);
+  /** Discards a slow coding lookup that lands after the job selection moved on. */
+  const codingFetchToken = useRef(0);
 
   useEffect(() => {
     fetchJobs();
@@ -76,6 +95,8 @@ export function ResultsPage() {
     } else {
       setResults([]);
       setCodeSubmissions([]);
+      setCodingPaper(null);
+      setCodingAssigned(new Set());
     }
   }, [selectedPrefix]);
 
@@ -100,9 +121,10 @@ export function ResultsPage() {
         compilerService.getResultsByJobPrefix(selectedPrefix),
       ]);
       const rows = resultsRes.data ?? [];
+      const submissions = codeRes.data ?? [];
       setResults(rows);
-      setCodeSubmissions(codeRes.data ?? []);
-      void fetchCodingPaper(rows);
+      setCodeSubmissions(submissions);
+      void fetchCodingContext(rows, submissions);
     } catch {
       // Error toast auto-handled by interceptor
     } finally {
@@ -111,31 +133,67 @@ export function ResultsPage() {
   }
 
   /**
-   * The coding paper for this job, needed only for its test-case count.
+   * Who was set coding on this job, and the paper they were set.
    *
-   * Without it the score's denominator collapses to the tests the candidate
-   * happened to run, so someone who passed 5 of 30 cases scored 5/5 = 100% here
-   * while their own detail page said 17%. The number an admin shortlists on has
-   * to be the same one on both screens.
+   * The paper is needed for its test-case count. Without it the score's
+   * denominator collapses to the tests the candidate happened to run, so
+   * someone who passed 5 of 30 cases scored 5/5 = 100% here while their own
+   * detail page said 17%. The number an admin shortlists on has to be the same
+   * one on both screens.
    *
-   * Fetched once, from the first candidate who has a coding assessment, because
-   * every candidate on a job sits the same paper. That assumption is verified
-   * per row before the paper is used — see `paperMatches` below — so a job where
-   * it does not hold degrades to "no score" rather than to a wrong score.
+   * The assignment list is what makes an unsat coding module read 0% instead of
+   * "--". Keying off the CODING *result* meant a candidate who never opened the
+   * paper had no coding row at all, so their overall was their aptitude mark
+   * alone — 47% here against the 24% their detail page showed for the same
+   * exam. Never opening the paper passes none of its test cases, which is a
+   * real zero and has to pull the average down. Only a candidate with no coding
+   * assessment at all is genuinely unscoreable.
+   *
+   * Assignments are per candidate, hence one lookup each; the paper is fetched
+   * once, because every candidate on a job sits the same one. That assumption
+   * is verified per row before the paper is used — see `paperUsable` below — so
+   * a job where it does not hold degrades to "no score" rather than a wrong one.
    */
-  async function fetchCodingPaper(rows: Result[]) {
+  async function fetchCodingContext(rows: Result[], submissions: CodeSubmissionResponse[]) {
+    const token = ++codingFetchToken.current;
     setCodingPaper(null);
-    const email = rows.find((r) => r.assessmentType === 'CODING')?.candidateEmail;
-    if (!email) return;
+    setCodingAssigned(new Set());
+
+    const emails = Array.from(
+      new Set(
+        [...rows.map((r) => r.candidateEmail), ...submissions.map((s) => s.userEmail ?? '')].filter(
+          Boolean,
+        ),
+      ),
+    );
+    if (emails.length === 0) return;
+
+    // Silent: one unreachable candidate should cost that row its coding score,
+    // not stack a red toast per candidate over the table.
+    const assigned = await Promise.all(
+      emails.map(async (email): Promise<CodingAssignment | null> => {
+        try {
+          const res = await assessmentService.getAllAssessmentsForCandidate(email, { silent: true });
+          const coding = asAssessmentList(res.data).find(
+            (a) => a.assessmentType === 'CODING' && a.jobPrefix === selectedPrefix,
+          );
+          return coding ? { email, id: coding.id } : null;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    if (token !== codingFetchToken.current) return;
+
+    const withCoding = assigned.filter((a): a is CodingAssignment => a !== null);
+    setCodingAssigned(new Set(withCoding.map((a) => a.email)));
+
+    const paperId = withCoding.find((a) => a.id != null)?.id;
+    if (paperId == null) return;
 
     try {
-      const assessments = await assessmentService.getAllAssessmentsForCandidate(email);
-      const coding = (assessments.data ?? []).find(
-        (a) => a.assessmentType === 'CODING' && a.jobPrefix === selectedPrefix,
-      );
-      if (!coding?.id) return;
-
-      const paper = await assessmentService.fetchQuestions(coding.id);
+      const paper = await assessmentService.fetchQuestions(paperId);
+      if (token !== codingFetchToken.current) return;
       setCodingPaper(parseAnswers<RawCodingQuestion>(paper.data?.questions));
     } catch {
       // Best effort. A missing paper costs the coding column its percentage,
@@ -151,6 +209,7 @@ export function ResultsPage() {
       email,
       codeSubmissions: [],
       overallStatus: 'PARTIAL',
+      hasCoding: false,
       aptitudeScore: null,
       codingScore: null,
       overallScore: null,
@@ -195,25 +254,34 @@ export function ResultsPage() {
       const aptitudeAnswers = parseAnswers<AptitudeAnswer>(row.aptitudeResult?.resultsJson);
       const codingAnswers = parseAnswers<CodingAnswer>(row.codingResult?.resultsJson);
 
+      row.hasCoding =
+        !!row.codingResult || row.codeSubmissions.length > 0 || codingAssigned.has(row.email);
+
       // The stored result holds one entry per question on the paper, so a
       // matching length is good evidence this candidate sat the paper we
       // fetched. If it does not match, the denominator is unknown and no
       // percentage is better than a wrong one.
-      const paperMatches =
-        codingPaper !== null && codingPaper.length > 0 && codingPaper.length === codingAnswers.length;
+      //
+      // No entries at all is not a mismatch — it is a candidate who never
+      // submitted. The paper alone then describes the attempt: every question
+      // on it unattempted, every test case failed, 0%.
+      const paperUsable =
+        codingPaper !== null &&
+        codingPaper.length > 0 &&
+        (codingAnswers.length === 0 ? row.hasCoding : codingPaper.length === codingAnswers.length);
 
       const codingRows = buildCodingRows(
-        paperMatches ? codingPaper : [],
+        paperUsable ? codingPaper : [],
         row.codeSubmissions,
         codingAnswers,
       );
       row.aptitudeScore = aptitudeScorePercent(row.aptitudeResult, aptitudeAnswers);
-      row.codingScore = paperMatches ? codingScorePercent(codingRows, row.codingResult) : null;
+      row.codingScore = paperUsable ? codingScorePercent(codingRows, row.codingResult) : null;
       row.overallScore = overallScorePercent([row.aptitudeScore, row.codingScore]);
     }
 
     return Array.from(map.values());
-  }, [results, codeSubmissions, codingPaper]);
+  }, [results, codeSubmissions, codingPaper, codingAssigned]);
 
   // ── Summary stats ────────────────────────────────────────────────────
   const stats = useMemo(() => {
@@ -443,7 +511,9 @@ function AptitudeCell({ row }: { row: CandidateRow }) {
 }
 
 function CodingCell({ row }: { row: CandidateRow }) {
-  if (!row.codingResult && row.codeSubmissions.length === 0) {
+  // "--" is reserved for candidates who were never set coding. One who was set
+  // it and never sat it scores 0, the same as on their detail page.
+  if (!row.hasCoding) {
     return <span className="text-[var(--textTertiary)] text-sm">--</span>;
   }
   return (

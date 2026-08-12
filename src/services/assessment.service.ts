@@ -55,10 +55,17 @@ export const assessmentService = {
     );
   },
 
-  /** Every assessment for a candidate, including attended and expired ones. */
-  getAllAssessmentsForCandidate(email: string) {
+  /**
+   * Every assessment for a candidate, including attended and expired ones.
+   *
+   * `silent` suppresses the global error toast — for background reads that fan
+   * out over a list of candidates, where one failure should cost that row its
+   * detail rather than stack a toast per candidate on screen.
+   */
+  getAllAssessmentsForCandidate(email: string, opts?: { silent?: boolean }) {
     return api.get<Assessment[]>(ENDPOINTS.ASSESSMENTS.GET_ASSESSMENTS, {
       params: { candidateEmail: email },
+      _skipErrorToast: opts?.silent,
     });
   },
 
