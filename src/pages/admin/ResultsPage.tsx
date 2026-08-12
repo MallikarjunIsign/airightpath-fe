@@ -27,6 +27,7 @@ import {
   scoreColor,
 } from '@/utils/result.utils';
 import type { JobPostDTO } from '@/types/job.types';
+import type { RawCodingQuestion } from '@/types/assessment.types';
 import type { Result, AptitudeAnswer, CodingAnswer } from '@/types/result.types';
 import type { CodeSubmissionResponse } from '@/types/compiler.types';
 
@@ -60,6 +61,8 @@ export function ResultsPage() {
   const [selectedPrefix, setSelectedPrefix] = usePersistentState('results:selectedPrefix', '');
   const [results, setResults] = useState<Result[]>([]);
   const [codeSubmissions, setCodeSubmissions] = useState<CodeSubmissionResponse[]>([]);
+  /** The job's coding paper; null until loaded, and null if it could not be. */
+  const [codingPaper, setCodingPaper] = useState<RawCodingQuestion[] | null>(null);
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [loadingResults, setLoadingResults] = useState(false);
 
@@ -96,12 +99,47 @@ export function ResultsPage() {
         assessmentService.getResultsByJobPrefix(selectedPrefix),
         compilerService.getResultsByJobPrefix(selectedPrefix),
       ]);
-      setResults(resultsRes.data ?? []);
+      const rows = resultsRes.data ?? [];
+      setResults(rows);
       setCodeSubmissions(codeRes.data ?? []);
+      void fetchCodingPaper(rows);
     } catch {
       // Error toast auto-handled by interceptor
     } finally {
       setLoadingResults(false);
+    }
+  }
+
+  /**
+   * The coding paper for this job, needed only for its test-case count.
+   *
+   * Without it the score's denominator collapses to the tests the candidate
+   * happened to run, so someone who passed 5 of 30 cases scored 5/5 = 100% here
+   * while their own detail page said 17%. The number an admin shortlists on has
+   * to be the same one on both screens.
+   *
+   * Fetched once, from the first candidate who has a coding assessment, because
+   * every candidate on a job sits the same paper. That assumption is verified
+   * per row before the paper is used — see `paperMatches` below — so a job where
+   * it does not hold degrades to "no score" rather than to a wrong score.
+   */
+  async function fetchCodingPaper(rows: Result[]) {
+    setCodingPaper(null);
+    const email = rows.find((r) => r.assessmentType === 'CODING')?.candidateEmail;
+    if (!email) return;
+
+    try {
+      const assessments = await assessmentService.getAllAssessmentsForCandidate(email);
+      const coding = (assessments.data ?? []).find(
+        (a) => a.assessmentType === 'CODING' && a.jobPrefix === selectedPrefix,
+      );
+      if (!coding?.id) return;
+
+      const paper = await assessmentService.fetchQuestions(coding.id);
+      setCodingPaper(parseAnswers<RawCodingQuestion>(paper.data?.questions));
+    } catch {
+      // Best effort. A missing paper costs the coding column its percentage,
+      // which is the honest outcome — never a number derived from a guess.
     }
   }
 
@@ -152,20 +190,30 @@ export function ResultsPage() {
       }
 
       // Aptitude ships raw marks and coding ships 0, so both are re-derived
-      // here — the same helpers the result detail page uses, so the two agree.
+      // here with the same helpers the result detail page uses — and, now, the
+      // same question paper, without which the two could not agree.
       const aptitudeAnswers = parseAnswers<AptitudeAnswer>(row.aptitudeResult?.resultsJson);
+      const codingAnswers = parseAnswers<CodingAnswer>(row.codingResult?.resultsJson);
+
+      // The stored result holds one entry per question on the paper, so a
+      // matching length is good evidence this candidate sat the paper we
+      // fetched. If it does not match, the denominator is unknown and no
+      // percentage is better than a wrong one.
+      const paperMatches =
+        codingPaper !== null && codingPaper.length > 0 && codingPaper.length === codingAnswers.length;
+
       const codingRows = buildCodingRows(
-        [],
+        paperMatches ? codingPaper : [],
         row.codeSubmissions,
-        parseAnswers<CodingAnswer>(row.codingResult?.resultsJson),
+        codingAnswers,
       );
       row.aptitudeScore = aptitudeScorePercent(row.aptitudeResult, aptitudeAnswers);
-      row.codingScore = codingScorePercent(codingRows, row.codingResult);
+      row.codingScore = paperMatches ? codingScorePercent(codingRows, row.codingResult) : null;
       row.overallScore = overallScorePercent([row.aptitudeScore, row.codingScore]);
     }
 
     return Array.from(map.values());
-  }, [results, codeSubmissions]);
+  }, [results, codeSubmissions, codingPaper]);
 
   // ── Summary stats ────────────────────────────────────────────────────
   const stats = useMemo(() => {
