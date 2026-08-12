@@ -51,6 +51,9 @@ export const MESSAGES = {
     codeUnchanged:
       'This is still the starter template. Write your solution before submitting — submitting locks the question.',
     compileTimeout: 'Your code took too long to run. Check for an infinite loop and try again.',
+    // Distinct from a compile failure: the code never got judged at all.
+    compileNetworkLost:
+      "Couldn't reach the code runner — check your connection. Your code is safe; try again.",
     compileFailed: 'Could not run your code. Please try again.',
     // Our compiler host is missing a toolchain — the candidate's code is fine,
     // so this must not read as a mistake they made.

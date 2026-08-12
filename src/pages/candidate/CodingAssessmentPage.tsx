@@ -145,6 +145,16 @@ export function CodingAssessmentPage() {
 
   // Refs
   const isSubmittingRef = useRef(false);
+  /**
+   * Re-entry guards for the three compiler actions.
+   *
+   * A button's `disabled` prop only bites after React re-renders, so two fast
+   * clicks can both enter a handler and fire two identical requests. A ref
+   * flips synchronously and closes that window.
+   */
+  const submittingQuestionRef = useRef(false);
+  const savingQuestionRef = useRef(false);
+  const runningRef = useRef(false);
   const isDesktop = useIsDesktop();
   const initRef = useRef(false);
   const proctoring = PROCTORING_CONFIG;
@@ -484,8 +494,10 @@ export function CodingAssessmentPage() {
 
   // ── Compile & Run ────────────────────────────────────────────────
   const handleCompileAndRun = async () => {
+    if (runningRef.current) return;
     if (!hasCodeToSend()) return;
     const currentQ = questions[currentIndex];
+    runningRef.current = true;
     // A run is either graded against the paper's test cases, or a scratch run
     // against whatever the candidate typed — never both, since the compiler
     // takes one stdin. `runsCustomInput` decides which, and the toolbar says so
@@ -528,6 +540,13 @@ export function CodingAssessmentPage() {
         message = MESSAGES.exam.compileTimeout;
         kind = 'Timeout';
         tone = 'warning';
+      } else if (code === 'NETWORK_ERROR') {
+        // No response at all — the request never reached the server, or the
+        // reply never came back. Nothing to do with the code, and retrying is
+        // the right move, so it must not read as a compile failure.
+        message = MESSAGES.exam.compileNetworkLost;
+        kind = 'Connection';
+        tone = 'warning';
       } else if (code === 'COMPILER_UNAVAILABLE') {
         message = MESSAGES.exam.compilerUnavailable;
         kind = 'Unavailable';
@@ -541,6 +560,7 @@ export function CodingAssessmentPage() {
       setCurrentError({ exception: kind, message, fullTrace: message });
       showToast(message, tone);
     } finally {
+      runningRef.current = false;
       setRunning(false);
     }
   };
@@ -549,10 +569,12 @@ export function CodingAssessmentPage() {
   const handleSaveQuestion = async () => {
     const currentQ = questions[currentIndex];
     if (!currentQ || !assessment || !user?.email) return;
+    if (savingQuestionRef.current) return;
     // Empty only — saving an untouched template is a legitimate draft, and a
     // save is reversible in a way a submit is not.
     if (!hasCodeToSend()) return;
 
+    savingQuestionRef.current = true;
     setSavingQuestion(true);
     try {
       setCodePerQuestion((prev) => ({ ...prev, [currentQ.id]: code }));
@@ -574,6 +596,7 @@ export function CodingAssessmentPage() {
     } catch {
       // Error toast auto-handled
     } finally {
+      savingQuestionRef.current = false;
       setSavingQuestion(false);
     }
   };
@@ -582,6 +605,14 @@ export function CodingAssessmentPage() {
   const handleSubmitQuestion = async () => {
     const currentQ = questions[currentIndex];
     if (!currentQ || !assessment || !user?.email) return;
+    // Re-entry guard, not just the button's disabled state. `disabled` only
+    // takes effect after React re-renders, so two fast clicks can both enter
+    // this handler and file two submissions for the same question. A ref flips
+    // synchronously, so the second call returns immediately.
+    if (submittingQuestionRef.current) return;
+    // Already submitted — the question is locked and must never be re-sent,
+    // whatever the UI state says.
+    if (questionStatus[currentQ.id] === 'submitted') return;
     if (!hasCodeToSend()) return;
     // Stricter than save, because a submit locks the question: an untouched
     // template sent by accident would leave the candidate unable to answer it
@@ -591,6 +622,7 @@ export function CodingAssessmentPage() {
       return;
     }
 
+    submittingQuestionRef.current = true;
     setSubmittingQuestion(true);
     setCompilerResponse(null);
     setCurrentError(null);
@@ -614,8 +646,10 @@ export function CodingAssessmentPage() {
       setQuestionStatus((prev) => ({ ...prev, [currentQ.id]: 'submitted' }));
       showToast(MESSAGES.exam.questionSubmitted(currentIndex + 1), 'success');
     } catch {
-      // Error toast auto-handled
+      // Error toast auto-handled. The question stays unsubmitted so a failed
+      // attempt can be retried — the ref is released either way below.
     } finally {
+      submittingQuestionRef.current = false;
       setSubmittingQuestion(false);
     }
   };

@@ -2,11 +2,26 @@ export const APP_CONFIG = {
   HTTP_TIMEOUT_MS: 30000,
   AI_GENERATION_TIMEOUT_MS: 330000,
   ASSIGN_TIMEOUT_MS: 120000,
-  // The backend now kills a runaway program in ~5s and answers, so the old
-  // 2-minute ceiling only meant a candidate sat watching a spinner when the
-  // request itself was lost. Kept well above the execution limit so a cold
-  // container or slow network is not mistaken for an infinite loop.
-  COMPILE_TIMEOUT_MS: 30000,
+  /**
+   * Derived from the server's own limits, not picked by feel. Backend config:
+   *   compiler.total-timeout-seconds = 45   (whole submission, execution only)
+   *   compiler.max-parallel-runs     = 4    (concurrent submissions)
+   *
+   * Execution is bounded at 45s, but a submission arriving when all four slots
+   * are busy waits for one — so the worst honest round trip is ~45s queued plus
+   * ~45s running. 120s covers that with headroom.
+   *
+   * The direction of the inequality is what matters: below the server's bound,
+   * this client aborts work the server is still validly doing, and the
+   * candidate gets a generic "try again" for a perfectly good program because
+   * the typed error was never read. Above it, the server's own limit always
+   * fires first and every failure arrives with a real reason attached.
+   *
+   * A client timeout cannot simply be removed — without one a request lost in
+   * transit spins forever. But if real responses ever approach 180s, that is
+   * backend capacity to fix, not a number to raise here.
+   */
+  COMPILE_TIMEOUT_MS: 120000,
   TOKEN_EXPIRY_SKEW_SECONDS: 30,
   MAX_FILE_SIZE_MB: 2,
   MAX_FILE_SIZE_BYTES: 2 * 1024 * 1024,
