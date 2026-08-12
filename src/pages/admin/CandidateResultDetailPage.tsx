@@ -232,6 +232,15 @@ export function CandidateResultDetailPage() {
   // totals, not just the ones that were submitted.
   const codingStats = useMemo(() => summarizeCoding(codingRows), [codingRows]);
 
+  /**
+   * When this candidate submitted, from whichever module they sat.
+   *
+   * Reading only the aptitude result showed "--" for anyone assigned coding
+   * alone — they had submitted, the page just looked in one place. The answer
+   * sheet export already fell back like this; the screen did not.
+   */
+  const submittedAt = aptitudeResult?.submittedAt ?? codingResult?.submittedAt;
+
   const overallStatus = (() => {
     const a = aptitudeResult?.status;
     const c = codingResult?.status;
@@ -271,7 +280,7 @@ export function CandidateResultDetailPage() {
     () => ({
       candidateEmail: email ?? '',
       jobPrefix: jobPrefix ?? '',
-      submittedAt: aptitudeResult?.submittedAt ?? codingResult?.submittedAt,
+      submittedAt,
       overallStatus,
       overallScore,
       aptitude: aptitudeResult
@@ -292,6 +301,7 @@ export function CandidateResultDetailPage() {
       jobPrefix,
       aptitudeResult,
       codingResult,
+      submittedAt,
       overallStatus,
       overallScore,
       aptitudeScore,
@@ -349,8 +359,8 @@ export function CandidateResultDetailPage() {
                   <span className="text-sm text-[var(--textSecondary)]">
                     Submitted:{' '}
                     <span className="font-medium text-[var(--text)]">
-                      {aptitudeResult?.submittedAt
-                        ? new Date(aptitudeResult.submittedAt).toLocaleDateString('en-US', {
+                      {submittedAt
+                        ? new Date(submittedAt).toLocaleDateString('en-US', {
                             year: 'numeric',
                             month: 'short',
                             day: 'numeric',
@@ -457,18 +467,14 @@ export function CandidateResultDetailPage() {
           chart={
             <KpiValue
               value={
-                aptitudeResult?.submittedAt
-                  ? new Date(aptitudeResult.submittedAt).toLocaleDateString('en-US', {
+                submittedAt
+                  ? new Date(submittedAt).toLocaleDateString('en-US', {
                       month: 'short',
                       day: 'numeric',
                     })
                   : '--'
               }
-              sub={
-                aptitudeResult?.submittedAt
-                  ? new Date(aptitudeResult.submittedAt).getFullYear().toString()
-                  : ''
-              }
+              sub={submittedAt ? new Date(submittedAt).getFullYear().toString() : ''}
             />
           }
         />
