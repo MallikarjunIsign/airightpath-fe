@@ -1,9 +1,10 @@
-import { Mail, Phone, Clock, Briefcase, MapPin, CheckCircle, XCircle, FileText, Loader2, Eye } from 'lucide-react';
+import { Mail, Phone, Clock, CalendarClock, Briefcase, MapPin, CheckCircle, XCircle, FileText, Loader2, Eye } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ReferralFields } from '@/components/application/ReferralFields';
 import { getAppEmail } from '@/utils/application.utils';
+import { formatDateTime, formatRelativeTime } from '@/utils/format.utils';
 import { hasReferral, referralStatusLabel } from '@/utils/referral.utils';
 import type { JobApplicationDTO } from '@/types/job.types';
 
@@ -122,6 +123,25 @@ export function CandidateDetailModal({
                 <p className="text-[var(--text)] font-medium">{candidate.jobRole || 'N/A'}</p>
               </div>
             </div>
+            {/* When they applied. The status column says where a candidate is,
+                never how long they have been waiting there — which is what
+                decides who to chase. Absent on applications filed before the
+                API returned it, so it is hidden rather than shown as "N/A". */}
+            {candidate.createdAt && (
+              <div className="flex items-center gap-2 text-sm">
+                <CalendarClock size={16} className="text-[var(--primary)] flex-shrink-0" />
+                <div>
+                  <p className="text-[var(--textTertiary)] text-xs">Applied On</p>
+                  <p className="text-[var(--text)] font-medium">
+                    {formatDateTime(candidate.createdAt)}
+                    <span className="text-[var(--textTertiary)] font-normal">
+                      {' '}
+                      ({formatRelativeTime(candidate.createdAt)})
+                    </span>
+                  </p>
+                </div>
+              </div>
+            )}
             <ReferralFields
               referralName={candidate.referralName}
               referralId={candidate.referralId}

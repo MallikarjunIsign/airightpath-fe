@@ -282,6 +282,15 @@ export function AdminJobsPage() {
                             : `Deadline: ${formatDate(job.applicationDeadline)}`}
                         </span>
                       </div>
+                      {/* How long this posting has been open. Omitted for jobs
+                          created before the API returned it, rather than shown
+                          as a blank or an epoch date. */}
+                      {job.createdAt && (
+                        <div className="flex items-center gap-2 text-sm text-[var(--textSecondary)] min-w-0">
+                          <Clock size={14} className="flex-shrink-0" />
+                          <span className="truncate">Posted: {formatDate(job.createdAt)}</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Action Buttons — 2×2 so four labelled actions never
@@ -493,6 +502,17 @@ export function AdminJobsPage() {
                   : `Application Deadline: ${formatDate(selectedJob.applicationDeadline)}`}
               </span>
             </div>
+
+            {/* When the posting went live — the other half of "how long has
+                this been open", which the deadline alone does not answer. */}
+            {selectedJob.createdAt && (
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
+                <Clock size={16} className="text-[var(--primary)] flex-shrink-0" />
+                <span className="text-sm font-medium text-[var(--text)]">
+                  Posted on {formatDate(selectedJob.createdAt)}
+                </span>
+              </div>
+            )}
 
             {/* Shareable apply link */}
             <div className="p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
