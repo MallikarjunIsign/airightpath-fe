@@ -178,6 +178,7 @@ export function CodingAssessmentPage() {
     tabWarnings,
     warningCount,
     fullscreenExitCount,
+    noiseWarnings,
     totalWarnings,
     faceDetected,
     multipleFaces,
@@ -821,6 +822,8 @@ export function CodingAssessmentPage() {
                     </p>
                   )}
                   {proctoring.fullscreen.enabled && <p>Fullscreen exits: {fullscreenExitCount}</p>}
+                  {/* No limit shown: noise warns but never auto-submits. */}
+                  {proctoring.noise.enabled && <p>Noise warnings: {noiseWarnings}</p>}
                 </div>
                 <p className="mt-1.5 text-[10px] text-[var(--textSecondary)] border-t border-[var(--border)] pt-1.5">
                   Reaching a limit auto-submits your exam. Do not reload this page — the

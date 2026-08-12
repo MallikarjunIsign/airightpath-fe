@@ -30,6 +30,8 @@ export const MESSAGES = {
     fullscreenExited: (count: number) => `Warning: Fullscreen exited! (${count})`,
     tabSwitch: (counter: string) => `Warning: Tab switch detected! (${counter})`,
     faceNotDetected: 'Warning: Your face is not detected!',
+    // Not "move somewhere quieter" — leaving your seat mid-exam is its own violation.
+    tooNoisy: 'Warning: Too much background noise. Please keep your surroundings quiet.',
     multipleFaces: (count: number) => `Warning: Multiple faces detected (${count})!`,
     lookingAway: (direction: string) => `Warning: Please keep looking at the screen (${direction}).`,
     autoSubmitting: (reason: string) => `Auto-submitting: ${reason}`,

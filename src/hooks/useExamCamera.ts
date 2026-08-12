@@ -17,6 +17,8 @@ interface UseExamCameraResult {
   /** Stops all tracks and resets to idle. */
   stop: () => void;
   streamRef: React.MutableRefObject<MediaStream | null>;
+  /** Reactive view of the same stream, for hooks that take one as an argument. */
+  stream: MediaStream | null;
 }
 
 const STATUS_MESSAGES: Record<Exclude<CameraStatus, 'active' | 'idle'>, string> = {
@@ -36,12 +38,16 @@ const STATUS_MESSAGES: Record<Exclude<CameraStatus, 'active' | 'idle'>, string> 
 export function useExamCamera(): UseExamCameraResult {
   const [status, setStatus] = useState<CameraStatus>('idle');
   const streamRef = useRef<MediaStream | null>(null);
+  // The same stream as the ref, held in state so hooks that consume it (the
+  // noise meter) re-run when it arrives. A ref alone never triggers that.
+  const [stream, setStream] = useState<MediaStream | null>(null);
 
   const stop = useCallback(() => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
+    setStream(null);
     setStatus('idle');
   }, []);
 
@@ -60,14 +66,26 @@ export function useExamCamera(): UseExamCameraResult {
 
     setStatus('requesting');
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      // Audio is asked for alongside video so the exam can keep reading room
+      // noise — the instructions promise the mic stays on throughout. It is
+      // best-effort: a machine with no working microphone must still be able to
+      // sit the exam, so a combined request that fails is retried video-only
+      // rather than failing the camera and blocking the candidate.
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      }
       streamRef.current = stream;
+      setStream(stream);
 
       // If the user revokes access or unplugs the camera mid-exam, reflect it.
       stream.getVideoTracks().forEach((track) => {
         track.onended = () => {
           if (streamRef.current === stream) {
             streamRef.current = null;
+            setStream(null);
             setStatus('denied');
           }
         };
@@ -101,5 +119,5 @@ export function useExamCamera(): UseExamCameraResult {
 
   const message = status === 'active' || status === 'idle' ? null : STATUS_MESSAGES[status];
 
-  return { status, message, start, stop, streamRef };
+  return { status, message, start, stop, streamRef, stream };
 }

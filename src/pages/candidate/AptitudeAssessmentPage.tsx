@@ -104,6 +104,7 @@ export function AptitudeAssessmentPage() {
     tabWarnings,
     warningCount,
     fullscreenExitCount,
+    noiseWarnings,
     totalWarnings,
     faceDetected,
     multipleFaces,
@@ -377,6 +378,8 @@ export function AptitudeAssessmentPage() {
                     </p>
                   )}
                   {proctoring.fullscreen.enabled && <p>Fullscreen exits: {fullscreenExitCount}</p>}
+                  {/* No limit shown: noise warns but never auto-submits. */}
+                  {proctoring.noise.enabled && <p>Noise warnings: {noiseWarnings}</p>}
                 </div>
                 <p className="mt-2 text-[11px] text-[var(--textSecondary)] border-t border-[var(--border)] pt-2">
                   Reaching a limit auto-submits your exam. Do not reload this page — the

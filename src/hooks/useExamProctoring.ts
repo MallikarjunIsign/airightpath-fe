@@ -5,8 +5,12 @@ import { usePageVisibility } from '@/hooks/usePageVisibility';
 import { useFaceDetection } from '@/hooks/useFaceDetection';
 import { useExamCamera } from '@/hooks/useExamCamera';
 import { useBeforeUnload } from '@/hooks/useBeforeUnload';
+import { useMicNoiseLevel } from '@/hooks/useMicNoiseLevel';
 import { PROCTORING_CONFIG } from '@/config/proctoring.config';
 import { MESSAGES } from '@/config/messages';
+
+/** Shortest gap between two "too noisy" toasts. */
+const NOISE_WARNING_COOLDOWN_MS = 60_000;
 
 interface UseExamProctoringOptions {
   /** True while the exam page shows its loading spinner (the <video> isn't mounted yet). */
@@ -71,6 +75,36 @@ export function useExamProctoring({ loading, onAutoSubmit }: UseExamProctoringOp
     },
   });
 
+  // ── Room noise ────────────────────────────────────────────────────
+  // Warn-only, deliberately. A candidate cannot always control a barking dog or
+  // a passing siren, so noise raises the same visible warning as a tab switch
+  // but never auto-submits — losing an exam to a neighbour's drill would be
+  // punishing the wrong person. It is counted so a reviewer can see it later.
+  const [noiseWarnings, setNoiseWarnings] = useState(0);
+  const noise = useMicNoiseLevel(config.noise.enabled ? camera.stream : null);
+  const lastNoiseWarnAtRef = useRef(0);
+  const prevNoiseBandRef = useRef(noise.band);
+
+  useEffect(() => {
+    const previous = prevNoiseBandRef.current;
+    prevNoiseBandRef.current = noise.band;
+
+    if (!config.noise.enabled || !proctoringActiveRef.current) return;
+    // Only the moment it crosses into loud — the band already needs the level
+    // sustained for `sustainMs`, so this cannot fire on a cough or a door.
+    if (noise.band !== 'loud' || previous === 'loud') return;
+
+    // One warning per minute at most. Sustained noise is a single situation,
+    // not a stream of separate offences, and a toast every few seconds would
+    // bury the exam under its own alerts.
+    const now = Date.now();
+    if (now - lastNoiseWarnAtRef.current < NOISE_WARNING_COOLDOWN_MS) return;
+    lastNoiseWarnAtRef.current = now;
+
+    setNoiseWarnings((n) => n + 1);
+    showToast(MESSAGES.proctoring.tooNoisy, 'warning');
+  }, [noise.band, config.noise.enabled, showToast]);
+
   const { loadModels, startDetection, stopDetection, warningCount, faceDetected, multipleFaces } = useFaceDetection({
     maxWarnings:
       config.eyeDetection.maxBeforeAutoSubmit > 0
@@ -87,7 +121,7 @@ export function useExamProctoring({ loading, onAutoSubmit }: UseExamProctoringOp
     onLookingAway: (direction) => showToast(MESSAGES.proctoring.lookingAway(direction), 'warning'),
   });
 
-  const totalWarnings = tabWarnings + warningCount + fullscreenExitCount;
+  const totalWarnings = tabWarnings + warningCount + fullscreenExitCount + noiseWarnings;
 
   // Acquires the camera (prompts for permission). Attaching the stream to the
   // <video> + starting detection happens in the effect below, once the element
@@ -149,6 +183,9 @@ export function useExamProctoring({ loading, onAutoSubmit }: UseExamProctoringOp
     tabWarnings,
     warningCount,
     fullscreenExitCount,
+    noiseWarnings,
+    /** Live band, so a page can show a "too noisy" indicator as it happens. */
+    noiseBand: noise.band,
     totalWarnings,
     faceDetected,
     multipleFaces,
