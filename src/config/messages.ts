@@ -40,6 +40,14 @@ export const MESSAGES = {
     codingSubmitted: 'Coding exam submitted successfully!',
     questionSaved: (n: number) => `Question ${n} saved!`,
     questionSubmitted: (n: number) => `Question ${n} submitted!`,
+    // Caught before the request: the compiler rejects an empty script, and its
+    // error reads as "your code is broken" rather than "you haven't written
+    // any", which sends the candidate hunting for a bug that isn't there.
+    codeRequired: 'Write some code first — the editor is empty.',
+    // Submitting locks the question, so an untouched template must not go
+    // through by accident: there would be no way back to answer it.
+    codeUnchanged:
+      'This is still the starter template. Write your solution before submitting — submitting locks the question.',
     compileTimeout: 'Your code took too long to run. Check for an infinite loop and try again.',
     compileFailed: 'Could not run your code. Please try again.',
     // Our compiler host is missing a toolchain — the candidate's code is fine,

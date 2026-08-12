@@ -49,6 +49,7 @@ import { useIsDesktop } from '@/hooks/useIsDesktop';
 import { ROUTES } from '@/config/routes';
 import { formatTimer } from '@/utils/format.utils';
 import { computeExamMinutes } from '@/utils/exam-duration.utils';
+import { LANGUAGE_SKELETONS, isSkeletonCode } from '@/utils/code.utils';
 import {
   errorKind,
   isGraded,
@@ -69,61 +70,12 @@ const MONACO_LANG_MAP: Record<string, string> = {
   javascript: 'javascript',
 };
 
-const LANGUAGE_SKELETONS: Record<string, string> = {
-  java: `import java.util.*;
-
-public class Solution {
-    public static void main(String[] args) {
-        Scanner sc = new Scanner(System.in);
-        // Write your solution here
-
-        sc.close();
-    }
-}
-`,
-  python: `def solve():
-    # Write your solution here
-    pass
-
-if __name__ == "__main__":
-    solve()
-`,
-  c: `#include <stdio.h>
-
-int main() {
-    // Write your solution here
-
-    return 0;
-}
-`,
-  cpp: `#include <iostream>
-using namespace std;
-
-int main() {
-    // Write your solution here
-
-    return 0;
-}
-`,
-  javascript: `const readline = require('readline');
-const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-});
-
-const lines = [];
-rl.on('line', (line) => lines.push(line));
-rl.on('close', () => {
-    // Write your solution here
-});
-`,
-};
-
-function isSkeletonCode(code: string): boolean {
-  return Object.values(LANGUAGE_SKELETONS).some(
-    (skeleton) => code.trim() === skeleton.trim()
-  );
-}
+// LANGUAGE_SKELETONS and isSkeletonCode were duplicated here, byte-for-byte,
+// alongside the copies in utils/code.utils.ts. Two definitions of "the
+// candidate never touched this" is a hazard: the admin result view grades
+// attempted/not-attempted with that copy while the exam offered this one, so
+// any drift between the two would score a candidate against a template they
+// were never shown. One source now, imported below.
 
 function normalizeCodingQuestions(raw: RawCodingQuestion[]): CodingQuestion[] {
   return raw.map((q, idx) => ({
@@ -503,8 +455,23 @@ export function CodingAssessmentPage() {
     setActiveOutputTab('output');
   };
 
+  /**
+   * Guards every path that ships the editor's contents to the compiler.
+   *
+   * An empty script is rejected server-side, and that failure comes back as a
+   * compiler error — which reads to the candidate as "your code is broken"
+   * rather than "you haven't written any", and sends them hunting for a bug
+   * that does not exist. Saying so here is both truthful and instant.
+   */
+  const hasCodeToSend = (): boolean => {
+    if (code.trim()) return true;
+    showToast(MESSAGES.exam.codeRequired, 'warning');
+    return false;
+  };
+
   // ── Compile & Run ────────────────────────────────────────────────
   const handleCompileAndRun = async () => {
+    if (!hasCodeToSend()) return;
     const currentQ = questions[currentIndex];
     setRunning(true);
     setCompilerResponse(null);
@@ -566,6 +533,9 @@ export function CodingAssessmentPage() {
   const handleSaveQuestion = async () => {
     const currentQ = questions[currentIndex];
     if (!currentQ || !assessment || !user?.email) return;
+    // Empty only — saving an untouched template is a legitimate draft, and a
+    // save is reversible in a way a submit is not.
+    if (!hasCodeToSend()) return;
 
     setSavingQuestion(true);
     try {
@@ -596,6 +566,14 @@ export function CodingAssessmentPage() {
   const handleSubmitQuestion = async () => {
     const currentQ = questions[currentIndex];
     if (!currentQ || !assessment || !user?.email) return;
+    if (!hasCodeToSend()) return;
+    // Stricter than save, because a submit locks the question: an untouched
+    // template sent by accident would leave the candidate unable to answer it
+    // at all. isSkeletonCode also covers empty, but that case was named above.
+    if (isSkeletonCode(code)) {
+      showToast(MESSAGES.exam.codeUnchanged, 'warning');
+      return;
+    }
 
     setSubmittingQuestion(true);
     setCompilerResponse(null);
@@ -928,10 +906,15 @@ export function CodingAssessmentPage() {
                 Compile & Run
               </Button>
               <div className="w-px h-6 bg-[var(--border)]" />
-              <Button size="sm" variant="outline" onClick={handleSaveQuestion} isLoading={savingQuestion} disabled={isQuestionLocked || !code.trim() || isSkeletonCode(code)} leftIcon={<Save size={14} />}>
+              {/* Disabled only when the question is locked. Greying these out
+                  for empty or untouched code left the candidate with two dead
+                  buttons and no reason why — the handlers now say what is
+                  missing instead, which is the same call the instructions
+                  screen makes about its Start button. */}
+              <Button size="sm" variant="outline" onClick={handleSaveQuestion} isLoading={savingQuestion} disabled={isQuestionLocked} leftIcon={<Save size={14} />}>
                 Save
               </Button>
-              <Button size="sm" variant="primary" onClick={handleSubmitQuestion} isLoading={submittingQuestion} disabled={isQuestionLocked || !code.trim() || isSkeletonCode(code)} leftIcon={<Send size={14} />}>
+              <Button size="sm" variant="primary" onClick={handleSubmitQuestion} isLoading={submittingQuestion} disabled={isQuestionLocked} leftIcon={<Send size={14} />}>
                 Submit Q{currentIndex + 1}
               </Button>
             </div>
