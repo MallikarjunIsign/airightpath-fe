@@ -15,13 +15,37 @@ export function isEndpointMissing(error: unknown): boolean {
   return status === 404 || status === 405 || status === 501;
 }
 
+/**
+ * The prefix the server actually assigned, from a createJob response.
+ *
+ * Returns null rather than guessing: the share link is handed to candidates, so
+ * a prefix we are unsure of would send them to a job that does not exist.
+ * Tolerates both a bare entity and an { data: … } envelope.
+ */
+export function createdJobPrefix(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null;
+  const direct = (body as JobPostDTO).jobPrefix;
+  if (typeof direct === 'string' && direct.trim()) return direct;
+  const wrapped = (body as { data?: JobPostDTO }).data?.jobPrefix;
+  return typeof wrapped === 'string' && wrapped.trim() ? wrapped : null;
+}
+
 export const jobService = {
   getAllJobs() {
     return api.get<JobPostDTO[]>(ENDPOINTS.JOBS.GET_ALL);
   },
 
+  /**
+   * Create a job post.
+   *
+   * The response matters: the server does not store the prefix the admin typed.
+   * It upper-cases it and appends the next id (`FE-DEV-2026-005` becomes
+   * `FE-DEV-2026-005-1292`), so the created job's real prefix is only knowable
+   * from what comes back. Typed as a bare entity because the endpoint returns
+   * one, though `createdJobPrefix` reads it defensively.
+   */
   createJob(data: JobPostDTO) {
-    return api.post<ApiResponse<JobPostDTO>>(ENDPOINTS.JOBS.CREATE, data);
+    return api.post<JobPostDTO | ApiResponse<JobPostDTO>>(ENDPOINTS.JOBS.CREATE, data);
   },
 
   /**

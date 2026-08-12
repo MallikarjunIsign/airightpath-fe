@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Send, Briefcase, CheckCircle, Save, ArrowLeft, Loader2 } from 'lucide-react';
 import { jobPostSchema, jobEditSchema } from '@/config/validation';
-import { jobService, isEndpointMissing } from '@/services/job.service';
+import { jobService, isEndpointMissing, createdJobPrefix } from '@/services/job.service';
 import { extractApiError } from '@/services/api.service';
 import { useToast } from '@/components/ui/Toast';
 import { Button } from '@/components/ui/Button';
@@ -196,9 +196,14 @@ export function JobPostFormPage() {
         return;
       }
 
-      await jobService.createJob(data);
+      const created = await jobService.createJob(data);
       showToast(MESSAGES.admin.jobPost.posted, 'success');
-      setCreatedPrefix(data.jobPrefix);
+      // The server's prefix, never the typed one: it upper-cases the input and
+      // appends the next id, so `data.jobPrefix` addresses no job that exists
+      // and the shareable link built from it 404s for every candidate sent it.
+      // Null when the response carries no prefix — the panel is then skipped
+      // rather than shown with a link we cannot vouch for.
+      setCreatedPrefix(createdJobPrefix(created.data));
       reset();
     } catch (error) {
       if (isEdit) {
