@@ -1057,23 +1057,35 @@ export function CodingAssessmentPage() {
                     </pre>
                   )}
 
-                  {/* Test case results */}
-                  {compilerResponse.testResults?.some(isGraded) && !hasError && (
+                  {/* Test case results.
+                      Gated on the code having COMPILED, not on hasError: a
+                      runtime error inside one case used to hide the whole list,
+                      including cases that had already passed. Nothing compiled
+                      means there are no results to show; anything else has
+                      per-case outcomes worth seeing. */}
+                  {compilerResponse.testResults?.some(isGraded) && !isCompilationError && (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <h4 className="text-sm font-semibold text-gray-400">Test Results</h4>
-                        {/* Explicit true/false — `passed` is null on ungraded
-                            runs, which a truthiness test reads as "Some Failed". */}
-                        {compilerResponse.passed === true && (
-                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-green-900/50 text-green-400">
-                            All Passed
-                          </span>
-                        )}
-                        {compilerResponse.passed === false && (
-                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-red-900/50 text-red-400">
-                            Some Failed
-                          </span>
-                        )}
+                        {/* A count, not just pass/fail: with the unsolved cases
+                            hidden, "how many are left" is the only progress
+                            signal the candidate has. */}
+                        {(() => {
+                          const graded = compilerResponse.testResults.filter(isGraded);
+                          const passedCount = graded.filter(isPassed).length;
+                          const allPassed = passedCount === graded.length;
+                          return (
+                            <span
+                              className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                                allPassed
+                                  ? 'bg-green-900/50 text-green-400'
+                                  : 'bg-red-900/50 text-red-400'
+                              }`}
+                            >
+                              {passedCount} / {graded.length} passed
+                            </span>
+                          );
+                        })()}
                       </div>
                       {compilerResponse.testResults.filter(isGraded).map((tr, idx) => (
                         <div
@@ -1102,20 +1114,39 @@ export function CodingAssessmentPage() {
                               </span>
                             )}
                           </div>
-                          {!isPassed(tr) && (
+                          {/* A passed case has nothing left to protect — its
+                              input and expected output are revealed as the
+                              reward for solving it. */}
+                          {isPassed(tr) && (
                             <div className="mt-2 space-y-1 pl-6">
                               <div className="flex gap-2 text-xs font-mono">
                                 <span className="text-gray-500 w-20 shrink-0">Input:</span>
-                                <span className="text-gray-400">{tr.input}</span>
+                                <span className="text-gray-300 whitespace-pre-wrap">{tr.input}</span>
                               </div>
                               <div className="flex gap-2 text-xs font-mono">
-                                <span className="text-gray-500 w-20 shrink-0">Expected:</span>
-                                <span className="text-green-300">{tr.expectedOutput}</span>
+                                <span className="text-gray-500 w-20 shrink-0">Output:</span>
+                                <span className="text-green-300 whitespace-pre-wrap">
+                                  {tr.expectedOutput}
+                                </span>
                               </div>
-                              <div className="flex gap-2 text-xs font-mono">
-                                <span className="text-gray-500 w-20 shrink-0">Got:</span>
-                                <span className="text-red-300">{tr.actualOutput}</span>
+                            </div>
+                          )}
+
+                          {!isPassed(tr) && (
+                            <div className="mt-2 space-y-1 pl-6">
+                              {/* Input and expected output stay sealed until the
+                                  case passes, so a candidate cannot read the
+                                  hidden tests off a failing run and hard-code
+                                  answers to them. */}
+                              <div className="flex items-center gap-2 text-xs text-gray-500">
+                                <Lock size={12} className="flex-shrink-0" />
+                                <span>
+                                  Input and expected output are hidden until this test passes.
+                                </span>
                               </div>
+                              {/* The error is about their code, not the hidden
+                                  test data, so it is safe — and necessary — to
+                                  show even while the case is locked. */}
                               {tr.errorInfo && (
                                 <div className="mt-1 space-y-1">
                                   <div className="text-xs text-red-400 font-mono">
