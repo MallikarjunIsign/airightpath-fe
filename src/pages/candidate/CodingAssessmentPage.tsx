@@ -121,6 +121,15 @@ export function CodingAssessmentPage() {
   const [submittingQuestion, setSubmittingQuestion] = useState(false);
   const [customInput, setCustomInput] = useState('');
   const [activeOutputTab, setActiveOutputTab] = useState<'output' | 'input'>('output');
+  /**
+   * Whether the next run feeds the candidate's own input instead of grading
+   * against the paper's test cases.
+   *
+   * Opt-in and explicit. Previously a question with test cases ignored the
+   * Custom Input tab entirely — anything typed there was silently discarded,
+   * which looks like the feature is broken rather than unavailable.
+   */
+  const [useCustomInput, setUseCustomInput] = useState(false);
 
   // Compiler output state — matches real BE response
   const [compilerResponse, setCompilerResponse] = useState<CodeSubmissionResponse | null>(null);
@@ -451,6 +460,9 @@ export function CodingAssessmentPage() {
     setCompilerResponse(null);
     setCurrentError(null);
     setCustomInput('');
+    // Reset with the input it belongs to — carrying it over would silently
+    // ungrade the first run on the next question.
+    setUseCustomInput(false);
     clearEditorMarkers();
     setActiveOutputTab('output');
   };
@@ -473,20 +485,23 @@ export function CodingAssessmentPage() {
   const handleCompileAndRun = async () => {
     if (!hasCodeToSend()) return;
     const currentQ = questions[currentIndex];
+    // A run is either graded against the paper's test cases, or a scratch run
+    // against whatever the candidate typed — never both, since the compiler
+    // takes one stdin. `runsCustomInput` decides which, and the toolbar says so
+    // before the button is pressed.
     setRunning(true);
     setCompilerResponse(null);
     setCurrentError(null);
     clearEditorMarkers();
     setActiveOutputTab('output');
     try {
-      const hasTests = (currentQ?.testCases?.length ?? 0) > 0;
       const res = await compilerService.runCode(
         {
           language,
           script: code,
-          ...(hasTests
-            ? { testCases: currentQ!.testCases }
-            : { customInput: customInput || currentQ?.sampleInput || '' }),
+          ...(runsCustomInput
+            ? { customInput: customInput || currentQ?.sampleInput || '' }
+            : { testCases: currentQ!.testCases }),
           assessmentId: assessment?.id,
           questionId: currentQ?.id,
           userEmail: user?.email ?? undefined,
@@ -676,6 +691,12 @@ export function CodingAssessmentPage() {
   const allSubmitted = submittedCount === questions.length;
 
   // Derive error display info
+  // A question with no test cases has nothing to grade against, so custom
+  // input is the only thing a run can consume — the toggle is redundant there
+  // and the tab is always live.
+  const questionHasTests = (questions[currentIndex]?.testCases?.length ?? 0) > 0;
+  const runsCustomInput = !questionHasTests || useCustomInput;
+
   const hasError = !!currentError;
   const errorName = currentError ? errorKind(currentError).toLowerCase() : '';
   const isCompilationError = errorName.includes('compilation') || errorName.includes('syntax');
@@ -981,19 +1002,55 @@ export function CodingAssessmentPage() {
                 }`}
               >
                 Custom Input
+                {/* Says which input the next run will consume without making
+                    the candidate open the tab to find out. */}
+                {runsCustomInput && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-[var(--primary)]/20 text-[var(--primary)] text-[10px] font-semibold">
+                    Active
+                  </span>
+                )}
               </button>
             </div>
 
             {/* Tab content */}
             <div className="flex-1 overflow-y-auto p-4">
               {activeOutputTab === 'input' ? (
-                <textarea
-                  value={customInput}
-                  onChange={(e) => setCustomInput(e.target.value)}
-                  placeholder="Enter custom input here..."
-                  className="w-full h-full bg-transparent text-sm font-mono text-gray-300 placeholder-gray-600 resize-none outline-none"
-                  disabled={isQuestionLocked}
-                />
+                <div className="h-full flex flex-col gap-2">
+                  {questionHasTests ? (
+                    <label className="flex items-start gap-2 text-xs text-gray-400 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={useCustomInput}
+                        onChange={(e) => setUseCustomInput(e.target.checked)}
+                        disabled={isQuestionLocked}
+                        className="mt-0.5 accent-[var(--primary)]"
+                      />
+                      <span>
+                        Run against this input instead of the test cases.
+                        <span className="block text-gray-500">
+                          A custom run is for checking your own cases — it is not graded and
+                          does not change your test results.
+                        </span>
+                      </span>
+                    </label>
+                  ) : (
+                    <p className="text-xs text-gray-500">
+                      This question has no test cases, so Compile &amp; Run always uses the
+                      input below.
+                    </p>
+                  )}
+                  <textarea
+                    value={customInput}
+                    onChange={(e) => setCustomInput(e.target.value)}
+                    placeholder={
+                      currentQuestion?.sampleInput
+                        ? `Enter custom input here...\n\nLeave empty to use the sample input:\n${currentQuestion.sampleInput}`
+                        : 'Enter custom input here...'
+                    }
+                    className="flex-1 w-full bg-transparent text-sm font-mono text-gray-300 placeholder-gray-600 resize-none outline-none"
+                    disabled={isQuestionLocked}
+                  />
+                </div>
               ) : !compilerResponse ? (
                 <p className="text-sm text-gray-500 font-mono">Run your code to see the output here.</p>
               ) : (
