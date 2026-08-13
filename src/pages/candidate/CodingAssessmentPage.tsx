@@ -51,6 +51,7 @@ import { formatTimer } from '@/utils/format.utils';
 import { computeExamMinutes } from '@/utils/exam-duration.utils';
 import { LANGUAGE_SKELETONS, isSkeletonCode } from '@/utils/code.utils';
 import { buildSubmissionMeta } from '@/utils/result.utils';
+import { isTestCaseRevealed, openTestCaseCount } from '@/config/coding-exam.config';
 import {
   errorKind,
   isGraded,
@@ -751,6 +752,12 @@ export function CodingAssessmentPage() {
   const questionHasTests = (questions[currentIndex]?.testCases?.length ?? 0) > 0;
   const runsCustomInput = !questionHasTests || useCustomInput;
 
+  // Only graded cases are shown: a plain Run against custom input comes back
+  // with passed: null and nothing to compare, so it is not a test result.
+  const gradedTests = (compilerResponse?.testResults ?? []).filter(isGraded);
+  /** How many of them show their input and expected output from the start. */
+  const openTestCases = openTestCaseCount(gradedTests.length);
+
   const hasError = !!currentError;
   const errorName = currentError ? errorKind(currentError).toLowerCase() : '';
   const isCompilationError = errorName.includes('compilation') || errorName.includes('syntax');
@@ -1184,9 +1191,8 @@ export function CodingAssessmentPage() {
                             hidden, "how many are left" is the only progress
                             signal the candidate has. */}
                         {(() => {
-                          const graded = compilerResponse.testResults.filter(isGraded);
-                          const passedCount = graded.filter(isPassed).length;
-                          const allPassed = passedCount === graded.length;
+                          const passedCount = gradedTests.filter(isPassed).length;
+                          const allPassed = passedCount === gradedTests.length;
                           return (
                             <span
                               className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
@@ -1195,12 +1201,30 @@ export function CodingAssessmentPage() {
                                   : 'bg-red-900/50 text-red-400'
                               }`}
                             >
-                              {passedCount} / {graded.length} passed
+                              {passedCount} / {gradedTests.length} passed
                             </span>
                           );
                         })()}
                       </div>
-                      {compilerResponse.testResults.filter(isGraded).map((tr, idx) => (
+                      {/* States the rule up front. A padlock with no explanation
+                          reads as a bug, and a candidate who thinks the grader
+                          is broken debugs the wrong thing. */}
+                      {openTestCases < gradedTests.length && (
+                        <p className="text-xs text-gray-500 flex items-center gap-1.5">
+                          <Lock size={11} className="flex-shrink-0" />
+                          {openTestCases === 0
+                            ? 'Each test reveals its input and expected output once your code passes it.'
+                            : `The first ${openTestCases} test${openTestCases === 1 ? '' : 's'} show their input and expected output. The rest unlock as you pass them.`}
+                        </p>
+                      )}
+                      {gradedTests.map((tr, idx) => {
+                        const passed = isPassed(tr);
+                        const revealed = isTestCaseRevealed({
+                          index: idx,
+                          passed,
+                          total: gradedTests.length,
+                        });
+                        return (
                         <div
                           key={`${tr.questionId ?? 'case'}-${idx}`}
                           className={`p-3 rounded-lg border ${
@@ -1227,25 +1251,36 @@ export function CodingAssessmentPage() {
                               </span>
                             )}
                           </div>
-                          {/* A passed case has nothing left to protect — its
-                              input and expected output are revealed as the
-                              reward for solving it. */}
-                          {isPassed(tr) && (
+                          {/* A passed case has nothing left to protect, and an
+                              open one was never protected — see
+                              coding-exam.config.ts for which cases are open. */}
+                          {revealed && (
                             <div className="mt-2 space-y-1 pl-6">
                               <div className="flex gap-2 text-xs font-mono">
                                 <span className="text-gray-500 w-20 shrink-0">Input:</span>
                                 <span className="text-gray-300 whitespace-pre-wrap">{tr.input}</span>
                               </div>
                               <div className="flex gap-2 text-xs font-mono">
-                                <span className="text-gray-500 w-20 shrink-0">Output:</span>
+                                <span className="text-gray-500 w-20 shrink-0">Expected:</span>
                                 <span className="text-green-300 whitespace-pre-wrap">
                                   {tr.expectedOutput}
                                 </span>
                               </div>
+                              {/* Only worth printing when it differs from what
+                                  was expected — on a pass the two are the same
+                                  line twice, which reads as a bug. */}
+                              {!passed && (
+                                <div className="flex gap-2 text-xs font-mono">
+                                  <span className="text-gray-500 w-20 shrink-0">Your output:</span>
+                                  <span className="text-red-300 whitespace-pre-wrap">
+                                    {tr.actualOutput || '(no output)'}
+                                  </span>
+                                </div>
+                              )}
                             </div>
                           )}
 
-                          {!isPassed(tr) && (
+                          {!revealed && (
                             <div className="mt-2 space-y-1 pl-6">
                               {/* Input and expected output stay sealed until the
                                   case passes, so a candidate cannot read the
@@ -1287,7 +1322,8 @@ export function CodingAssessmentPage() {
                             </div>
                           )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
