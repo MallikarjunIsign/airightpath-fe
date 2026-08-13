@@ -58,99 +58,200 @@ export function AssessmentListPage() {
           </p>
         </div>
       ) : (
-        <Card padding="none">
-          <div className="overflow-x-auto">
-            <table className="w-full">
+        <>
+          {/* Mobile: one card per assessment. Six columns — two of them dates —
+              only fit by scrolling sideways, which pushed the Start button off
+              the screen whose whole purpose is to press it. */}
+          <div className="md:hidden space-y-3">
+            {assessments.map((assessment) => {
+              const { isExpired, canStart } = assessmentState(assessment);
+
+              return (
+                <div
+                  key={assessment.id}
+                  className="rounded-2xl border border-[var(--borderMuted,var(--border))] bg-[var(--cardBg)] p-4 space-y-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-1.5">
+                      <TypeBadge type={assessment.assessmentType} />
+                      <p className="font-medium text-[var(--text)] break-words">
+                        {assessment.jobPrefix}
+                      </p>
+                    </div>
+                    <StatusBadge assessment={assessment} isExpired={isExpired} />
+                  </div>
+
+                  <dl className="grid grid-cols-2 gap-x-3 gap-y-2">
+                    <div className="min-w-0">
+                      <dt className="text-xs text-[var(--textTertiary)] mb-0.5">Assigned</dt>
+                      <dd className="text-sm text-[var(--textSecondary)]">
+                        {formatDate(assessment.assignedAt)}
+                      </dd>
+                    </div>
+                    <div className="min-w-0">
+                      <dt className="text-xs text-[var(--textTertiary)] mb-0.5">Deadline</dt>
+                      <dd className="text-sm text-[var(--textSecondary)]">
+                        {formatDate(assessment.deadline)}
+                      </dd>
+                    </div>
+                  </dl>
+
+                  <ActionCell
+                    assessment={assessment}
+                    canStart={canStart}
+                    onStart={handleStart}
+                    className="w-full justify-center text-center"
+                  />
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop: fixed layout so a long job prefix wraps instead of
+              stretching the table past the card. */}
+          <Card padding="none" className="hidden md:block overflow-hidden">
+            <table className="w-full table-fixed">
               <thead>
                 <tr className="border-b border-[var(--border)]">
-                  <th className="text-left px-6 py-4 text-sm font-semibold text-[var(--textSecondary)]">
+                  <th className="text-left px-6 py-4 text-sm font-semibold text-[var(--textSecondary)] w-[14%]">
                     Type
                   </th>
-                  <th className="text-left px-6 py-4 text-sm font-semibold text-[var(--textSecondary)]">
+                  <th className="text-left px-6 py-4 text-sm font-semibold text-[var(--textSecondary)] w-[22%]">
                     Job
                   </th>
-                  <th className="text-left px-6 py-4 text-sm font-semibold text-[var(--textSecondary)]">
+                  <th className="text-left px-6 py-4 text-sm font-semibold text-[var(--textSecondary)] w-[17%]">
                     Assigned Date
                   </th>
-                  <th className="text-left px-6 py-4 text-sm font-semibold text-[var(--textSecondary)]">
+                  <th className="text-left px-6 py-4 text-sm font-semibold text-[var(--textSecondary)] w-[17%]">
                     Deadline
                   </th>
-                  <th className="text-left px-6 py-4 text-sm font-semibold text-[var(--textSecondary)]">
+                  <th className="text-left px-6 py-4 text-sm font-semibold text-[var(--textSecondary)] w-[15%]">
                     Status
                   </th>
-                  <th className="text-left px-6 py-4 text-sm font-semibold text-[var(--textSecondary)]">
+                  <th className="text-left px-6 py-4 text-sm font-semibold text-[var(--textSecondary)] w-[15%]">
                     Action
                   </th>
                 </tr>
               </thead>
               <tbody>
                 {assessments.map((assessment) => {
-                  const isExpired = assessment.expired || new Date(assessment.deadline) < new Date();
-                  const canStart = !assessment.examAttended && !isExpired;
+                  const { isExpired, canStart } = assessmentState(assessment);
 
                   return (
                     <tr
                       key={assessment.id}
                       className="border-b border-[var(--border)] last:border-b-0 hover:bg-[var(--surface1)] transition-colors"
                     >
-                      <td className="px-6 py-4">
-                        <Badge
-                          variant={assessment.assessmentType === 'APTITUDE' ? 'info' : 'warning'}
-                          size="sm"
-                        >
-                          {assessment.assessmentType}
-                        </Badge>
+                      <td className="px-6 py-4 align-top">
+                        <TypeBadge type={assessment.assessmentType} />
                       </td>
-                      <td className="px-6 py-4 text-sm text-[var(--text)]">
+                      <td className="px-6 py-4 align-top text-sm text-[var(--text)] break-words">
                         {assessment.jobPrefix}
                       </td>
-                      <td className="px-6 py-4 text-sm text-[var(--textSecondary)]">
+                      <td className="px-6 py-4 align-top text-sm text-[var(--textSecondary)]">
                         {formatDate(assessment.assignedAt)}
                       </td>
-                      <td className="px-6 py-4 text-sm text-[var(--textSecondary)]">
+                      <td className="px-6 py-4 align-top text-sm text-[var(--textSecondary)]">
                         {formatDate(assessment.deadline)}
                       </td>
-                      <td className="px-6 py-4">
-                        {assessment.examAttended ? (
-                          <Badge variant="success" size="sm">
-                            Attended
-                          </Badge>
-                        ) : isExpired ? (
-                          <Badge variant="error" size="sm">
-                            Expired
-                          </Badge>
-                        ) : (
-                          <Badge variant="warning" size="sm">
-                            Pending
-                          </Badge>
-                        )}
+                      <td className="px-6 py-4 align-top">
+                        <StatusBadge assessment={assessment} isExpired={isExpired} />
                       </td>
-                      <td className="px-6 py-4">
-                        {canStart ? (
-                          <Button
-                            size="sm"
-                            leftIcon={<Play size={14} />}
-                            onClick={() => handleStart(assessment)}
-                          >
-                            Start
-                          </Button>
-                        ) : assessment.examAttended ? (
-                          <span className="text-sm text-[var(--textSecondary)]">Completed</span>
-                        ) : (
-                          <div className="flex items-center gap-1 text-sm text-[var(--error)]">
-                            <AlertCircle size={14} />
-                            <span>Expired</span>
-                          </div>
-                        )}
+                      <td className="px-6 py-4 align-top">
+                        <ActionCell
+                          assessment={assessment}
+                          canStart={canStart}
+                          onStart={handleStart}
+                        />
                       </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
-          </div>
-        </Card>
+          </Card>
+        </>
       )}
+    </div>
+  );
+}
+
+// ── Sub-components ─────────────────────────────────────────────────────
+// Shared by the desktop row and the mobile card so the two renderings cannot
+// drift apart.
+
+/** Expiry is derived in one place so the badge and the button always agree. */
+function assessmentState(assessment: Assessment) {
+  const isExpired = assessment.expired || new Date(assessment.deadline) < new Date();
+  return { isExpired, canStart: !assessment.examAttended && !isExpired };
+}
+
+function TypeBadge({ type }: Readonly<{ type: Assessment['assessmentType'] }>) {
+  return (
+    <Badge variant={type === 'APTITUDE' ? 'info' : 'warning'} size="sm">
+      {type}
+    </Badge>
+  );
+}
+
+function StatusBadge({
+  assessment,
+  isExpired,
+}: Readonly<{ assessment: Assessment; isExpired: boolean }>) {
+  if (assessment.examAttended) {
+    return (
+      <Badge variant="success" size="sm">
+        Attended
+      </Badge>
+    );
+  }
+  if (isExpired) {
+    return (
+      <Badge variant="error" size="sm">
+        Expired
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="warning" size="sm">
+      Pending
+    </Badge>
+  );
+}
+
+function ActionCell({
+  assessment,
+  canStart,
+  onStart,
+  className = '',
+}: Readonly<{
+  assessment: Assessment;
+  canStart: boolean;
+  onStart: (assessment: Assessment) => void;
+  /** Lets the mobile card stretch the button to the full card width. */
+  className?: string;
+}>) {
+  if (canStart) {
+    return (
+      <Button
+        size="sm"
+        className={className}
+        leftIcon={<Play size={14} />}
+        onClick={() => onStart(assessment)}
+      >
+        Start
+      </Button>
+    );
+  }
+  if (assessment.examAttended) {
+    return (
+      <span className={`block text-sm text-[var(--textSecondary)] ${className}`}>Completed</span>
+    );
+  }
+  return (
+    <div className={`flex items-center gap-1 text-sm text-[var(--error)] ${className}`}>
+      <AlertCircle size={14} />
+      <span>Expired</span>
     </div>
   );
 }

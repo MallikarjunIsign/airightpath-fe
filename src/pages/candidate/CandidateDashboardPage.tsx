@@ -179,14 +179,23 @@ export function CandidateDashboardPage() {
               {upcomingAssessments.slice(0, 5).map((assessment) => (
                 <div
                   key={assessment.id}
-                  className="flex items-center justify-between p-4 rounded-lg bg-[var(--surface1)] border border-[var(--border)]"
+                  className="flex items-center justify-between gap-3 p-4 rounded-lg bg-[var(--surface1)] border border-[var(--border)]"
                 >
-                  <div className="flex items-center gap-3">
-                    <Badge variant={assessment.assessmentType === 'APTITUDE' ? 'info' : 'warning'} size="sm">
+                  {/* min-w-0 down the chain: without it a long job prefix grows
+                      the row past the card and takes the Start button off the
+                      side of a phone screen. */}
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Badge
+                      variant={assessment.assessmentType === 'APTITUDE' ? 'info' : 'warning'}
+                      size="sm"
+                      className="flex-shrink-0"
+                    >
                       {assessment.assessmentType}
                     </Badge>
-                    <div>
-                      <p className="font-medium text-[var(--text)]">{assessment.jobPrefix}</p>
+                    <div className="min-w-0">
+                      <p className="font-medium text-[var(--text)] break-words">
+                        {assessment.jobPrefix}
+                      </p>
                       <p className="text-sm text-[var(--textSecondary)]">
                         Deadline: {formatDate(assessment.deadline)}
                       </p>
@@ -194,6 +203,7 @@ export function CandidateDashboardPage() {
                   </div>
                   <Button
                     size="sm"
+                    className="flex-shrink-0"
                     onClick={() =>
                       navigate(ROUTES.CANDIDATE.INSTRUCTIONS, { state: { assessment } })
                     }
