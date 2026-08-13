@@ -50,6 +50,7 @@ import { ROUTES } from '@/config/routes';
 import { formatTimer } from '@/utils/format.utils';
 import { computeExamMinutes } from '@/utils/exam-duration.utils';
 import { LANGUAGE_SKELETONS, isSkeletonCode } from '@/utils/code.utils';
+import { buildSubmissionMeta } from '@/utils/result.utils';
 import {
   errorKind,
   isGraded,
@@ -208,6 +209,13 @@ export function CodingAssessmentPage() {
     onExpire: () => handleAutoSubmit('Time is up!'),
   });
 
+  // The clock as it stood when submit ran, for the record written with the
+  // answers. Refs because handleSubmitExam is memoised and would otherwise
+  // close over the countdown as it was on the render that created it.
+  const secondsLeftRef = useRef(0);
+  secondsLeftRef.current = secondsLeft;
+  const examDurationSecondsRef = useRef(0);
+
   // ── Monaco editor helpers ─────────────────────────────────────────
   const handleEditorMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
@@ -277,7 +285,7 @@ export function CodingAssessmentPage() {
   }, [setEditorMarkers, clearEditorMarkers]);
 
   // ── Submit entire exam ────────────────────────────────────────────
-  const handleSubmitExam = useCallback(async () => {
+  const handleSubmitExam = useCallback(async (autoSubmitReason?: string) => {
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
     setSubmitting(true);
@@ -300,19 +308,29 @@ export function CodingAssessmentPage() {
         langs[currentQ.id] = language;
       }
 
+      // Recorded with the answers: whether the candidate submitted or the exam
+      // ended itself, why, and how much of the clock was still unused. The
+      // result screens can only report what the exam page knew at this moment.
+      const submission = buildSubmissionMeta({
+        reason: autoSubmitReason,
+        secondsLeft: secondsLeftRef.current,
+        durationSeconds: examDurationSecondsRef.current,
+      });
+
       await assessmentService.saveResult({
         candidateEmail: user.email,
         assessmentType: assessment.assessmentType,
         score: 0,
-        resultsJson: JSON.stringify(
-          qs.map((q) => ({
+        resultsJson: JSON.stringify([
+          ...qs.map((q) => ({
             questionId: q.id,
             title: q.title,
             code: codes[q.id] || '',
             language: langs[q.id] || 'java',
             status: statuses[q.id] || 'not_started',
-          }))
-        ),
+          })),
+          submission,
+        ]),
         jobPrefix: assessment.jobPrefix,
       });
 
@@ -336,7 +354,7 @@ export function CodingAssessmentPage() {
     (reason: string) => {
       if (isSubmittingRef.current) return;
       showToast(MESSAGES.proctoring.autoSubmitting(reason), 'error');
-      handleSubmitExam();
+      handleSubmitExam(reason);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [handleSubmitExam]
@@ -382,6 +400,7 @@ export function CodingAssessmentPage() {
           minutesPerQuestion: assessment.minutesPerQuestion,
           durationMinutes: agreedDurationMinutes ?? assessment.durationMinutes,
         });
+        examDurationSecondsRef.current = minutes * 60;
         resetTimer(minutes * 60);
 
         // Proctoring init: fullscreen → face models → camera (config-driven).
@@ -1287,7 +1306,7 @@ export function CodingAssessmentPage() {
         footer={
           <>
             <Button variant="ghost" onClick={() => setShowConfirmSubmit(false)}>Cancel</Button>
-            <Button variant="primary" onClick={handleSubmitExam} isLoading={submitting}>Confirm Submit</Button>
+            <Button variant="primary" onClick={() => handleSubmitExam()} isLoading={submitting}>Confirm Submit</Button>
           </>
         }
       >

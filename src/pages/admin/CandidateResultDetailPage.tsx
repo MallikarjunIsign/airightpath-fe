@@ -76,9 +76,11 @@ import {
   rowLanguage,
   codeOf,
   normalizeBand,
+  splitResultsJson,
 } from '@/utils/result.utils';
+import { SubmissionInfo } from '@/components/result/SubmissionInfo';
 import type { CodingRow } from '@/utils/result.utils';
-import type { Result, AptitudeAnswer, CodingAnswer } from '@/types/result.types';
+import type { Result, AptitudeAnswer, CodingAnswer, SubmissionMeta } from '@/types/result.types';
 import type { CodeSubmissionResponse } from '@/types/compiler.types';
 import type { Assessment, RawCodingQuestion, RawQuestion } from '@/types/assessment.types';
 
@@ -211,17 +213,21 @@ export function CandidateResultDetailPage() {
   const aptitudeResult = results.find((r) => r.assessmentType === 'APTITUDE');
   const codingResult = results.find((r) => r.assessmentType === 'CODING');
 
-  const aptitudeAnswers: AptitudeAnswer[] = useMemo(
-    () => parseArray<AptitudeAnswer>(aptitudeResult?.resultsJson),
+  // `resultsJson` holds the answers plus, at the end, the record of how the
+  // attempt was submitted — split so the metadata is never scored as an answer.
+  const aptitudeParsed = useMemo(
+    () => splitResultsJson<AptitudeAnswer>(aptitudeResult?.resultsJson),
     [aptitudeResult],
   );
+  const aptitudeAnswers = aptitudeParsed.answers;
 
   // The CODING result carries one entry per question on the paper — including
   // the ones never opened — so it, not the compiler submissions, defines the list.
-  const codingAnswers: CodingAnswer[] = useMemo(
-    () => parseArray<CodingAnswer>(codingResult?.resultsJson),
+  const codingParsed = useMemo(
+    () => splitResultsJson<CodingAnswer>(codingResult?.resultsJson),
     [codingResult],
   );
+  const codingAnswers = codingParsed.answers;
 
   const codingRows = useMemo(
     () => buildCodingRows(codingQuestions, codeSubmissions, codingAnswers),
@@ -290,10 +296,16 @@ export function CandidateResultDetailPage() {
             marksLabel: `${aptitudeResult.score}${aptitudeResult.totalMarks ? `/${aptitudeResult.totalMarks}` : ''} marks`,
             answers: aptitudeAnswers,
             paper: aptitudePaper,
+            submission: aptitudeParsed.submission,
           }
         : undefined,
       coding: hasCoding
-        ? { score: codingScore, status: codingResult?.status, rows: codingRows }
+        ? {
+            score: codingScore,
+            status: codingResult?.status,
+            rows: codingRows,
+            submission: codingParsed.submission,
+          }
         : undefined,
     }),
     [
@@ -306,10 +318,12 @@ export function CandidateResultDetailPage() {
       overallScore,
       aptitudeScore,
       aptitudeAnswers,
+      aptitudeParsed.submission,
       aptitudePaper,
       hasCoding,
       codingScore,
       codingRows,
+      codingParsed.submission,
     ],
   );
 
@@ -520,6 +534,8 @@ export function CandidateResultDetailPage() {
           aptitudeScore={aptitudeScore}
           codingScore={codingScore}
           aptitudeAnswers={aptitudeAnswers}
+          aptitudeSubmission={aptitudeParsed.submission}
+          codingSubmission={codingParsed.submission}
           codingRows={codingRows}
           codingStats={codingStats}
           onOpenTab={setActiveTab}
@@ -738,6 +754,8 @@ function OverviewTab({
   aptitudeScore,
   codingScore,
   aptitudeAnswers,
+  aptitudeSubmission,
+  codingSubmission,
   codingRows,
   codingStats,
   onOpenTab,
@@ -747,6 +765,9 @@ function OverviewTab({
   aptitudeScore: number | null;
   codingScore: number | null;
   aptitudeAnswers: AptitudeAnswer[];
+  /** How each module's attempt ended — recorded per result, so one each. */
+  aptitudeSubmission?: SubmissionMeta;
+  codingSubmission?: SubmissionMeta;
   codingRows: CodingRow[];
   codingStats: ReturnType<typeof summarizeCoding>;
   onOpenTab: (tab: DetailTab) => void;
@@ -823,6 +844,12 @@ function OverviewTab({
                   ))}
                 </div>
               )}
+
+              <SubmissionInfo
+                meta={aptitudeSubmission}
+                submittedAt={aptitude.submittedAt}
+                className="pt-1"
+              />
 
               <AreasToImprove areas={aptitudeAreasToImprove(aptitudeBands)} suffix="Aptitude" />
             </div>
@@ -905,6 +932,12 @@ function OverviewTab({
                   </div>
                 </div>
               )}
+
+              <SubmissionInfo
+                meta={codingSubmission}
+                submittedAt={coding?.submittedAt}
+                className="pt-1"
+              />
 
               <AreasToImprove areas={codingAreasToImprove(codingBands)} suffix="Programming" />
             </div>

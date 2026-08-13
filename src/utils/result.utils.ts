@@ -5,7 +5,7 @@
  */
 import type { RawCodingQuestion, RawQuestion } from '@/types/assessment.types';
 import type { CodeSubmissionResponse } from '@/types/compiler.types';
-import type { AptitudeAnswer, CodingAnswer, Result } from '@/types/result.types';
+import type { AptitudeAnswer, CodingAnswer, Result, SubmissionMeta } from '@/types/result.types';
 import { isSkeletonCode } from './code.utils';
 import { isGraded, isPassed } from './compiler.utils';
 
@@ -53,6 +53,157 @@ export function formatDurationBetween(start?: string, end?: string): string | nu
   const days = Math.floor(hours / 24);
   const remHours = hours % 24;
   return remHours ? `${days} d ${remHours} h` : `${days} d`;
+}
+
+// ── Submission record ──────────────────────────────────────────────────
+
+/** Present and true on the `resultsJson` entry that describes the submission. */
+export const SUBMISSION_META_FLAG = '__submissionMeta';
+
+function isSubmissionMeta(entry: unknown): entry is SubmissionMeta {
+  return (
+    !!entry &&
+    typeof entry === 'object' &&
+    (entry as Record<string, unknown>)[SUBMISSION_META_FLAG] === true
+  );
+}
+
+/**
+ * The one way to read a stored `resultsJson`.
+ *
+ * The array holds one entry per question plus, since the exam started recording
+ * it, a final entry describing how the attempt ended. Splitting here rather than
+ * at each call site is what keeps the metadata from being scored as a question —
+ * an extra "answer" would shift both the answer counts and the coding paper's
+ * length check, which is the difference between 6 questions and 7.
+ *
+ * Results submitted before this existed simply have no submission entry, and
+ * every screen falls back to what it showed then.
+ */
+export function splitResultsJson<T>(raw: unknown): { answers: T[]; submission?: SubmissionMeta } {
+  const parsed = parseJsonArray<unknown>(raw);
+  const answers: T[] = [];
+  let submission: SubmissionMeta | undefined;
+
+  for (const entry of parsed) {
+    if (isSubmissionMeta(entry)) submission = entry;
+    else answers.push(entry as T);
+  }
+
+  return { answers, submission };
+}
+
+/** Best-effort parse of a JSON string (or an already-parsed array) into an array. */
+export function parseJsonArray<T>(raw: unknown): T[] {
+  if (!raw) return [];
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** The entry an exam page appends to its answers when it submits. */
+export function buildSubmissionMeta(input: {
+  /** The auto-submit reason, or undefined when the candidate pressed Submit. */
+  reason?: string;
+  secondsLeft?: number;
+  durationSeconds?: number;
+}): SubmissionMeta {
+  return {
+    __submissionMeta: true,
+    mode: input.reason ? 'AUTO' : 'MANUAL',
+    ...(input.reason ? { reason: input.reason } : {}),
+    submittedAt: new Date().toISOString(),
+    ...(Number.isFinite(input.secondsLeft) ? { secondsLeft: input.secondsLeft } : {}),
+    ...(Number.isFinite(input.durationSeconds) && (input.durationSeconds ?? 0) > 0
+      ? { durationSeconds: input.durationSeconds }
+      : {}),
+  };
+}
+
+/** "45 min", "1 h 5 min", "40 s" — for durations quoted beside a result. */
+export function formatSecondsDuration(totalSeconds: number): string {
+  if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return '--';
+  const seconds = Math.round(totalSeconds);
+  if (seconds < 60) return `${seconds} s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remMins = minutes % 60;
+  return remMins ? `${hours} h ${remMins} min` : `${hours} h`;
+}
+
+export interface SubmissionSummary {
+  mode: 'MANUAL' | 'AUTO';
+  /** Headline, e.g. "Auto-submitted — proctoring". */
+  label: string;
+  tone: 'success' | 'warning' | 'error';
+  /** The auto-submit reason as the candidate saw it, when there was one. */
+  reason?: string;
+  /** ISO timestamp — the server's, unless only the client's was recorded. */
+  submittedAt?: string;
+  /** "20 min left" — how much of the exam clock was unused. */
+  timeLeftLabel?: string;
+  /** "25 min of 45 min" — how long the attempt actually took. */
+  timeSpentLabel?: string;
+}
+
+/** True when the exam ended itself because the clock ran out, not on a violation. */
+function isTimeExpiry(reason?: string): boolean {
+  return /time/i.test(reason ?? '');
+}
+
+/**
+ * Everything a result screen needs to say about how an attempt ended.
+ *
+ * Returns null only when there is nothing at all to show — no recorded
+ * submission and no timestamp — so older results stay silent rather than
+ * claiming a manual submit that was never recorded.
+ */
+export function describeSubmission(
+  meta?: SubmissionMeta,
+  /** The server's timestamp. It wins: the client clock can be set to anything. */
+  serverSubmittedAt?: string,
+): SubmissionSummary | null {
+  const submittedAt = serverSubmittedAt ?? meta?.submittedAt;
+  if (!meta) {
+    if (!submittedAt) return null;
+    // Pre-dates the recording: the time is known, the manner is not.
+    return { mode: 'MANUAL', label: 'Submitted', tone: 'success', submittedAt };
+  }
+
+  const auto = meta.mode === 'AUTO';
+  const timeUp = auto && isTimeExpiry(meta.reason);
+
+  let label = 'Submitted by candidate';
+  if (timeUp) label = 'Auto-submitted — time expired';
+  else if (auto) label = 'Auto-submitted — proctoring';
+
+  let tone: SubmissionSummary['tone'] = 'success';
+  if (timeUp) tone = 'warning';
+  else if (auto) tone = 'error';
+
+  const { secondsLeft, durationSeconds } = meta;
+  const hasLeft = Number.isFinite(secondsLeft);
+  const hasDuration = Number.isFinite(durationSeconds) && (durationSeconds ?? 0) > 0;
+
+  let timeSpentLabel: string | undefined;
+  if (hasLeft && hasDuration) {
+    const spent = Math.max(0, (durationSeconds as number) - (secondsLeft as number));
+    timeSpentLabel = `${formatSecondsDuration(spent)} of ${formatSecondsDuration(durationSeconds as number)}`;
+  }
+
+  return {
+    mode: meta.mode,
+    label,
+    tone,
+    reason: meta.reason,
+    submittedAt,
+    timeLeftLabel: hasLeft ? `${formatSecondsDuration(secondsLeft as number)} left` : undefined,
+    timeSpentLabel,
+  };
 }
 
 // ── Outcome vocabulary ─────────────────────────────────────────────────
