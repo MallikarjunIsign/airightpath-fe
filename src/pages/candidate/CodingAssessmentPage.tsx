@@ -755,8 +755,20 @@ export function CodingAssessmentPage() {
   // Only graded cases are shown: a plain Run against custom input comes back
   // with passed: null and nothing to compare, so it is not a test result.
   const gradedTests = (compilerResponse?.testResults ?? []).filter(isGraded);
+  /**
+   * The question's own case count, not the last run's.
+   *
+   * "The first half" has to mean the same cases every run. Counting what came
+   * back would move the line whenever a run graded fewer cases than the paper
+   * holds — a timeout part-way through would quietly re-lock a case that was
+   * open a minute ago. The paper is the authority; the run is the fallback.
+   */
+  const totalTestCases = Math.max(
+    currentQuestion?.testCases?.length ?? 0,
+    gradedTests.length,
+  );
   /** How many of them show their input and expected output from the start. */
-  const openTestCases = openTestCaseCount(gradedTests.length);
+  const openTestCases = openTestCaseCount(totalTestCases);
 
   const hasError = !!currentError;
   const errorName = currentError ? errorKind(currentError).toLowerCase() : '';
@@ -1209,7 +1221,7 @@ export function CodingAssessmentPage() {
                       {/* States the rule up front. A padlock with no explanation
                           reads as a bug, and a candidate who thinks the grader
                           is broken debugs the wrong thing. */}
-                      {openTestCases < gradedTests.length && (
+                      {openTestCases < totalTestCases && (
                         <p className="text-xs text-gray-500 flex items-center gap-1.5">
                           <Lock size={11} className="flex-shrink-0" />
                           {openTestCases === 0
@@ -1222,7 +1234,7 @@ export function CodingAssessmentPage() {
                         const revealed = isTestCaseRevealed({
                           index: idx,
                           passed,
-                          total: gradedTests.length,
+                          total: totalTestCases,
                         });
                         return (
                         <div
