@@ -14,7 +14,9 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { ROUTES } from '@/config/routes';
 import { MESSAGES } from '@/config/messages';
-import type { Result, ResultDetail } from '@/types/result.types';
+import { splitResultsJson } from '@/utils/result.utils';
+import { SubmissionInfo } from '@/components/result/SubmissionInfo';
+import type { Result, ResultDetail, SubmissionMeta } from '@/types/result.types';
 
 export function ResultDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -26,6 +28,7 @@ export function ResultDetailPage() {
 
   const [result] = useState<Result | null>(stateResult ?? null);
   const [details, setDetails] = useState<ResultDetail[]>([]);
+  const [submission, setSubmission] = useState<SubmissionMeta | undefined>();
   const [loading, setLoading] = useState(!stateResult);
 
   useEffect(() => {
@@ -35,14 +38,12 @@ export function ResultDetailPage() {
       return;
     }
 
-    // Parse result details from resultsJson
+    // The stored array is the answers plus, at the end, the record of how the
+    // exam was submitted — split so the metadata is never counted as a question.
     if (result?.resultsJson) {
-      try {
-        const parsed = JSON.parse(result.resultsJson);
-        setDetails(Array.isArray(parsed) ? parsed : []);
-      } catch {
-        setDetails([]);
-      }
+      const parsed = splitResultsJson<ResultDetail>(result.resultsJson);
+      setDetails(parsed.answers);
+      setSubmission(parsed.submission);
     }
     setLoading(false);
   }, [result, id, navigate, showToast]);
@@ -161,6 +162,13 @@ export function ResultDetailPage() {
                   </>
                 )}
               </div>
+
+              {/* How the attempt ended — the candidate's own record of it. */}
+              <SubmissionInfo
+                meta={submission}
+                submittedAt={result.submittedAt}
+                className="pt-1"
+              />
             </div>
           </div>
         </CardContent>

@@ -25,6 +25,7 @@ import {
   overallScorePercent,
   buildCodingRows,
   scoreColor,
+  splitResultsJson,
 } from '@/utils/result.utils';
 import type { JobPostDTO } from '@/types/job.types';
 import type { Assessment, RawCodingQuestion } from '@/types/assessment.types';
@@ -251,8 +252,15 @@ export function ResultsPage() {
       // Aptitude ships raw marks and coding ships 0, so both are re-derived
       // here with the same helpers the result detail page uses — and, now, the
       // same question paper, without which the two could not agree.
-      const aptitudeAnswers = parseAnswers<AptitudeAnswer>(row.aptitudeResult?.resultsJson);
-      const codingAnswers = parseAnswers<CodingAnswer>(row.codingResult?.resultsJson);
+      // splitResultsJson, not a plain parse: the stored array ends with the
+      // record of how the exam was submitted, and counting that as a question
+      // would break the paper-length check below by exactly one.
+      const { answers: aptitudeAnswers } = splitResultsJson<AptitudeAnswer>(
+        row.aptitudeResult?.resultsJson,
+      );
+      const { answers: codingAnswers } = splitResultsJson<CodingAnswer>(
+        row.codingResult?.resultsJson,
+      );
 
       row.hasCoding =
         !!row.codingResult || row.codeSubmissions.length > 0 || codingAssigned.has(row.email);

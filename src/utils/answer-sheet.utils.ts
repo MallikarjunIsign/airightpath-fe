@@ -11,6 +11,7 @@
 
 import {
   codeOf,
+  describeSubmission,
   normalizeBand,
   passedTestCount,
   rowLanguage,
@@ -18,7 +19,7 @@ import {
   testsOf,
 } from '@/utils/result.utils';
 import type { CodingRow } from '@/utils/result.utils';
-import type { AptitudeAnswer } from '@/types/result.types';
+import type { AptitudeAnswer, SubmissionMeta } from '@/types/result.types';
 import type { RawQuestion } from '@/types/assessment.types';
 
 export interface AnswerSheetAptitude {
@@ -29,12 +30,15 @@ export interface AnswerSheetAptitude {
   answers: AptitudeAnswer[];
   /** The paper, used to print the option text the candidate chose between. */
   paper: RawQuestion[];
+  /** How this module's attempt ended, when the exam recorded it. */
+  submission?: SubmissionMeta;
 }
 
 export interface AnswerSheetCoding {
   score: number | null;
   status?: string;
   rows: CodingRow[];
+  submission?: SubmissionMeta;
 }
 
 export interface AnswerSheetData {
@@ -90,6 +94,24 @@ function optionText(options: Option[], key?: string): string {
 }
 
 const answered = (a: AptitudeAnswer) => !!(a.selectedAnswer ?? '').toString().trim();
+
+/**
+ * One line describing how a module was submitted — the same facts the result
+ * screen shows, flattened for a document that has no components.
+ *
+ * Empty when nothing was recorded, so sections of older sheets print as before.
+ */
+function submissionLine(meta?: SubmissionMeta, submittedAt?: string): string {
+  const summary = describeSubmission(meta, submittedAt);
+  if (!summary) return '';
+
+  const parts = [summary.label];
+  if (summary.reason) parts.push(summary.reason);
+  if (summary.timeLeftLabel) parts.push(summary.timeLeftLabel);
+  if (summary.timeSpentLabel) parts.push(`used ${summary.timeSpentLabel}`);
+  if (summary.submittedAt) parts.push(new Date(summary.submittedAt).toLocaleString());
+  return parts.join(' · ');
+}
 
 const scoreLabel = (score: number | null) => (score === null ? 'N/A' : `${score}%`);
 
@@ -159,6 +181,7 @@ function aptitudeHtml(section: AnswerSheetAptitude): string {
   return `<h2>Aptitude — ${escapeHtml(scoreLabel(section.score))}${
     section.marksLabel ? ` <span class="meta">(${escapeHtml(section.marksLabel)})</span>` : ''
   }${section.status ? ` <span class="tag ${section.status === 'PASSED' ? 'pass' : 'fail'}">${escapeHtml(section.status)}</span>` : ''}</h2>
+    ${sectionSubmissionHtml(section.submission)}
     ${questions || '<p class="meta">No aptitude answers recorded.</p>'}`;
 }
 
@@ -206,7 +229,13 @@ function codingHtml(section: AnswerSheetCoding): string {
   return `<h2>Coding — ${escapeHtml(scoreLabel(section.score))}${
     section.status ? ` <span class="tag ${section.status === 'PASSED' ? 'pass' : 'fail'}">${escapeHtml(section.status)}</span>` : ''
   }</h2>
+    ${sectionSubmissionHtml(section.submission)}
     ${questions || '<p class="meta">No coding submissions recorded.</p>'}`;
+}
+
+function sectionSubmissionHtml(meta?: SubmissionMeta): string {
+  const line = submissionLine(meta);
+  return line ? `<p class="meta">${escapeHtml(line)}</p>` : '';
 }
 
 /** A self-contained document — styles inline, since Word and print see no app CSS. */
@@ -269,6 +298,7 @@ export function answerSheetToJson(data: AnswerSheetData): string {
         ? {
             scorePercent: data.aptitude.score,
             status: data.aptitude.status ?? null,
+            submission: data.aptitude.submission ?? null,
             questions: data.aptitude.answers.map((answer, i) => {
               const options = optionsOf(paperQuestionFor(answer, i, data.aptitude!.paper));
               return {
@@ -291,6 +321,7 @@ export function answerSheetToJson(data: AnswerSheetData): string {
         ? {
             scorePercent: data.coding.score,
             status: data.coding.status ?? null,
+            submission: data.coding.submission ?? null,
             questions: data.coding.rows.map((row, i) => ({
               number: i + 1,
               title: rowTitle(row),
@@ -385,6 +416,8 @@ export async function buildAnswerSheetPdf(data: AnswerSheetData) {
         section.status ? `  ·  ${section.status}` : ''
       }`
     );
+    const aptitudeSubmission = submissionLine(section.submission);
+    if (aptitudeSubmission) muted(aptitudeSubmission, 9);
 
     section.answers.forEach((answer, i) => {
       ensureRoom(70);
@@ -435,6 +468,8 @@ export async function buildAnswerSheetPdf(data: AnswerSheetData) {
     heading(
       `Coding — ${scoreLabel(section.score)}${section.status ? `  ·  ${section.status}` : ''}`
     );
+    const codingSubmission = submissionLine(section.submission);
+    if (codingSubmission) muted(codingSubmission, 9);
 
     section.rows.forEach((row, i) => {
       ensureRoom(80);

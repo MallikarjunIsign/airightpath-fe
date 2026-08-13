@@ -32,6 +32,7 @@ import { useIsDesktop } from '@/hooks/useIsDesktop';
 import { ROUTES } from '@/config/routes';
 import { formatTimer } from '@/utils/format.utils';
 import { computeExamMinutes } from '@/utils/exam-duration.utils';
+import { buildSubmissionMeta } from '@/utils/result.utils';
 import type { Assessment, Question, RawQuestion } from '@/types/assessment.types';
 
 /** Normalise raw BE question (object options, "question" field) → clean UI shape */
@@ -129,7 +130,14 @@ export function AptitudeAssessmentPage() {
     onExpire: () => handleAutoSubmit('Time is up!'),
   });
 
-  const handleSubmit = useCallback(async () => {
+  // The clock as it stood when submit ran, for the record written with the
+  // answers. Refs because handleSubmit is memoised and would otherwise close
+  // over the countdown as it was on the render that created it.
+  const secondsLeftRef = useRef(0);
+  secondsLeftRef.current = secondsLeft;
+  const examDurationSecondsRef = useRef(0);
+
+  const handleSubmit = useCallback(async (autoSubmitReason?: string) => {
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
     setSubmitting(true);
@@ -158,11 +166,20 @@ export function AptitudeAssessmentPage() {
         };
       });
 
+      // Recorded with the answers: whether the candidate submitted or the exam
+      // ended itself, why, and how much of the clock was still unused. The
+      // result screens can only report what the exam page knew at this moment.
+      const submission = buildSubmissionMeta({
+        reason: autoSubmitReason,
+        secondsLeft: secondsLeftRef.current,
+        durationSeconds: examDurationSecondsRef.current,
+      });
+
       await assessmentService.saveResult({
         candidateEmail: user.email,
         assessmentType: assessment.assessmentType,
         score,
-        resultsJson: JSON.stringify(resultDetails),
+        resultsJson: JSON.stringify([...resultDetails, submission]),
         jobPrefix: assessment.jobPrefix,
       });
 
@@ -186,7 +203,7 @@ export function AptitudeAssessmentPage() {
     (reason: string) => {
       if (isSubmittingRef.current) return;
       showToast(MESSAGES.proctoring.autoSubmitting(reason), 'error');
-      handleSubmit();
+      handleSubmit(reason);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [handleSubmit]
@@ -231,6 +248,7 @@ export function AptitudeAssessmentPage() {
           minutesPerQuestion: assessment.minutesPerQuestion,
           durationMinutes: agreedDurationMinutes ?? assessment.durationMinutes,
         });
+        examDurationSecondsRef.current = minutes * 60;
         resetTimer(minutes * 60);
 
         // Proctoring init: fullscreen → face models → camera (config-driven).
@@ -587,7 +605,7 @@ export function AptitudeAssessmentPage() {
             <Button variant="ghost" onClick={() => setShowConfirmSubmit(false)}>
               Cancel
             </Button>
-            <Button variant="primary" onClick={handleSubmit} isLoading={submitting}>
+            <Button variant="primary" onClick={() => handleSubmit()} isLoading={submitting}>
               Confirm Submit
             </Button>
           </>
