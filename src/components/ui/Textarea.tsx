@@ -12,12 +12,19 @@ interface TextareaProps extends TextareaHTMLAttributes<HTMLTextAreaElement> {
 
 export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
   ({ label, error, helperText, maxLength, showCharCount = false, resizable = true, required, className = '', onChange, ...props }, ref) => {
-    const [charCount, setCharCount] = useState(0);
+    const [typedCount, setTypedCount] = useState(0);
 
     const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      setCharCount(e.target.value.length);
+      setTypedCount(e.target.value.length);
       onChange?.(e);
     };
+
+    // A controlled textarea already knows how long its text is. Counting only
+    // keystrokes showed "0/10000" under a field holding a freshly loaded
+    // prompt, and reverted to that count every time the value changed from
+    // outside — switching tabs, say. The local count is the fallback for the
+    // uncontrolled case.
+    const charCount = typeof props.value === 'string' ? props.value.length : typedCount;
 
     return (
       <div className="w-full">

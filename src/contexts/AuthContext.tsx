@@ -1,4 +1,12 @@
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+  useRef,
+  ReactNode,
+} from 'react';
 import { authService } from '@/services/auth.service';
 import {
   setAccessToken,
@@ -6,6 +14,7 @@ import {
   clearTokens,
   broadcastAuthChange,
   refreshAccessToken,
+  isAuthRejection,
   authChannel,
 } from '@/services/api.service';
 import { isJwtExpired } from '@/utils/jwt.utils';
@@ -26,6 +35,9 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/** Breathing room before retrying a /me that failed for a non-auth reason. */
+const RETRY_DELAY_MS = 600;
+
 function normalizeRole(role: string): RoleName {
   return role
     .replace(/^ROLE_/i, '')
@@ -42,23 +54,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const isAuthenticated = !!user;
 
-  const loadMe = useCallback(async () => {
-    try {
-      const response = await authService.me();
-      const me = response.data.data;
-      setUser(me.user);
-      const normalizedRoles = me.roles.map(normalizeRole);
-      setRoles(normalizedRoles);
-      setPermissions(me.permissions as PermissionName[]);
-      return me;
-    } catch {
-      setUser(null);
-      setRoles([]);
-      setPermissions([]);
-      clearTokens();
-      return null;
-    }
+  const clearSession = useCallback(() => {
+    setUser(null);
+    setRoles([]);
+    setPermissions([]);
+    clearTokens();
   }, []);
+
+  /**
+   * Loads the signed-in user, and decides what a failure means.
+   *
+   * Any error used to end the session here, so a dropped connection or a 5xx on
+   * one request threw away a perfectly good login. Only the server rejecting
+   * the token means the session is over — everything else earns one retry and
+   * then leaves the stored token alone, so the next page load can recover it.
+   */
+  const loadMe = useCallback(async () => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const response = await authService.me();
+        const me = response.data.data;
+        setUser(me.user);
+        const normalizedRoles = me.roles.map(normalizeRole);
+        setRoles(normalizedRoles);
+        setPermissions(me.permissions as PermissionName[]);
+        return me;
+      } catch (error) {
+        if (isAuthRejection(error)) {
+          clearSession();
+          return null;
+        }
+        if (attempt === 0) {
+          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+        }
+      }
+    }
+    return null;
+  }, [clearSession]);
 
   const bootstrapSession = useCallback(async () => {
     setIsLoading(true);
@@ -82,14 +114,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // No usable refresh cookie — fall through to a signed-out state.
       }
 
-      setUser(null);
-      setRoles([]);
-      setPermissions([]);
-      clearTokens();
+      clearSession();
     } finally {
       setIsLoading(false);
     }
-  }, [loadMe]);
+  }, [loadMe, clearSession]);
 
   // Bootstrap on mount — acquire the access token (via refresh) and load the
   // user BEFORE any protected page renders, so pages never fire token-less
@@ -98,30 +127,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     bootstrapSession();
   }, [bootstrapSession]);
 
+  // Read inside the cross-tab listener without re-subscribing on every change.
+  const isAuthenticatedRef = useRef(isAuthenticated);
+  isAuthenticatedRef.current = isAuthenticated;
+
   // Cross-tab sync via BroadcastChannel
   useEffect(() => {
     const handleMessage = (e: MessageEvent) => {
       if (e.data?.type === 'logout') {
-        // Clear in-memory token in this tab as well
-        setAccessToken(null);
-        setUser(null);
-        setRoles([]);
-        setPermissions([]);
+        clearSession();
       } else if (e.data?.type === 'login') {
-        // Another tab logged in. Only adopt the shared (refresh-cookie) session
-        // if this tab has no token yet — prevents redundant bootstraps. Because
-        // setAccessToken no longer re-broadcasts, this cannot feed back into a loop.
-        if (!getAccessToken()) {
+        // Another tab logged in. Adopt the session only when this tab is still
+        // signed out — the access token is shared storage now, so holding one
+        // says nothing about whether this tab has loaded its user yet.
+        if (!isAuthenticatedRef.current) {
           bootstrapSession();
         }
       }
     };
 
     const handleForceLogout = () => {
-      setUser(null);
-      setRoles([]);
-      setPermissions([]);
-      clearTokens();
+      clearSession();
     };
 
     authChannel?.addEventListener('message', handleMessage);
@@ -130,7 +156,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       authChannel?.removeEventListener('message', handleMessage);
       window.removeEventListener('auth:forceLogout', handleForceLogout);
     };
-  }, [bootstrapSession]);
+  }, [bootstrapSession, clearSession]);
 
   const login = useCallback(
     async (data: LoginRequest): Promise<{ roles: RoleName[] }> => {

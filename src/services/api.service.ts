@@ -3,9 +3,44 @@ import { ENV } from "@/config/env";
 import { ENDPOINTS } from "@/config/api.endpoints";
 import { getErrorMessage } from "@/config/error-messages";
 import { dispatchErrorToast } from "@/config/toast-events";
+import { isJwtExpired } from "@/utils/jwt.utils";
 import type { ApiErrorEnvelope } from "@/types/api.types";
 
-// ── In-memory token store ────────────────────────────────────────────
+// ── Access-token store ───────────────────────────────────────────────
+//
+// Persisted, not memory-only.
+//
+// The server rotates the refresh cookie on every use and treats a second
+// presentation of an already-rotated token as theft — it revokes the whole
+// session, not just that token. A memory-only access token meant every page
+// load began with nothing and had to spend the refresh cookie to get a token.
+// Reload a few times in quick succession and two rotations are in flight at
+// once — the unloading page's request and the new page's — so the server saw
+// the same refresh token twice and killed the session. The user was logged out
+// for pressing F5.
+//
+// Persisting the access token removes the cause: a reload reuses the token the
+// tab already had, and the refresh cookie is only spent once that token has
+// genuinely expired. Sharing it across tabs (localStorage, not sessionStorage)
+// means opening a second tab does not spend a rotation either.
+//
+// The refresh cookie itself stays httpOnly. The trade-off is that the
+// short-lived access token is now readable by script on this origin — the
+// exposure it already had in memory, extended to survive a reload.
+const TOKEN_STORAGE_KEY = "rightpath.accessToken";
+
+/** Private-mode browsers throw on Storage access — fall back to memory. */
+const storageAvailable = (() => {
+  try {
+    const probe = "__rightpath_probe__";
+    localStorage.setItem(probe, "1");
+    localStorage.removeItem(probe);
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
 let accessToken: string | null = null;
 
 // BroadcastChannel for cross-tab auth sync (replaces localStorage events)
@@ -19,6 +54,15 @@ try {
 export { authChannel };
 
 export function getAccessToken(): string | null {
+  // Storage is the source of truth when it exists, so a tab always sees the
+  // newest token another tab rotated rather than its own stale copy.
+  if (storageAvailable) {
+    try {
+      return localStorage.getItem(TOKEN_STORAGE_KEY);
+    } catch {
+      // Fall through to the in-memory copy.
+    }
+  }
   return accessToken;
 }
 
@@ -28,12 +72,19 @@ export function setAccessToken(token: string | null): void {
   // bootstrap → refresh → setAccessToken path would re-broadcast and create a
   // cross-tab feedback loop. Use broadcastAuthChange() for user-initiated auth.
   accessToken = token;
+  if (!storageAvailable) return;
+  try {
+    if (token) localStorage.setItem(TOKEN_STORAGE_KEY, token);
+    else localStorage.removeItem(TOKEN_STORAGE_KEY);
+  } catch {
+    // Storage full or blocked mid-session — the in-memory copy still works.
+  }
 }
 
 export function clearTokens(): void {
   // Pure store — see setAccessToken. Broadcast logout explicitly via
   // broadcastAuthChange('logout') only for genuine session-end transitions.
-  accessToken = null;
+  setAccessToken(null);
 }
 
 // Explicitly notify other tabs about a user-initiated auth change (login on
@@ -92,10 +143,28 @@ api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 // So there is exactly one in-flight refresh, and every caller awaits it.
 let refreshPromise: Promise<string> | null = null;
 
-export function refreshAccessToken(): Promise<string> {
+const REFRESH_LOCK = "rightpath_auth_refresh";
+
+/**
+ * Runs `fn` with no other tab running it at the same time.
+ *
+ * The in-flight promise below only serialises callers within one tab. Two tabs
+ * waking up together would each spend the refresh cookie, and the second use of
+ * the pre-rotation token is what the server reads as theft. Web Locks are
+ * origin-wide, so they serialise across tabs; without them (older browsers) the
+ * per-tab guard is still better than nothing.
+ */
+function withRefreshLock(fn: () => Promise<string>): Promise<string> {
+  const locks = navigator.locks;
+  if (!locks?.request) return fn();
+  return locks.request(REFRESH_LOCK, fn) as Promise<string>;
+}
+
+/** Spends the refresh cookie for a new access token. */
+function requestNewAccessToken(): Promise<string> {
   // Bare axios, not `api`: the instance's own interceptor would try to refresh
   // a failing refresh, and recurse.
-  refreshPromise ??= axios
+  return axios
     .post<{ data?: { accessToken?: string } }>(
       `${ENV.API_BASE_URL}${ENDPOINTS.AUTH.REFRESH}`,
       {},
@@ -106,14 +175,38 @@ export function refreshAccessToken(): Promise<string> {
       if (!newToken) throw new Error('No token in refresh response');
       setAccessToken(newToken);
       return newToken;
-    })
-    .finally(() => {
-      // Cleared once settled so a later, genuine refresh can start. Callers
-      // already holding this promise are unaffected.
-      refreshPromise = null;
     });
+}
+
+export function refreshAccessToken(): Promise<string> {
+  refreshPromise ??= withRefreshLock(async () => {
+    // Re-checked inside the lock: whoever held it before us may already have
+    // rotated the cookie, and spending it again is exactly the double use the
+    // server revokes sessions for.
+    const current = getAccessToken();
+    if (current && !isJwtExpired(current)) return current;
+    return requestNewAccessToken();
+  }).finally(() => {
+    // Cleared once settled so a later, genuine refresh can start. Callers
+    // already holding this promise are unaffected.
+    refreshPromise = null;
+  });
 
   return refreshPromise;
+}
+
+/**
+ * Did the server actually reject this session, or did the request just fail?
+ *
+ * Only a real 401/403 from the refresh endpoint means the session is gone. A
+ * network drop, a timeout, a 5xx or a request aborted because the page is
+ * unloading say nothing about the session — and tearing it down on those was
+ * its own way of logging people out mid-reload.
+ */
+export function isAuthRejection(error: unknown): boolean {
+  if (!axios.isAxiosError(error)) return false;
+  const status = error.response?.status;
+  return status === 401 || status === 403;
 }
 
 /** Tears the session down locally and tells the app and other tabs. */
@@ -173,7 +266,11 @@ api.interceptors.response.use(
           originalRequest.headers.Authorization = `Bearer ${newToken}`;
           return api(originalRequest);
         } catch (refreshError) {
-          endSession();
+          // Only a rejected session ends the session. A refresh that failed
+          // because the network blinked — or because the tab is reloading and
+          // the request was aborted — leaves the login intact, so the next
+          // attempt can use it.
+          if (isAuthRejection(refreshError)) endSession();
           return Promise.reject(refreshError);
         }
       }

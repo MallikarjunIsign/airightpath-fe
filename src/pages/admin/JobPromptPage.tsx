@@ -43,6 +43,14 @@ interface PromptTab {
   placeholders: string[];
 }
 
+/**
+ * Ceiling for every prompt textarea on this page.
+ *
+ * Raised from 10,000: the generated coding prompt alone reached the old limit
+ * and the editor stopped accepting keystrokes mid-sentence.
+ */
+const MAX_PROMPT_LENGTH = 15000;
+
 const JOB_PLACEHOLDERS = ['{{skills}}', '{{jobTitle}}', '{{experience}}', '{{education}}', '{{jobDescription}}', '{{companyName}}', '{{location}}', '{{role}}', '{{department}}', '{{jobPrefix}}'];
 
 const PROMPT_TABS: PromptTab[] = [
@@ -660,7 +668,7 @@ export function JobPromptPage() {
                       placeholder={`Enter the ${currentTab.label.toLowerCase()} for this job...`}
                       value={promptContents[activeTab] ?? ''}
                       onChange={(e) => setPromptContents((prev) => ({ ...prev, [activeTab]: e.target.value }))}
-                      maxLength={10000}
+                      maxLength={MAX_PROMPT_LENGTH}
                       showCharCount
                       className="min-h-[250px]"
                     />
@@ -747,7 +755,7 @@ export function JobPromptPage() {
                     placeholder="Enter evaluation prompt for this job..."
                     value={evaluationInstructions}
                     onChange={(e) => setEvaluationInstructions(e.target.value)}
-                    maxLength={10000}
+                    maxLength={MAX_PROMPT_LENGTH}
                     showCharCount
                     className="min-h-[180px]"
                   />
