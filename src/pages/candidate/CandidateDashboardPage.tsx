@@ -7,6 +7,7 @@ import {
   Trophy,
   ArrowRight,
   Loader2,
+  Clock,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { assessmentService } from '@/services/assessment.service';
@@ -16,7 +17,8 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ROUTES } from '@/config/routes';
-import { formatDate } from '@/utils/format.utils';
+import { formatDate, formatDateTime } from '@/utils/format.utils';
+import { useNow } from '@/hooks/useNow';
 import type { Assessment } from '@/types/assessment.types';
 import type { InterviewSchedule } from '@/types/interview.types';
 import type { JobApplicationDTO } from '@/types/job.types';
@@ -59,9 +61,20 @@ export function CandidateDashboardPage() {
 
   // `expired` is set by a scheduled sweep, so a deadline that passed minutes ago
   // may not be flagged yet — check the date too, as the assessments table does.
-  const now = Date.now();
+  const now = useNow().getTime();
   const isExpired = (a: Assessment) =>
     a.expired || new Date(a.deadline).getTime() < now;
+
+  /**
+   * An assignment can be scheduled to open later. Same rule as the assessments
+   * list — an exam still inside its window cannot be started from here either,
+   * or this card would be the way around it.
+   */
+  const startsLater = (a: Assessment) => {
+    if (!a.startTime) return false;
+    const startsAt = new Date(a.startTime).getTime();
+    return Number.isFinite(startsAt) && startsAt > now;
+  };
 
   const upcomingAssessments = assessments.filter((a) => !a.examAttended && !isExpired(a));
   const upcomingInterviews = interviews.filter((i) => i.attemptStatus !== 'COMPLETED');
@@ -197,19 +210,28 @@ export function CandidateDashboardPage() {
                         {assessment.jobPrefix}
                       </p>
                       <p className="text-sm text-[var(--textSecondary)]">
-                        Deadline: {formatDate(assessment.deadline)}
+                        {startsLater(assessment)
+                          ? `Opens: ${formatDateTime(assessment.startTime!)}`
+                          : `Deadline: ${formatDate(assessment.deadline)}`}
                       </p>
                     </div>
                   </div>
-                  <Button
-                    size="sm"
-                    className="flex-shrink-0"
-                    onClick={() =>
-                      navigate(ROUTES.CANDIDATE.INSTRUCTIONS, { state: { assessment } })
-                    }
-                  >
-                    Start
-                  </Button>
+                  {startsLater(assessment) ? (
+                    <span className="flex-shrink-0 flex items-center gap-1.5 text-sm text-[var(--textSecondary)]">
+                      <Clock size={14} />
+                      Scheduled
+                    </span>
+                  ) : (
+                    <Button
+                      size="sm"
+                      className="flex-shrink-0"
+                      onClick={() =>
+                        navigate(ROUTES.CANDIDATE.INSTRUCTIONS, { state: { assessment } })
+                      }
+                    >
+                      Start
+                    </Button>
+                  )}
                 </div>
               ))}
             </div>

@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ClipboardCheck, Play, Loader2, AlertCircle } from 'lucide-react';
+import { ClipboardCheck, Play, Loader2, AlertCircle, Clock } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { assessmentService } from '@/services/assessment.service';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { ROUTES } from '@/config/routes';
-import { formatDate } from '@/utils/format.utils';
+import { formatDate, formatDateTime } from '@/utils/format.utils';
+import { useNow } from '@/hooks/useNow';
 import type { Assessment } from '@/types/assessment.types';
 
 export function AssessmentListPage() {
@@ -16,6 +17,9 @@ export function AssessmentListPage() {
 
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [loading, setLoading] = useState(true);
+  // Ticks, so an exam scheduled for 18:00 unlocks itself for a candidate who is
+  // already sitting on this page rather than waiting for them to reload.
+  const now = useNow();
 
   useEffect(() => {
     async function fetchAssessments() {
@@ -64,7 +68,10 @@ export function AssessmentListPage() {
               the screen whose whole purpose is to press it. */}
           <div className="md:hidden space-y-3">
             {assessments.map((assessment) => {
-              const { isExpired, canStart } = assessmentState(assessment);
+              const { isExpired, canStart, notOpenYet, startsAt } = assessmentState(
+                assessment,
+                now,
+              );
 
               return (
                 <div
@@ -78,14 +85,25 @@ export function AssessmentListPage() {
                         {assessment.jobPrefix}
                       </p>
                     </div>
-                    <StatusBadge assessment={assessment} isExpired={isExpired} />
+                    <StatusBadge
+                      assessment={assessment}
+                      isExpired={isExpired}
+                      notOpenYet={notOpenYet}
+                    />
                   </div>
 
                   <dl className="grid grid-cols-2 gap-x-3 gap-y-2">
                     <div className="min-w-0">
-                      <dt className="text-xs text-[var(--textTertiary)] mb-0.5">Assigned</dt>
+                      {/* The start time is the actionable one, so it takes the
+                          slot when there is one; the assigned date is only
+                          bookkeeping. */}
+                      <dt className="text-xs text-[var(--textTertiary)] mb-0.5">
+                        {startsAt ? 'Starts' : 'Assigned'}
+                      </dt>
                       <dd className="text-sm text-[var(--textSecondary)]">
-                        {formatDate(assessment.assignedAt)}
+                        {startsAt
+                          ? formatDateTime(startsAt.toISOString())
+                          : formatDate(assessment.assignedAt)}
                       </dd>
                     </div>
                     <div className="min-w-0">
@@ -99,6 +117,8 @@ export function AssessmentListPage() {
                   <ActionCell
                     assessment={assessment}
                     canStart={canStart}
+                    notOpenYet={notOpenYet}
+                    startsAt={startsAt}
                     onStart={handleStart}
                     className="w-full justify-center text-center"
                   />
@@ -120,7 +140,7 @@ export function AssessmentListPage() {
                     Job
                   </th>
                   <th className="text-left px-6 py-4 text-sm font-semibold text-[var(--textSecondary)] w-[17%]">
-                    Assigned Date
+                    Starts
                   </th>
                   <th className="text-left px-6 py-4 text-sm font-semibold text-[var(--textSecondary)] w-[17%]">
                     Deadline
@@ -135,7 +155,10 @@ export function AssessmentListPage() {
               </thead>
               <tbody>
                 {assessments.map((assessment) => {
-                  const { isExpired, canStart } = assessmentState(assessment);
+                  const { isExpired, canStart, notOpenYet, startsAt } = assessmentState(
+                    assessment,
+                    now,
+                  );
 
                   return (
                     <tr
@@ -148,19 +171,30 @@ export function AssessmentListPage() {
                       <td className="px-6 py-4 align-top text-sm text-[var(--text)] break-words">
                         {assessment.jobPrefix}
                       </td>
+                      {/* The window the candidate is waiting on, to the minute.
+                          A date alone cannot answer "can I sit it now?" for an
+                          exam that opens at 18:00. */}
                       <td className="px-6 py-4 align-top text-sm text-[var(--textSecondary)]">
-                        {formatDate(assessment.assignedAt)}
+                        {startsAt
+                          ? formatDateTime(startsAt.toISOString())
+                          : formatDate(assessment.assignedAt)}
                       </td>
                       <td className="px-6 py-4 align-top text-sm text-[var(--textSecondary)]">
                         {formatDate(assessment.deadline)}
                       </td>
                       <td className="px-6 py-4 align-top">
-                        <StatusBadge assessment={assessment} isExpired={isExpired} />
+                        <StatusBadge
+                          assessment={assessment}
+                          isExpired={isExpired}
+                          notOpenYet={notOpenYet}
+                        />
                       </td>
                       <td className="px-6 py-4 align-top">
                         <ActionCell
                           assessment={assessment}
                           canStart={canStart}
+                          notOpenYet={notOpenYet}
+                          startsAt={startsAt}
                           onStart={handleStart}
                         />
                       </td>
@@ -180,10 +214,32 @@ export function AssessmentListPage() {
 // Shared by the desktop row and the mobile card so the two renderings cannot
 // drift apart.
 
-/** Expiry is derived in one place so the badge and the button always agree. */
-function assessmentState(assessment: Assessment) {
-  const isExpired = assessment.expired || new Date(assessment.deadline) < new Date();
-  return { isExpired, canStart: !assessment.examAttended && !isExpired };
+/**
+ * The window an assessment sits in, derived in one place so the badge, the
+ * button and the caption can never disagree.
+ *
+ * An assignment carries a start time as well as a deadline, and the start time
+ * was being ignored: an exam scheduled for 18:00 could be opened the moment it
+ * was assigned. It is now closed until its window opens — the candidate can see
+ * it and see when it begins, but not sit it early.
+ */
+function assessmentState(assessment: Assessment, now: Date) {
+  const startsAt = parseDate(assessment.startTime);
+  const notOpenYet = !!startsAt && startsAt > now;
+  const isExpired = assessment.expired || new Date(assessment.deadline) < now;
+  return {
+    startsAt,
+    notOpenYet,
+    isExpired,
+    canStart: !assessment.examAttended && !isExpired && !notOpenYet,
+  };
+}
+
+/** An unparseable or absent timestamp is treated as "no start time set". */
+function parseDate(value?: string): Date | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function TypeBadge({ type }: Readonly<{ type: Assessment['assessmentType'] }>) {
@@ -197,7 +253,8 @@ function TypeBadge({ type }: Readonly<{ type: Assessment['assessmentType'] }>) {
 function StatusBadge({
   assessment,
   isExpired,
-}: Readonly<{ assessment: Assessment; isExpired: boolean }>) {
+  notOpenYet,
+}: Readonly<{ assessment: Assessment; isExpired: boolean; notOpenYet?: boolean }>) {
   if (assessment.examAttended) {
     return (
       <Badge variant="success" size="sm">
@@ -212,6 +269,14 @@ function StatusBadge({
       </Badge>
     );
   }
+  // "Pending" would read as "waiting for you"; this one is waiting for a clock.
+  if (notOpenYet) {
+    return (
+      <Badge variant="info" size="sm">
+        Scheduled
+      </Badge>
+    );
+  }
   return (
     <Badge variant="warning" size="sm">
       Pending
@@ -222,11 +287,15 @@ function StatusBadge({
 function ActionCell({
   assessment,
   canStart,
+  notOpenYet,
+  startsAt,
   onStart,
   className = '',
 }: Readonly<{
   assessment: Assessment;
   canStart: boolean;
+  notOpenYet?: boolean;
+  startsAt?: Date | null;
   onStart: (assessment: Assessment) => void;
   /** Lets the mobile card stretch the button to the full card width. */
   className?: string;
@@ -246,6 +315,21 @@ function ActionCell({
   if (assessment.examAttended) {
     return (
       <span className={`block text-sm text-[var(--textSecondary)] ${className}`}>Completed</span>
+    );
+  }
+  // Naming the moment it opens, not just refusing: "Locked" on its own leaves
+  // the candidate checking back at random, or mailing to ask.
+  if (notOpenYet) {
+    return (
+      <div className={`flex items-start gap-1.5 text-sm text-[var(--textSecondary)] ${className}`}>
+        <Clock size={14} className="mt-0.5 flex-shrink-0" />
+        <span className="min-w-0">
+          <span className="block">Starts</span>
+          <span className="block text-xs text-[var(--textTertiary)]">
+            {startsAt ? formatDateTime(startsAt.toISOString()) : '--'}
+          </span>
+        </span>
+      </div>
     );
   }
   return (

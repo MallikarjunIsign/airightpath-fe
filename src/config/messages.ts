@@ -77,6 +77,8 @@ export const MESSAGES = {
     secondPersonPresent: 'Another person is visible in your camera. Please sit alone to continue.',
     tooNoisy: 'Your surroundings are too noisy. Please move somewhere quieter and try again.',
     roomScanRequired: 'Please complete the room scan before starting the exam.',
+    /** Names the moment, so the candidate knows when to come back. */
+    notOpenYet: (startsAt: string) => `This exam opens at ${startsAt}. You can start it then.`,
     desktopRequired:
       'Please switch to a desktop or laptop with a webcam. This exam cannot be taken on a phone or tablet.',
     roomScanDone: 'Room scan captured. Thank you.',

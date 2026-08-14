@@ -36,6 +36,8 @@ import { ROUTES } from '@/config/routes';
 import { PROCTORING_CONFIG } from '@/config/proctoring.config';
 import { MESSAGES } from '@/config/messages';
 import { computeExamMinutes, formatDurationLabel } from '@/utils/exam-duration.utils';
+import { formatDateTime } from '@/utils/format.utils';
+import { useNow } from '@/hooks/useNow';
 import type { Assessment } from '@/types/assessment.types';
 
 /** Face checks on this screen run fast — the candidate is waiting on them. */
@@ -68,6 +70,9 @@ export function ExamInstructionsPage() {
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [photoStatus, setPhotoStatus] = useState<IdentityPhotoStatus>('idle');
   const isDesktop = useIsDesktop();
+  // Ticks so the exam unlocks on this screen the moment its window opens,
+  // rather than leaving a candidate who arrived early staring at a dead button.
+  const now = useNow();
   // True unless a required room scan is still outstanding — the check component
   // reports this, since it owns the scan.
   const [roomScanOk, setRoomScanOk] = useState(!PROCTORING_CONFIG.roomScan.required);
@@ -197,13 +202,23 @@ export function ExamInstructionsPage() {
   // and the attempt would still be recorded against the candidate.
   const deviceOk = isDesktop;
 
+  // The assignment's own window. The list already hides the Start button before
+  // it opens, but this screen can be reached directly, and "the button was
+  // hidden" is not a rule — this is where the rule lives.
+  const startsAt = assessment?.startTime ? new Date(assessment.startTime) : null;
+  const notOpenYet = !!startsAt && !Number.isNaN(startsAt.getTime()) && startsAt > now;
+
   const secondPersonBlocking = faceCheckAvailable && faceStatus === 'multiple';
   const noiseBlocking = noiseConfig.enabled && noiseConfig.blocksStart && noise.band === 'loud';
 
   // Every reason the button is disabled, spelled out. A dead button with no
   // explanation is the fastest way to make a candidate think the exam is broken.
   const blockers: string[] = [];
-  // First in the list: on the wrong device nothing below it can be fixed.
+  // First in the list: nothing else on this screen matters until the exam opens.
+  if (notOpenYet && startsAt) {
+    blockers.push(MESSAGES.examSetup.notOpenYet(formatDateTime(startsAt.toISOString())));
+  }
+  // On the wrong device nothing below it can be fixed either.
   if (!deviceOk) blockers.push(MESSAGES.examSetup.desktopRequired);
   if (!cameraReady || !micReady) blockers.push(MESSAGES.examSetup.enableDevicesRequired);
   if (!photoOk) {
