@@ -35,8 +35,15 @@ import { nowDateTimeLocal, isPast } from '@/utils/datetime.utils';
 import { MESSAGES } from '@/config/messages';
 import type { JobPostDTO, JobApplicationDTO, JobApplicationStatus } from '@/types/job.types';
 
-// Assessments are assigned at the RECONFIRMED stage, just before the exam link is sent.
-const ASSIGN_STAGE: JobApplicationStatus = 'RECONFIRMED';
+/**
+ * Stages from which an exam can be assigned.
+ *
+ * RECONFIRMED is the first round, just before the exam link is sent. The later
+ * two are included because a round is not always one assignment — aptitude can
+ * be set first and coding added once it has been sat — and offering the button
+ * only at RECONFIRMED made the second exam unassignable.
+ */
+const ASSIGN_STAGES: JobApplicationStatus[] = ['RECONFIRMED', 'EXAM_SENT', 'EXAM_COMPLETED'];
 
 const STAGES: JobApplicationStatus[] = [
   'APPLIED',
@@ -55,6 +62,10 @@ const STAGE_LABELS: Record<string, string> = {
   APPLIED: 'Applied',
   SHORTLISTED: 'Shortlisted',
   ACKNOWLEDGED: 'Acknowledged',
+  // Named after the status, not the action waiting on it. Calling this tab
+  // "Reconfirm" put three different things called reconfirm on one screen —
+  // this tab, the "Reconfirmed" stage next to it, and the Send Reconfirmation
+  // button inside it — and a recruiter could not tell which one they were on.
   ACKNOWLEDGED_BACK: 'Ack Back',
   RECONFIRMED: 'Reconfirmed',
   EXAM_SENT: 'Exam Sent',
@@ -571,7 +582,7 @@ export function CandidateDetailsPage() {
           {(availableActions.length > 0 ||
             activeStage === ('APPLIED' as JobApplicationStatus) ||
             activeStage === ('REJECTED' as JobApplicationStatus) ||
-            activeStage === ASSIGN_STAGE) && (
+            ASSIGN_STAGES.includes(activeStage)) && (
             <div className="flex flex-wrap gap-2">
               {activeStage === ('APPLIED' as JobApplicationStatus) && (
                 <>
@@ -622,14 +633,18 @@ export function CandidateDetailsPage() {
                   </Button>
                 </>
               )}
-              {activeStage === ASSIGN_STAGE && (
+              {ASSIGN_STAGES.includes(activeStage) && (
                 <Button
                   variant="primary"
                   size="sm"
                   leftIcon={<ClipboardList size={16} />}
                   onClick={handleAssignAssessment}
                 >
-                  Assign Assessment
+                  {/* Naming it "another" past the first round, so nobody reads
+                      the button as a way to re-send the paper already sat. */}
+                  {activeStage === 'RECONFIRMED'
+                    ? 'Assign Assessment'
+                    : 'Assign Another Assessment'}
                 </Button>
               )}
               {availableActions.map((key) => {

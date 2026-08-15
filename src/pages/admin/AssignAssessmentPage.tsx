@@ -19,6 +19,7 @@ import { BackLink } from '@/components/ui/BackLink';
 import { QuestionPaperExportDialog } from '@/components/admin/QuestionPaperExportDialog';
 import { ExamDurationFields } from '@/components/admin/ExamDurationFields';
 import { Select } from '@/components/ui/Select';
+import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/contexts/AuthContext';
@@ -36,7 +37,28 @@ import {
 } from '@/utils/exam-duration.utils';
 import { MESSAGES } from '@/config/messages';
 import { APP_CONFIG } from '@/config/app.config';
-import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
+import type { JobPostDTO, JobApplicationDTO, JobApplicationStatus } from '@/types/job.types';
+
+/**
+ * Who may be assigned an exam.
+ *
+ * RECONFIRMED is the first round. The other two are here because an exam round
+ * is not always one assignment: a job may set aptitude first and add coding
+ * once it is sat, and listing only RECONFIRMED made that impossible — the
+ * candidate left this screen the moment their first paper was assigned, so
+ * their coding exam could never be created and never appeared on their
+ * assessments list.
+ */
+const ASSIGNABLE_STATUSES = new Set<JobApplicationStatus>([
+  'RECONFIRMED',
+  'EXAM_SENT',
+  'EXAM_COMPLETED',
+]);
+
+/** Marks a candidate who already has at least one exam for this job. */
+function hasExamAlready(status: JobApplicationStatus): boolean {
+  return status === 'EXAM_SENT' || status === 'EXAM_COMPLETED';
+}
 
 interface FileState {
   file: File | null;
@@ -298,7 +320,7 @@ export function AssignAssessmentPage() {
     setLoadingCandidates(true);
     try {
       const res = await jobApplicationService.getByPrefix(selectedPrefix);
-      const eligible = (res.data ?? []).filter((c) => c.status === 'RECONFIRMED');
+      const eligible = (res.data ?? []).filter((c) => ASSIGNABLE_STATUSES.has(c.status));
       setCandidates(eligible);
     } catch {
       // Error toast auto-handled by interceptor
@@ -879,6 +901,14 @@ export function AssignAssessmentPage() {
                             {c.email}
                           </p>
                         </div>
+                        {/* Says which of these candidates is on their second
+                            paper, so an admin assigning coding does not wonder
+                            why someone who has already sat aptitude is listed. */}
+                        {hasExamAlready(c.status) && (
+                          <Badge variant="info" size="sm" className="flex-shrink-0">
+                            {c.status === 'EXAM_COMPLETED' ? 'Exam done' : 'Exam sent'}
+                          </Badge>
+                        )}
                       </label>
                     ))}
                   </div>
