@@ -98,19 +98,32 @@ const BULK_ACTION_CONFIG: Record<
   failure: { label: 'Send Failure', hasDateTime: false, icon: <AlertTriangle size={16} /> },
 };
 
-// Stage-specific actions: only show relevant bulk action buttons per stage
+/**
+ * Stage-specific actions: only show relevant bulk action buttons per stage.
+ *
+ * Two rules cut across the table:
+ *
+ * - Rejection is on every stage. A candidate can drop out of the running at any
+ *   point (no-show to the exam, withdrew after the interview), and leaving
+ *   stages without it forced admins to push people forward just to reject them.
+ * - Reconfirmation is offered at ACKNOWLEDGED as well as ACKNOWLEDGED_BACK, so
+ *   an admin need not wait on the candidate's ack-back to move them to
+ *   RECONFIRMED — the stage where Assign Assessment unlocks. It goes no earlier
+ *   than that: APPLIED and SHORTLISTED candidates have not been sent the ack
+ *   mail yet, and reconfirming one skips the step it is confirming.
+ */
 const STAGE_ACTIONS: Record<string, BulkAction[]> = {
-  APPLIED: [],
+  APPLIED: ['rejection'],
   SHORTLISTED: ['ack', 'rejection'],
-  ACKNOWLEDGED: [],
+  ACKNOWLEDGED: ['reconfirmation', 'rejection'],
   ACKNOWLEDGED_BACK: ['reconfirmation', 'rejection'],
   // Exams reach candidates via Assign Assessment, not from here.
   RECONFIRMED: ['rejection'],
-  EXAM_SENT: [],
+  EXAM_SENT: ['rejection'],
   EXAM_COMPLETED: ['rejection'],
-  INTERVIEW_SCHEDULED: [],
+  INTERVIEW_SCHEDULED: ['rejection'],
   INTERVIEW_COMPLETED: ['success', 'rejection'],
-  SELECTED: [],
+  SELECTED: ['rejection'],
 };
 
 export function CandidateDetailsPage() {
@@ -652,12 +665,16 @@ export function CandidateDetailsPage() {
                 return (
                   <Button
                     key={key}
-                    variant="outline"
+                    // Rejection carries the red fill on every stage, so the one
+                    // action that takes a candidate out of the running never
+                    // reads like the outline buttons that move them along.
+                    variant={key === 'rejection' ? 'danger' : 'outline'}
                     size="sm"
                     leftIcon={config.icon}
                     onClick={() => openActionModal(key)}
                   >
                     {config.label}
+                    {selectedEmails.size > 0 ? ` (${selectedEmails.size})` : ''}
                   </Button>
                 );
               })}
