@@ -106,16 +106,15 @@ const BULK_ACTION_CONFIG: Record<
  * - Rejection is on every stage. A candidate can drop out of the running at any
  *   point (no-show to the exam, withdrew after the interview), and leaving
  *   stages without it forced admins to push people forward just to reject them.
- * - Reconfirmation is offered at ACKNOWLEDGED as well as ACKNOWLEDGED_BACK, so
- *   an admin need not wait on the candidate's ack-back to move them to
- *   RECONFIRMED — the stage where Assign Assessment unlocks. It goes no earlier
- *   than that: APPLIED and SHORTLISTED candidates have not been sent the ack
- *   mail yet, and reconfirming one skips the step it is confirming.
+ * - Reconfirmation sits on ACKNOWLEDGED_BACK and nowhere else. The validator
+ *   allows RECONFIRMED only out of ACKNOWLEDGED_BACK, and Assign Assessment
+ *   consumes a RECONFIRMED candidate rather than producing one, so this button
+ *   is the sole way out of Ack Back — without it the stage is a dead end.
  */
 const STAGE_ACTIONS: Record<string, BulkAction[]> = {
   APPLIED: ['rejection'],
   SHORTLISTED: ['ack', 'rejection'],
-  ACKNOWLEDGED: ['reconfirmation', 'rejection'],
+  ACKNOWLEDGED: ['rejection'],
   ACKNOWLEDGED_BACK: ['reconfirmation', 'rejection'],
   // Exams reach candidates via Assign Assessment, not from here.
   RECONFIRMED: ['rejection'],

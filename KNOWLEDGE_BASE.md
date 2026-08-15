@@ -2078,13 +2078,22 @@ not_started → in_progress → saved → submitted (locked)
 ```
 APPLIED → SHORTLISTED | REJECTED
 SHORTLISTED → ACKNOWLEDGED | REJECTED
-ACKNOWLEDGED → ACKNOWLEDGED_BACK
+ACKNOWLEDGED → ACKNOWLEDGED_BACK | REJECTED
 ACKNOWLEDGED_BACK → RECONFIRMED | REJECTED
 RECONFIRMED → EXAM_SENT | REJECTED
-EXAM_SENT → EXAM_COMPLETED
-EXAM_COMPLETED → INTERVIEW_SCHEDULED | REJECTED
-INTERVIEW_SCHEDULED → INTERVIEW_COMPLETED
+EXAM_SENT → EXAM_COMPLETED | EXAM_SENT | REJECTED
+EXAM_COMPLETED → INTERVIEW_SCHEDULED | EXAM_SENT | REJECTED
+INTERVIEW_SCHEDULED → INTERVIEW_COMPLETED | REJECTED
 INTERVIEW_COMPLETED → SELECTED | REJECTED
+SELECTED → REJECTED
 ```
 
-Enforced by `StatusTransitionValidator.validate(currentStatus, targetStatus)` — throws `IllegalStateException` on invalid transitions. REJECTED and SELECTED are terminal states.
+Enforced by `StatusTransitionValidator.validate(currentStatus, targetStatus)` — throws `IllegalStateException` on invalid transitions.
+
+**Rejection is reachable from every live stage.** The admin Candidates page offers Send Rejection on all ten stages, and a candidate can drop out at any point (stops replying after the ack, no-shows the exam, cancels the interview). Rejecting a SELECTED candidate covers a declined or withdrawn offer.
+
+REJECTED is fully terminal — the only way back is the "Shortlist Anyway" override, which bypasses the validator deliberately (`shortlist(override = true)`). SELECTED is terminal for every *forward* step; rejection is its one permitted move.
+
+`EXAM_SENT → EXAM_SENT` and `EXAM_COMPLETED → EXAM_SENT` exist because an exam round is not always one assignment — a job may set aptitude first and add the coding paper once it has been sat.
+
+Pinned by `StatusTransitionValidatorTest`.
