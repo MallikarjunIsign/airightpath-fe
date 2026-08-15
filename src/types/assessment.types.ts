@@ -100,4 +100,10 @@ export interface AssessmentResult {
   score: number;
   resultsJson: string;
   jobPrefix: string;
+  /**
+   * The assessment actually sat. A re-assigned exam leaves several rows of the
+   * same type on the same job, so without this the server can only guess which
+   * attempt a result belongs to.
+   */
+  assessmentId?: number;
 }

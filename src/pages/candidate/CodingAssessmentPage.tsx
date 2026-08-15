@@ -333,6 +333,9 @@ export function CodingAssessmentPage() {
           submission,
         ]),
         jobPrefix: assessment.jobPrefix,
+        // See the aptitude page: identifies which assigned paper this is, so a
+        // re-sent exam does not close out the attempt that came before it.
+        assessmentId: assessment.id,
       });
 
       showToast(MESSAGES.exam.codingSubmitted, 'success');

@@ -181,6 +181,10 @@ export function AptitudeAssessmentPage() {
         score,
         resultsJson: JSON.stringify([...resultDetails, submission]),
         jobPrefix: assessment.jobPrefix,
+        // Names the paper this candidate actually had open. Where an exam has
+        // been re-sent there are two of the same type, and the server cannot
+        // otherwise tell which one is being handed in.
+        assessmentId: assessment.id,
       });
 
       showToast(MESSAGES.exam.aptitudeSubmitted, 'success');

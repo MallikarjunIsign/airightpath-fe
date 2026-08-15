@@ -87,6 +87,7 @@ export const assessmentService = {
         assessmentType: data.assessmentType,
         score: data.score,
         jobPrefix: data.jobPrefix,
+        assessmentId: data.assessmentId,
       },
     });
   },
