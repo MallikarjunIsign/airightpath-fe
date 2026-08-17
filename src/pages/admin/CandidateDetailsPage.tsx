@@ -38,12 +38,24 @@ import type { JobPostDTO, JobApplicationDTO, JobApplicationStatus } from '@/type
 /**
  * Stages from which an exam can be assigned.
  *
- * RECONFIRMED is the first round, just before the exam link is sent. The later
- * two are included because a round is not always one assignment — aptitude can
- * be set first and coding added once it has been sat — and offering the button
- * only at RECONFIRMED made the second exam unassignable.
+ * RECONFIRMED is the first round of the full pipeline, just before the exam link
+ * is sent. EXAM_SENT and EXAM_COMPLETED are included because a round is not
+ * always one assignment — aptitude can be set first and coding added once it has
+ * been sat — and offering the button only at RECONFIRMED made the second exam
+ * unassignable.
+ *
+ * APPLIED and SHORTLISTED are the direct route, for a recruiter who wants an
+ * applicant examined without the ack and reconfirmation round-trip. Assigning
+ * from APPLIED shortlists the candidate as part of the same action, so they are
+ * recorded as shortlisted rather than skipping the stage.
  */
-const ASSIGN_STAGES: JobApplicationStatus[] = ['RECONFIRMED', 'EXAM_SENT', 'EXAM_COMPLETED'];
+const ASSIGN_STAGES: JobApplicationStatus[] = [
+  'APPLIED',
+  'SHORTLISTED',
+  'RECONFIRMED',
+  'EXAM_SENT',
+  'EXAM_COMPLETED',
+];
 
 const STAGES: JobApplicationStatus[] = [
   'APPLIED',
@@ -124,6 +136,21 @@ const STAGE_ACTIONS: Record<string, BulkAction[]> = {
   INTERVIEW_COMPLETED: ['success', 'rejection'],
   SELECTED: ['rejection'],
 };
+
+/**
+ * What the assign button says, which differs by where in the pipeline it is:
+ *
+ * - Applied / Shortlisted skip the ack round-trip, and "Send Exam Directly" is
+ *   the promise being made — the candidate is shortlisted and mailed the paper
+ *   in one action.
+ * - Past the first round it is "another", so nobody reads the button as a way to
+ *   re-send the paper already sat.
+ */
+function assignButtonLabel(stage: JobApplicationStatus): string {
+  if (stage === 'APPLIED' || stage === 'SHORTLISTED') return 'Send Exam Directly';
+  if (stage === 'RECONFIRMED') return 'Assign Assessment';
+  return 'Assign Another Assessment';
+}
 
 export function CandidateDetailsPage() {
   const { showToast } = useToast();
@@ -652,11 +679,7 @@ export function CandidateDetailsPage() {
                   leftIcon={<ClipboardList size={16} />}
                   onClick={handleAssignAssessment}
                 >
-                  {/* Naming it "another" past the first round, so nobody reads
-                      the button as a way to re-send the paper already sat. */}
-                  {activeStage === 'RECONFIRMED'
-                    ? 'Assign Assessment'
-                    : 'Assign Another Assessment'}
+                  {assignButtonLabel(activeStage)}
                 </Button>
               )}
               {availableActions.map((key) => {

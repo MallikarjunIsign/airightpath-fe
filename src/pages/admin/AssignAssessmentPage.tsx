@@ -42,14 +42,21 @@ import type { JobPostDTO, JobApplicationDTO, JobApplicationStatus } from '@/type
 /**
  * Who may be assigned an exam.
  *
- * RECONFIRMED is the first round. The other two are here because an exam round
- * is not always one assignment: a job may set aptitude first and add coding
- * once it is sat, and listing only RECONFIRMED made that impossible — the
- * candidate left this screen the moment their first paper was assigned, so
- * their coding exam could never be created and never appeared on their
- * assessments list.
+ * RECONFIRMED is the first round of the full pipeline. EXAM_SENT and
+ * EXAM_COMPLETED are here because an exam round is not always one assignment: a
+ * job may set aptitude first and add coding once it is sat, and listing only
+ * RECONFIRMED made that impossible — the candidate left this screen the moment
+ * their first paper was assigned, so their coding exam could never be created
+ * and never appeared on their assessments list.
+ *
+ * APPLIED and SHORTLISTED are the direct route. A recruiter who already wants a
+ * candidate examined can send the paper without walking them through the ack and
+ * reconfirmation round-trip; the backend shortlists an applicant as part of the
+ * assignment, so they still pass through SHORTLISTED on the way to EXAM_SENT.
  */
 const ASSIGNABLE_STATUSES = new Set<JobApplicationStatus>([
+  'APPLIED',
+  'SHORTLISTED',
   'RECONFIRMED',
   'EXAM_SENT',
   'EXAM_COMPLETED',
