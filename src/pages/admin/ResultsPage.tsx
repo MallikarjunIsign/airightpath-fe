@@ -22,11 +22,13 @@ import { Button } from '@/components/ui/Button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { jobService } from '@/services/job.service';
+import { jobApplicationService } from '@/services/job-application.service';
 import { assessmentService } from '@/services/assessment.service';
 import { compilerService } from '@/services/compiler.service';
 import { usePersistentState } from '@/hooks/usePersistentState';
 import { useToast } from '@/components/ui/Toast';
 import { downloadBlob } from '@/utils/question-paper.utils';
+import { getAppEmail } from '@/utils/application.utils';
 import { buildResultsWorkbook, resultsWorkbookFileName } from '@/utils/results-export.utils';
 import {
   aptitudeScorePercent,
@@ -35,12 +37,22 @@ import {
   buildCodingRows,
   scoreColor,
   splitResultsJson,
+  summarizeAptitude,
+  groupCodingByBand,
+  normalizeBand,
+  isAnswered,
+  codeOf,
+  rowTitle,
+  rowLanguage,
+  codingOutcome,
+  passedTestCount,
+  plannedTestCount,
   passMarkOf,
   moduleVerdict,
   overallVerdict,
   DEFAULT_PASS_PERCENTAGE,
 } from '@/utils/result.utils';
-import type { JobPostDTO } from '@/types/job.types';
+import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
 import type { Assessment, RawCodingQuestion } from '@/types/assessment.types';
 import type { Result, AptitudeAnswer, CodingAnswer } from '@/types/result.types';
 import type { CodeSubmissionResponse } from '@/types/compiler.types';
@@ -82,6 +94,9 @@ interface CandidateAssignment {
   /** The pass mark each paper was assigned with, defaulted where absent. */
   aptitudePassMark: number;
   codingPassMark: number;
+  /** When each paper's exam window opened, for the exported report. */
+  aptitudeStart?: string;
+  codingStart?: string;
 }
 
 // ── Aggregated candidate row ─────────────────────────────────────────
@@ -104,6 +119,46 @@ interface CandidateRow {
    */
   aptitudeVerdict: 'PASSED' | 'FAILED' | null;
   codingVerdict: 'PASSED' | 'FAILED' | null;
+  /** The application behind the email — name, contact, experience, referral. */
+  profile?: JobApplicationDTO;
+  /** When each paper's exam window opened, as scheduled at assign time. */
+  aptitudeStart?: string;
+  codingStart?: string;
+  /** Question counts behind the aptitude percentage, for the exported report. */
+  aptitudeSummary?: { total: number; answered: number; correct: number };
+  /** The aptitude answer sheet: one entry per question, as the candidate left it. */
+  aptitudeAnswerSheet?: {
+    number: number;
+    question: string;
+    difficulty: string;
+    selectedAnswer: string;
+    correctAnswer: string;
+    isCorrect: boolean;
+    answered: boolean;
+    marks: number | null;
+  }[];
+  /** One entry per coding question, paper-aware, for the exported report. */
+  codingQuestions?: {
+    label: string;
+    title: string;
+    difficulty: string;
+    language?: string;
+    outcome: 'pass' | 'fail' | 'skip';
+    testsPassed: number;
+    testsTotal: number;
+    submittedAt?: string;
+    /** The code as submitted — the coding half of the answer sheet. */
+    code: string;
+  }[];
+  /** Coding broken down by difficulty band, for the exported report. */
+  codingBands?: {
+    name: string;
+    questions: number;
+    solved: number;
+    attempted: number;
+    testsPassed: number;
+    testsTotal: number;
+  }[];
 }
 
 export function ResultsPage() {
@@ -118,10 +173,10 @@ export function ResultsPage() {
   const [codingPaper, setCodingPaper] = useState<RawCodingQuestion[] | null>(null);
   /** Emails with a coding assessment on this job, whether or not they sat it. */
   const [codingAssigned, setCodingAssigned] = useState<Set<string>>(new Set());
-  /** Per-candidate pass marks, read off the assessments they were assigned. */
-  const [passMarks, setPassMarks] = useState<Map<string, { aptitude: number; coding: number }>>(
-    new Map(),
-  );
+  /** Per-candidate assessment facts: pass marks and when each window opened. */
+  const [assignments, setAssignments] = useState<Map<string, CandidateAssignment>>(new Map());
+  /** Applications for the selected job, keyed by email — names and contact details. */
+  const [profiles, setProfiles] = useState<Map<string, JobApplicationDTO>>(new Map());
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [loadingResults, setLoadingResults] = useState(false);
   // Not persisted, unlike the job selection: a filter left over from a previous
@@ -152,7 +207,8 @@ export function ResultsPage() {
       setCodeSubmissions([]);
       setCodingPaper(null);
       setCodingAssigned(new Set());
-      setPassMarks(new Map());
+      setAssignments(new Map());
+      setProfiles(new Map());
     }
   }, [selectedPrefix]);
 
@@ -172,14 +228,24 @@ export function ResultsPage() {
     if (!selectedPrefix) return;
     setLoadingResults(true);
     try {
-      const [resultsRes, codeRes] = await Promise.all([
+      // Applications come along for the ride: the results API knows only an
+      // email, and the exported report needs the person behind it — name,
+      // contact, experience, referral. Failure is tolerated so a profile lookup
+      // cannot cost the page its results.
+      const [resultsRes, codeRes, appsRes] = await Promise.all([
         assessmentService.getResultsByJobPrefix(selectedPrefix),
         compilerService.getResultsByJobPrefix(selectedPrefix),
+        jobApplicationService.getByPrefix(selectedPrefix).catch(() => null),
       ]);
       const rows = resultsRes.data ?? [];
       const submissions = codeRes.data ?? [];
       setResults(rows);
       setCodeSubmissions(submissions);
+      setProfiles(
+        new Map(
+          (appsRes?.data ?? []).map((app) => [getAppEmail(app).toLowerCase(), app]),
+        ),
+      );
       void fetchCodingContext(rows, submissions);
     } catch {
       // Error toast auto-handled by interceptor
@@ -214,7 +280,7 @@ export function ResultsPage() {
     const token = ++codingFetchToken.current;
     setCodingPaper(null);
     setCodingAssigned(new Set());
-    setPassMarks(new Map());
+    setAssignments(new Map());
 
     const emails = Array.from(
       new Set(
@@ -242,6 +308,8 @@ export function ResultsPage() {
             hasCoding: !!coding,
             aptitudePassMark: passMarkOf(aptitude),
             codingPassMark: passMarkOf(coding),
+            aptitudeStart: aptitude?.startTime,
+            codingStart: coding?.startTime,
           };
         } catch {
           return null;
@@ -252,9 +320,7 @@ export function ResultsPage() {
 
     const found = assigned.filter((a): a is CandidateAssignment => a !== null);
     setCodingAssigned(new Set(found.filter((a) => a.hasCoding).map((a) => a.email)));
-    setPassMarks(
-      new Map(found.map((a) => [a.email, { aptitude: a.aptitudePassMark, coding: a.codingPassMark }])),
-    );
+    setAssignments(new Map(found.map((a) => [a.email, a])));
 
     const paperId = found.find((a) => a.codingId != null)?.codingId;
     if (paperId == null) return;
@@ -350,9 +416,68 @@ export function ResultsPage() {
       // raw marks against a hardcoded 50, so a 17/20 aptitude paper was stored
       // FAILED and coding — which submits a literal score of 0 — always was.
       // Deriving it re-grades historic results correctly on read.
-      const marks = passMarks.get(row.email);
-      const aptitudeMark = marks?.aptitude ?? DEFAULT_PASS_PERCENTAGE;
-      const codingMark = marks?.coding ?? DEFAULT_PASS_PERCENTAGE;
+      const assignment = assignments.get(row.email);
+      const aptitudeMark = assignment?.aptitudePassMark ?? DEFAULT_PASS_PERCENTAGE;
+      const codingMark = assignment?.codingPassMark ?? DEFAULT_PASS_PERCENTAGE;
+
+      row.profile = profiles.get(row.email.toLowerCase());
+      row.aptitudeStart = assignment?.aptitudeStart;
+      row.codingStart = assignment?.codingStart;
+
+      // Counts behind the percentages. Answered and correct differ — a blank is
+      // not a wrong answer, and a report that conflates them cannot tell someone
+      // who ran out of time from someone who guessed badly.
+      row.aptitudeSummary = row.aptitudeResult
+        ? (({ total, answered, correct }) => ({ total, answered, correct }))(
+            summarizeAptitude(aptitudeAnswers),
+          )
+        : undefined;
+
+      // The answer sheet itself, question by question. Kept beside the counts
+      // rather than instead of them: the totals say how someone did, this says
+      // where, which is what anyone reviewing a borderline candidate opens.
+      row.aptitudeAnswerSheet = row.aptitudeResult
+        ? aptitudeAnswers.map((answer, index) => ({
+            number: index + 1,
+            question: answer.questionText || answer.question || `Question ${index + 1}`,
+            difficulty: normalizeBand(answer.Difficulty || answer.category),
+            selectedAnswer: (answer.selectedAnswer ?? '').toString().trim(),
+            correctAnswer: (answer.correctAnswer ?? '').toString().trim(),
+            isCorrect: !!answer.isCorrect,
+            answered: isAnswered(answer),
+            marks: typeof answer.marks === 'number' ? answer.marks : null,
+          }))
+        : undefined;
+
+      // One row per question rather than per raw submission: the built rows
+      // pair a question with whatever was run against it, so a question the
+      // candidate never opened still appears instead of silently vanishing.
+      row.codingQuestions = row.hasCoding
+        ? codingRows.map((codingRow) => ({
+            label: codingRow.label,
+            title: rowTitle(codingRow),
+            difficulty: normalizeBand(codingRow.question?.Difficulty),
+            language: rowLanguage(codingRow),
+            outcome: codingOutcome(codingRow),
+            testsPassed: passedTestCount(codingRow),
+            testsTotal: plannedTestCount(codingRow),
+            submittedAt: codingRow.sub?.createdAt,
+            code: codeOf(codingRow),
+          }))
+        : [];
+
+      // Bands come from the paper's own difficulty labels, so only a usable
+      // paper can produce them — without it there is nothing to group by.
+      row.codingBands = paperUsable
+        ? groupCodingByBand(codingRows).map((band) => ({
+            name: band.name,
+            questions: band.rows.length,
+            solved: band.solved,
+            attempted: band.attempted,
+            testsPassed: band.testsPassed,
+            testsTotal: band.testsTotal,
+          }))
+        : [];
 
       row.aptitudeVerdict = moduleVerdict(row.aptitudeScore, aptitudeMark);
       row.codingVerdict = row.hasCoding ? moduleVerdict(row.codingScore, codingMark) : null;
@@ -367,7 +492,7 @@ export function ResultsPage() {
     }
 
     return Array.from(map.values());
-  }, [results, codeSubmissions, codingPaper, codingAssigned, passMarks]);
+  }, [results, codeSubmissions, codingPaper, codingAssigned, assignments, profiles]);
 
   // ── Filtering ────────────────────────────────────────────────────────
   const visibleRows = useMemo(() => {
