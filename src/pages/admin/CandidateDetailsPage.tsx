@@ -57,11 +57,18 @@ const ASSIGN_STAGES: JobApplicationStatus[] = [
   'EXAM_COMPLETED',
 ];
 
+/**
+ * The pipeline as the admin sees it.
+ *
+ * ACKNOWLEDGED_BACK is deliberately absent. A candidate acknowledging is now
+ * carried straight to RECONFIRMED by the backend, so nothing new ever lands
+ * there and a tab for it would only ever read zero. It is still a real status,
+ * though — see LEGACY_STAGE.
+ */
 const STAGES: JobApplicationStatus[] = [
   'APPLIED',
   'SHORTLISTED',
   'ACKNOWLEDGED',
-  'ACKNOWLEDGED_BACK',
   'RECONFIRMED',
   'EXAM_SENT',
   'EXAM_COMPLETED',
@@ -69,6 +76,14 @@ const STAGES: JobApplicationStatus[] = [
   'INTERVIEW_COMPLETED',
   'SELECTED',
 ];
+
+/**
+ * Retired from the pipeline but still held by applications that reached it
+ * before the acknowledgement flow changed. Shown as its own tab only while
+ * someone is actually in it, so those candidates stay reachable and can be moved
+ * on, and the tab disappears for good once the last one has left.
+ */
+const LEGACY_STAGE = 'ACKNOWLEDGED_BACK' as JobApplicationStatus;
 
 const STAGE_LABELS: Record<string, string> = {
   APPLIED: 'Applied',
@@ -118,10 +133,10 @@ const BULK_ACTION_CONFIG: Record<
  * - Rejection is on every stage. A candidate can drop out of the running at any
  *   point (no-show to the exam, withdrew after the interview), and leaving
  *   stages without it forced admins to push people forward just to reject them.
- * - Reconfirmation sits on ACKNOWLEDGED_BACK and nowhere else. The validator
- *   allows RECONFIRMED only out of ACKNOWLEDGED_BACK, and Assign Assessment
- *   consumes a RECONFIRMED candidate rather than producing one, so this button
- *   is the sole way out of Ack Back — without it the stage is a dead end.
+ * - Reconfirmation sits on ACKNOWLEDGED_BACK and nowhere else, and only to drain
+ *   it. Acknowledging now carries a candidate to RECONFIRMED on its own, so
+ *   nothing new arrives at that stage; what is already there still needs a way
+ *   forward, and this is it.
  */
 const STAGE_ACTIONS: Record<string, BulkAction[]> = {
   APPLIED: ['rejection'],
@@ -243,10 +258,27 @@ export function CandidateDetailsPage() {
   // Count rejected candidates separately
   const rejectedCount = candidates.filter((c) => c.status === 'REJECTED').length;
 
-  // Count candidates with null/unrecognized status
+  // Applications left at the retired Ack Back stage; drives its stand-in tab.
+  const legacyCount = candidates.filter((c) => c.status === LEGACY_STAGE).length;
+
+  // Count candidates with null/unrecognized status. Ack Back is off the pipeline
+  // but still a status we render, so it must not be reported as unrecognized.
   const unknownCount = candidates.filter(
-    (c) => !c.status || (!STAGES.includes(c.status as JobApplicationStatus) && c.status !== 'REJECTED')
+    (c) =>
+      !c.status ||
+      (!STAGES.includes(c.status as JobApplicationStatus) &&
+        c.status !== 'REJECTED' &&
+        c.status !== LEGACY_STAGE)
   ).length;
+
+  // The selected stage is persisted between visits, so it can name a tab that is
+  // no longer on screen — Ack Back once the last application has left it. Without
+  // this the page opens on a stage with nothing highlighted and no rows.
+  useEffect(() => {
+    if (activeStage === LEGACY_STAGE && legacyCount === 0 && !loadingCandidates) {
+      setActiveStage('APPLIED');
+    }
+  }, [activeStage, legacyCount, loadingCandidates, setActiveStage]);
 
   // Available actions for the current stage
   const availableActions = STAGE_ACTIONS[activeStage] ?? [];
@@ -589,6 +621,35 @@ export function CandidateDetailsPage() {
                     </div>
                   );
                 })}
+                {/* Ack Back — off the pipeline, and only here while applications
+                    that predate the current acknowledgement flow are still in it.
+                    Amber rather than the pipeline styling: it is a place to empty,
+                    not a step anybody should be aiming for. */}
+                {legacyCount > 0 && (
+                  <div className="flex items-center flex-shrink-0 ml-4 pl-4 border-l border-[var(--border)]">
+                    <button
+                      onClick={() => {
+                        setActiveStage(LEGACY_STAGE);
+                        setSelectedEmails(new Set());
+                      }}
+                      title="Retired stage — acknowledging now moves a candidate straight to Reconfirmed"
+                      className={`
+                        flex flex-col items-center px-3 py-2 rounded-lg transition-all duration-200
+                        ${activeStage === LEGACY_STAGE
+                          ? 'bg-amber-500 text-white'
+                          : 'hover:bg-amber-50 dark:hover:bg-amber-900/20 text-amber-600'
+                        }
+                      `}
+                    >
+                      <span className="text-xs font-semibold whitespace-nowrap">Ack Back</span>
+                      <span
+                        className={`text-lg font-bold ${activeStage === LEGACY_STAGE ? 'text-white' : 'text-amber-600'}`}
+                      >
+                        {legacyCount}
+                      </span>
+                    </button>
+                  </div>
+                )}
                 {/* Rejected tab - separated from pipeline */}
                 {rejectedCount > 0 && (
                   <div className="flex items-center flex-shrink-0 ml-4 pl-4 border-l border-[var(--border)]">

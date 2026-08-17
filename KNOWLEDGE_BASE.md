@@ -2090,6 +2090,10 @@ SELECTED → REJECTED
 
 Enforced by `StatusTransitionValidator.validate(currentStatus, targetStatus)` — throws `IllegalStateException` on invalid transitions.
 
+**`ACKNOWLEDGED_BACK` is a pass-through, not a resting place.** `acknowledgeCandidate` takes both steps in one call — `ACKNOWLEDGED → ACKNOWLEDGED_BACK → RECONFIRMED` — so a candidate who clicks the acknowledge link lands ready for exam assignment. Nothing new stops at Ack Back, and the admin pipeline hides the stage unless applications from before this change are still sitting in it.
+
+**`SHORTLISTED → EXAM_SENT` is the direct-assignment path.** Assigning an exam to an `APPLIED` candidate shortlists them on the way through (`shortlistStatus = "Shortlisted (Direct Exam)"`), so the exam can be sent without the ack / reconfirm round-trip. `APPLIED → EXAM_SENT` stays illegal — the candidate genuinely passes through `SHORTLISTED`.
+
 **Rejection is reachable from every live stage.** The admin Candidates page offers Send Rejection on all ten stages, and a candidate can drop out at any point (stops replying after the ack, no-shows the exam, cancels the interview). Rejecting a SELECTED candidate covers a declined or withdrawn offer.
 
 REJECTED is fully terminal — the only way back is the "Shortlist Anyway" override, which bypasses the validator deliberately (`shortlist(override = true)`). SELECTED is terminal for every *forward* step; rejection is its one permitted move.
