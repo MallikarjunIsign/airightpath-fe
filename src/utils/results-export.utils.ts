@@ -19,6 +19,9 @@ import { splitResultsJson } from '@/utils/result.utils';
 /** One aggregated candidate, as the results table renders them. */
 export interface ExportCandidateRow {
   email: string;
+  /** Every attempt at each module, oldest first; the results below are the latest. */
+  aptitudeAttempts?: Result[];
+  codingAttempts?: Result[];
   aptitudeResult?: Result;
   codingResult?: Result;
   codeSubmissions: CodeSubmissionResponse[];
@@ -436,12 +439,14 @@ function addResultsSheet(workbook: Workbook, input: ResultsExportInput): void {
     { header: 'Aptitude Submitted', key: 'aptitudeSubmitted', width: 20, style: { numFmt: DATE_FORMAT } },
     { header: 'Aptitude Time (min)', key: 'aptitudeMinutes', width: 18, style: { numFmt: MINUTES } },
     { header: 'Aptitude Submission', key: 'aptitudeSubmission', width: 26 },
+    { header: 'Aptitude Attempts', key: 'aptitudeAttempts', width: 17 },
     { header: 'Coding Score', key: 'codingScore', width: 14, style: { numFmt: PERCENT_FORMAT } },
     { header: 'Coding Status', key: 'codingStatus', width: 16 },
     { header: 'Coding Start', key: 'codingStart', width: 20, style: { numFmt: DATE_FORMAT } },
     { header: 'Coding Submitted', key: 'codingSubmitted', width: 20, style: { numFmt: DATE_FORMAT } },
     { header: 'Coding Time (min)', key: 'codingMinutes', width: 17, style: { numFmt: MINUTES } },
     { header: 'Coding Submission', key: 'codingSubmission', width: 26 },
+    { header: 'Coding Attempts', key: 'codingAttempts', width: 16 },
     { header: 'Test Cases Passed', key: 'testsPassed', width: 18 },
     { header: 'Test Cases Total', key: 'testsTotal', width: 17 },
     { header: 'Overall Score', key: 'overallScore', width: 14, style: { numFmt: PERCENT_FORMAT } },
@@ -467,12 +472,16 @@ function addResultsSheet(workbook: Workbook, input: ResultsExportInput): void {
       aptitudeSubmitted: aptitudeAttempt.submittedAt,
       aptitudeMinutes: aptitudeAttempt.minutesTaken,
       aptitudeSubmission: aptitudeAttempt.submission,
+      // How many times the paper was sat. The figures on this row describe the
+      // latest; anything above 1 tells the reader an earlier one exists.
+      aptitudeAttempts: row.aptitudeAttempts?.length || null,
       codingScore: percentCell(row.codingScore),
       codingStatus: moduleStatus(row.codingResult, row.hasCoding, row.codingVerdict),
       codingStart: row.hasCoding ? dateCell(row.codingStart) : null,
       codingSubmitted: codingAttempt.submittedAt,
       codingMinutes: codingAttempt.minutesTaken,
       codingSubmission: codingAttempt.submission,
+      codingAttempts: row.codingAttempts?.length || null,
       testsPassed: tests.total ? tests.passed : null,
       testsTotal: tests.total || null,
       overallScore: percentCell(row.overallScore),

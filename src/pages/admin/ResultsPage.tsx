@@ -37,6 +37,7 @@ import {
   buildCodingRows,
   scoreColor,
   splitResultsJson,
+  orderedAttempts,
   summarizeAptitude,
   groupCodingByBand,
   normalizeBand,
@@ -102,6 +103,13 @@ interface CandidateAssignment {
 // ── Aggregated candidate row ─────────────────────────────────────────
 interface CandidateRow {
   email: string;
+  /**
+   * Every attempt at each module, oldest first. Re-assigning an exam adds a
+   * result rather than replacing one, so a candidate can hold several.
+   */
+  aptitudeAttempts: Result[];
+  codingAttempts: Result[];
+  /** The latest attempt — what the scores and verdicts below describe. */
   aptitudeResult?: Result;
   codingResult?: Result;
   codeSubmissions: CodeSubmissionResponse[];
@@ -341,6 +349,8 @@ export function ResultsPage() {
 
     const blankRow = (email: string): CandidateRow => ({
       email,
+      aptitudeAttempts: [],
+      codingAttempts: [],
       codeSubmissions: [],
       overallStatus: 'PARTIAL',
       hasCoding: false,
@@ -356,10 +366,12 @@ export function ResultsPage() {
         map.set(r.candidateEmail, blankRow(r.candidateEmail));
       }
       const row = map.get(r.candidateEmail)!;
+      // Collected, not overwritten. Assigning here kept whichever result the
+      // API happened to return last, which is not the same as the latest.
       if (r.assessmentType === 'APTITUDE') {
-        row.aptitudeResult = r;
+        row.aptitudeAttempts.push(r);
       } else if (r.assessmentType === 'CODING') {
-        row.codingResult = r;
+        row.codingAttempts.push(r);
       }
     }
 
@@ -374,6 +386,14 @@ export function ResultsPage() {
 
     // Compute the module percentages, then grade them
     for (const row of map.values()) {
+      // Order the attempts and score the most recent. The earlier ones stay on
+      // the row so the table can say how many there were, and the detail page
+      // can show them.
+      row.aptitudeAttempts = orderedAttempts(row.aptitudeAttempts, 'APTITUDE');
+      row.codingAttempts = orderedAttempts(row.codingAttempts, 'CODING');
+      row.aptitudeResult = row.aptitudeAttempts[row.aptitudeAttempts.length - 1];
+      row.codingResult = row.codingAttempts[row.codingAttempts.length - 1];
+
       // Aptitude ships raw marks and coding ships 0, so both are re-derived
       // here with the same helpers the result detail page uses — and, now, the
       // same question paper, without which the two could not agree.
@@ -875,17 +895,34 @@ function StatCard({ label, value, color }: { label: string; value: number; color
 // The three value cells, shared by the desktop row and the mobile card so the
 // two renderings cannot drift apart.
 
+/**
+ * Says which attempt the figures above describe, and that there were others.
+ * Without it a re-sat exam silently replaced the first on screen, and nobody
+ * reviewing the row could tell it had happened.
+ */
+function AttemptNote({ count }: { count: number }) {
+  if (count < 2) return null;
+  return (
+    <p className="text-xs text-[var(--warning)] ml-5">
+      Attempt {count} of {count}
+    </p>
+  );
+}
+
 function AptitudeCell({ row }: { row: CandidateRow }) {
   if (!row.aptitudeResult) {
     return <span className="text-[var(--textTertiary)] text-sm">--</span>;
   }
   const { score, totalMarks } = row.aptitudeResult;
   return (
-    <ScoreBadge
-      score={row.aptitudeScore}
-      status={row.aptitudeVerdict}
-      detail={`${score}${totalMarks ? `/${totalMarks}` : ''} marks`}
-    />
+    <div>
+      <ScoreBadge
+        score={row.aptitudeScore}
+        status={row.aptitudeVerdict}
+        detail={`${score}${totalMarks ? `/${totalMarks}` : ''} marks`}
+      />
+      <AttemptNote count={row.aptitudeAttempts.length} />
+    </div>
   );
 }
 
@@ -898,6 +935,7 @@ function CodingCell({ row }: { row: CandidateRow }) {
   return (
     <div className="space-y-0.5">
       <ScoreBadge score={row.codingScore} status={row.codingVerdict} />
+      <AttemptNote count={row.codingAttempts.length} />
       <CodingSubmissionSummary submissions={row.codeSubmissions} />
     </div>
   );

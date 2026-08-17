@@ -623,6 +623,38 @@ export function overallScorePercent(parts: (number | null | undefined)[]): numbe
   return clampPercent(values.reduce((a, b) => a + b, 0) / values.length);
 }
 
+// ── Attempts ───────────────────────────────────────────────────────────
+
+/**
+ * When an attempt happened, for ordering. Falls back through the timestamps a
+ * result might carry and finally to its id, which is monotonic — the API
+ * returns results unordered, so without this "the latest attempt" would mean
+ * whatever the database felt like returning last.
+ */
+function attemptOrder(result: Result): number {
+  const stamp = result.submittedAt ?? result.createdAt;
+  const time = stamp ? new Date(stamp).getTime() : Number.NaN;
+  return Number.isNaN(time) ? (result.id ?? 0) : time;
+}
+
+/**
+ * Every attempt at one module, oldest first — so index 0 is attempt 1, the
+ * paper the candidate sat first, and the last entry is the most recent.
+ *
+ * Re-assigning an exam creates a second result rather than replacing the first,
+ * and both are real. Screens that show a single figure should show the latest;
+ * none of them should pick one by array position, which is how the list and the
+ * detail page came to disagree about the same candidate.
+ */
+export function orderedAttempts(
+  results: Result[],
+  type: 'APTITUDE' | 'CODING',
+): Result[] {
+  return results
+    .filter((r) => r.assessmentType === type)
+    .sort((a, b) => attemptOrder(a) - attemptOrder(b));
+}
+
 // ── Pass marks ─────────────────────────────────────────────────────────
 
 /** Applied to any paper assigned before the pass mark was configurable. */

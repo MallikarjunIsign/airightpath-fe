@@ -77,12 +77,71 @@ import {
   codeOf,
   normalizeBand,
   splitResultsJson,
+  orderedAttempts,
 } from '@/utils/result.utils';
 import { SubmissionInfo } from '@/components/result/SubmissionInfo';
 import type { CodingRow } from '@/utils/result.utils';
 import type { Result, AptitudeAnswer, CodingAnswer, SubmissionMeta } from '@/types/result.types';
 import type { CodeSubmissionResponse } from '@/types/compiler.types';
 import type { Assessment, RawCodingQuestion, RawQuestion } from '@/types/assessment.types';
+
+// ── Attempts ───────────────────────────────────────────────────────────
+
+/**
+ * Lets the reviewer move between attempts when an exam was assigned more than
+ * once. Renders nothing for the single-attempt case, which is nearly every
+ * candidate — a picker offering one choice is just clutter.
+ *
+ * Attempt 1 is the paper sat first. The latest is selected by default, since
+ * that is the result the pipeline and the results table act on, but the earlier
+ * ones stay reachable: a re-sit is usually granted for a reason, and the
+ * original is part of that record.
+ */
+function AttemptPicker({
+  attempts,
+  selected,
+  onSelect,
+}: {
+  attempts: Result[];
+  selected?: Result;
+  onSelect: (index: number) => void;
+}) {
+  if (attempts.length < 2) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--warning)] bg-[var(--warningMuted,rgba(245,158,11,0.08))] px-3 py-2">
+      <span className="text-sm text-[var(--text)]">
+        This exam was assigned <strong>{attempts.length} times</strong> — showing:
+      </span>
+      {attempts.map((attempt, index) => {
+        const isSelected = attempt === selected;
+        const when = attempt.submittedAt
+          ? new Date(attempt.submittedAt).toLocaleDateString()
+          : 'not submitted';
+        return (
+          <button
+            key={attempt.id ?? index}
+            type="button"
+            onClick={() => onSelect(index)}
+            className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
+              isSelected
+                ? 'bg-[var(--primary)] text-white'
+                : 'bg-[var(--surface1)] text-[var(--textSecondary)] hover:bg-[var(--surface2)]'
+            }`}
+          >
+            Attempt {index + 1}
+            <span className={`ml-1.5 font-normal ${isSelected ? 'text-white/80' : ''}`}>
+              {when}
+            </span>
+          </button>
+        );
+      })}
+      {attempts.length > 1 && selected === attempts[attempts.length - 1] && (
+        <span className="text-xs text-[var(--textSecondary)]">(latest)</span>
+      )}
+    </div>
+  );
+}
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -210,8 +269,23 @@ export function CandidateResultDetailPage() {
     }
   }
 
-  const aptitudeResult = results.find((r) => r.assessmentType === 'APTITUDE');
-  const codingResult = results.find((r) => r.assessmentType === 'CODING');
+  // Every attempt at each module, oldest first. A re-assigned exam adds a
+  // result rather than replacing one, so `.find()` here was showing whichever
+  // the API returned first — usually the original, never the re-sit.
+  const aptitudeAttempts = useMemo(() => orderedAttempts(results, 'APTITUDE'), [results]);
+  const codingAttempts = useMemo(() => orderedAttempts(results, 'CODING'), [results]);
+
+  // Which attempt is on screen. -1 means "the latest", so the page keeps
+  // following the most recent attempt as results load rather than pinning to a
+  // stale index the moment a new one arrives.
+  const [aptitudeAttemptIdx, setAptitudeAttemptIdx] = useState(-1);
+  const [codingAttemptIdx, setCodingAttemptIdx] = useState(-1);
+
+  const pickAttempt = (attempts: Result[], index: number): Result | undefined =>
+    attempts[index] ?? attempts[attempts.length - 1];
+
+  const aptitudeResult = pickAttempt(aptitudeAttempts, aptitudeAttemptIdx);
+  const codingResult = pickAttempt(codingAttempts, codingAttemptIdx);
 
   // `resultsJson` holds the answers plus, at the end, the record of how the
   // attempt was submitted — split so the metadata is never scored as an answer.
@@ -542,6 +616,12 @@ export function CandidateResultDetailPage() {
         />
       )}
       {activeTab === 'aptitude' && aptitudeResult && (
+        <>
+        <AttemptPicker
+          attempts={aptitudeAttempts}
+          selected={aptitudeResult}
+          onSelect={setAptitudeAttemptIdx}
+        />
         <AptitudeTab
           result={aptitudeResult}
           score={aptitudeScore}
@@ -552,8 +632,15 @@ export function CandidateResultDetailPage() {
           lookupError={papersError}
           jobPrefix={jobPrefix ?? ''}
         />
+        </>
       )}
       {activeTab === 'coding' && (
+        <>
+        <AttemptPicker
+          attempts={codingAttempts}
+          selected={codingResult}
+          onSelect={setCodingAttemptIdx}
+        />
         <CodingTab
           result={codingResult}
           score={codingScore}
@@ -564,6 +651,7 @@ export function CandidateResultDetailPage() {
           paper={codingQuestions}
           jobPrefix={jobPrefix ?? ''}
         />
+        </>
       )}
 
       {exportingSheet && (
