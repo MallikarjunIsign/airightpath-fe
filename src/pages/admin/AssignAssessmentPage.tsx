@@ -18,6 +18,8 @@ import { DateTimeField } from '@/components/ui/DateTimeField';
 import { BackLink } from '@/components/ui/BackLink';
 import { QuestionPaperExportDialog } from '@/components/admin/QuestionPaperExportDialog';
 import { ExamDurationFields } from '@/components/admin/ExamDurationFields';
+import { PassMarkField } from '@/components/admin/PassMarkField';
+import { DEFAULT_PASS_PERCENTAGE } from '@/utils/result.utils';
 import { Select } from '@/components/ui/Select';
 import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -113,6 +115,16 @@ function appendTiming(
   }
 }
 
+/**
+ * The typed pass mark as a whole number, or the default when the field is blank
+ * or nonsense. Bounds are 1-100: a paper nobody can fail is not a pass mark.
+ */
+function parsePassMark(raw: string): number {
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isFinite(value) || value <= 0 || value > 100) return DEFAULT_PASS_PERCENTAGE;
+  return value;
+}
+
 export function AssignAssessmentPage() {
   const { showToast } = useToast();
   const { user } = useAuth();
@@ -143,6 +155,9 @@ export function AssignAssessmentPage() {
   // Per-question time, and the question counts used to show the resulting total.
   const [aptitudeMinutes, setAptitudeMinutes] = useState(defaultMinutesPerQuestion('APTITUDE'));
   const [codingMinutes, setCodingMinutes] = useState(defaultMinutesPerQuestion('CODING'));
+  // Held as strings so the field can be emptied while typing; validated on submit.
+  const [aptitudePassMark, setAptitudePassMark] = useState(String(DEFAULT_PASS_PERCENTAGE));
+  const [codingPassMark, setCodingPassMark] = useState(String(DEFAULT_PASS_PERCENTAGE));
   const [aptitudeCount, setAptitudeCount] = useState<number | null>(null);
   const [codingCount, setCodingCount] = useState<number | null>(null);
   const [aptitudeCountManual, setAptitudeCountManual] = useState('');
@@ -524,10 +539,12 @@ export function AssignAssessmentPage() {
       if (aptitudeChecked && aptitudeFile.file) {
         formData.append('aptitudeQuestionPaper', aptitudeFile.file);
         appendTiming(formData, 'aptitude', aptitudeMinutes, aptitudeCount, aptitudeCountManual);
+        formData.append('aptitudePassPercentage', String(parsePassMark(aptitudePassMark)));
       }
       if (codingChecked && codingFile.file) {
         formData.append('codingQuestionPaper', codingFile.file);
         appendTiming(formData, 'coding', codingMinutes, codingCount, codingCountManual);
+        formData.append('codingPassPercentage', String(parsePassMark(codingPassMark)));
       }
 
       await assessmentService.assignMultipart(formData);
@@ -543,6 +560,8 @@ export function AssignAssessmentPage() {
       setCodingFile({ file: null, source: null });
       setAptitudeMinutes(defaultMinutesPerQuestion('APTITUDE'));
       setCodingMinutes(defaultMinutesPerQuestion('CODING'));
+      setAptitudePassMark(String(DEFAULT_PASS_PERCENTAGE));
+      setCodingPassMark(String(DEFAULT_PASS_PERCENTAGE));
       setAptitudeCountManual('');
       setCodingCountManual('');
 
@@ -732,6 +751,13 @@ export function AssignAssessmentPage() {
                   onManualCountChange={setAptitudeCountManual}
                   disabled={submitting}
                 />
+
+                <PassMarkField
+                  type="APTITUDE"
+                  value={aptitudePassMark}
+                  onChange={setAptitudePassMark}
+                  disabled={submitting}
+                />
               </div>
             )}
 
@@ -837,6 +863,13 @@ export function AssignAssessmentPage() {
                   detectedCount={codingCount}
                   manualCount={codingCountManual}
                   onManualCountChange={setCodingCountManual}
+                  disabled={submitting}
+                />
+
+                <PassMarkField
+                  type="CODING"
+                  value={codingPassMark}
+                  onChange={setCodingPassMark}
                   disabled={submitting}
                 />
               </div>

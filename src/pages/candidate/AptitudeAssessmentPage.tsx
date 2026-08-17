@@ -151,10 +151,16 @@ export function AptitudeAssessmentPage() {
       const currentQuestions = questionsRef.current;
       const currentAnswers = answersRef.current;
 
+      // Marks earned and marks available, tracked together. The paper is the
+      // only place the denominator is known for certain, so it is sent with the
+      // result rather than reconstructed later from an answer sheet that cannot
+      // say what a wrong answer was worth.
       let score = 0;
+      let totalMarks = 0;
       const resultDetails = currentQuestions.map((q) => {
         const selectedAnswer = currentAnswers[q.id] || '';
         const isCorrect = selectedAnswer === q.correctAnswer;
+        totalMarks += q.marks || 1;
         if (isCorrect) score += q.marks || 1;
         return {
           questionId: q.id,
@@ -179,6 +185,11 @@ export function AptitudeAssessmentPage() {
         candidateEmail: user.email,
         assessmentType: assessment.assessmentType,
         score,
+        totalMarks,
+        // The pass mark is compared against this, not against `score` — raw
+        // marks are not a percentage, and grading them as one failed every
+        // paper marked out of more than the pass mark.
+        percentage: totalMarks > 0 ? Math.round((score / totalMarks) * 100) : 0,
         resultsJson: JSON.stringify([...resultDetails, submission]),
         jobPrefix: assessment.jobPrefix,
         // Names the paper this candidate actually had open. Where an exam has

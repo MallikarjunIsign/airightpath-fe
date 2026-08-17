@@ -26,6 +26,9 @@ export interface ExportCandidateRow {
   aptitudeScore: number | null;
   codingScore: number | null;
   overallScore: number | null;
+  /** Derived from the percentage against the paper's pass mark, as on screen. */
+  aptitudeVerdict: 'PASSED' | 'FAILED' | null;
+  codingVerdict: 'PASSED' | 'FAILED' | null;
 }
 
 export interface ResultsExportFilters {
@@ -115,13 +118,22 @@ function testCaseTally(row: ExportCandidateRow): { passed: number; total: number
 }
 
 /**
- * Module status in words. The three cases are distinct and a reader must be
- * able to tell them apart: never assigned, assigned but never sat, and sat.
+ * Module status in words. The four cases are distinct and a reader must be able
+ * to tell them apart: never assigned, assigned but never sat, sat but not
+ * gradeable, and graded.
+ *
+ * The verdict comes from the percentage against the paper's pass mark, matching
+ * the table exactly — `Result.status` is not used, since it was written by
+ * comparing raw marks to a hardcoded 50.
  */
-function moduleStatus(result: Result | undefined, assigned: boolean): string {
+function moduleStatus(
+  result: Result | undefined,
+  assigned: boolean,
+  verdict: 'PASSED' | 'FAILED' | null,
+): string {
   if (!assigned) return 'Not assigned';
   if (!result) return 'Not attempted';
-  return result.status ?? 'Submitted';
+  return verdict ?? 'Submitted (not graded)';
 }
 
 /**
@@ -295,9 +307,9 @@ function addResultsSheet(workbook: Workbook, input: ResultsExportInput): void {
       email: row.email,
       aptitudeScore: percentCell(row.aptitudeScore),
       aptitudeMarks: aptitudeMarksLabel(aptitude),
-      aptitudeStatus: moduleStatus(aptitude, !!aptitude),
+      aptitudeStatus: moduleStatus(aptitude, !!aptitude, row.aptitudeVerdict),
       codingScore: percentCell(row.codingScore),
-      codingStatus: moduleStatus(row.codingResult, row.hasCoding),
+      codingStatus: moduleStatus(row.codingResult, row.hasCoding, row.codingVerdict),
       testsPassed: tests.total ? tests.passed : null,
       testsTotal: tests.total || null,
       overallScore: percentCell(row.overallScore),

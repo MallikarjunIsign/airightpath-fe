@@ -623,6 +623,59 @@ export function overallScorePercent(parts: (number | null | undefined)[]): numbe
   return clampPercent(values.reduce((a, b) => a + b, 0) / values.length);
 }
 
+// ── Pass marks ─────────────────────────────────────────────────────────
+
+/** Applied to any paper assigned before the pass mark was configurable. */
+export const DEFAULT_PASS_PERCENTAGE = 60;
+
+/**
+ * The pass mark for a paper. Out-of-range values fall back to the default
+ * rather than being clamped: a stored 0 or 300 is a data fault, and quietly
+ * turning it into a paper nobody can fail (or nobody can pass) is worse than
+ * grading to the standard everything else uses.
+ */
+export function passMarkOf(assessment?: { passPercentage?: number } | null): number {
+  const configured = assessment?.passPercentage;
+  if (!isNumber(configured) || configured <= 0 || configured > 100) {
+    return DEFAULT_PASS_PERCENTAGE;
+  }
+  return configured;
+}
+
+/**
+ * Pass or fail for one module, judged on its percentage against its own mark.
+ *
+ * The stored `Result.status` is deliberately not consulted. It was written by
+ * comparing raw marks to a hardcoded 50, so a 17-out-of-20 aptitude paper was
+ * recorded FAILED and every coding paper failed on a literal score of 0 — the
+ * verdict contradicted the percentage printed beside it. Deriving it here means
+ * historic results are re-graded correctly on read, and every screen agrees.
+ */
+export function moduleVerdict(
+  percent: number | null | undefined,
+  passMark: number = DEFAULT_PASS_PERCENTAGE,
+): 'PASSED' | 'FAILED' | null {
+  if (!isNumber(percent)) return null;
+  return percent >= passMark ? 'PASSED' : 'FAILED';
+}
+
+/**
+ * The candidate's overall verdict.
+ *
+ * The overall percentage is what is judged, against the strictest bar any of
+ * their papers set — passing a 40% coding paper should not carry a 75% aptitude
+ * bar it never met. Null while no module has been scored, which is "pending"
+ * rather than a failure.
+ */
+export function overallVerdict(
+  overallPercent: number | null | undefined,
+  passMarks: number[],
+): 'PASSED' | 'FAILED' | null {
+  if (!isNumber(overallPercent)) return null;
+  const bar = passMarks.length > 0 ? Math.max(...passMarks) : DEFAULT_PASS_PERCENTAGE;
+  return overallPercent >= bar ? 'PASSED' : 'FAILED';
+}
+
 /**
  * Bands the candidate is weakest in — anything under `threshold`% of its test
  * cases. Shown as coaching hints next to the coding summary.

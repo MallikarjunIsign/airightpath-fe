@@ -11,6 +11,7 @@ import {
   FileSpreadsheet,
   SearchX,
   X,
+  MinusCircle,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Select } from '@/components/ui/Select';
@@ -34,6 +35,10 @@ import {
   buildCodingRows,
   scoreColor,
   splitResultsJson,
+  passMarkOf,
+  moduleVerdict,
+  overallVerdict,
+  DEFAULT_PASS_PERCENTAGE,
 } from '@/utils/result.utils';
 import type { JobPostDTO } from '@/types/job.types';
 import type { Assessment, RawCodingQuestion } from '@/types/assessment.types';
@@ -68,10 +73,15 @@ const STATUS_FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: 'PARTIAL', label: 'Pending' },
 ];
 
-/** A candidate's coding assessment on the selected job, if they were set one. */
-interface CodingAssignment {
+/** What one candidate's assessments on the selected job tell us. */
+interface CandidateAssignment {
   email: string;
-  id?: number;
+  /** Their coding assessment id, when they were set one. */
+  codingId?: number;
+  hasCoding: boolean;
+  /** The pass mark each paper was assigned with, defaulted where absent. */
+  aptitudePassMark: number;
+  codingPassMark: number;
 }
 
 // ── Aggregated candidate row ─────────────────────────────────────────
@@ -87,6 +97,13 @@ interface CandidateRow {
   aptitudeScore: number | null;
   codingScore: number | null;
   overallScore: number | null;
+  /**
+   * Pass/fail derived from the percentage against the paper's own pass mark.
+   * Not `Result.status`, which was written by comparing raw marks to a
+   * hardcoded 50 and contradicts the percentage shown beside it.
+   */
+  aptitudeVerdict: 'PASSED' | 'FAILED' | null;
+  codingVerdict: 'PASSED' | 'FAILED' | null;
 }
 
 export function ResultsPage() {
@@ -101,6 +118,10 @@ export function ResultsPage() {
   const [codingPaper, setCodingPaper] = useState<RawCodingQuestion[] | null>(null);
   /** Emails with a coding assessment on this job, whether or not they sat it. */
   const [codingAssigned, setCodingAssigned] = useState<Set<string>>(new Set());
+  /** Per-candidate pass marks, read off the assessments they were assigned. */
+  const [passMarks, setPassMarks] = useState<Map<string, { aptitude: number; coding: number }>>(
+    new Map(),
+  );
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [loadingResults, setLoadingResults] = useState(false);
   // Not persisted, unlike the job selection: a filter left over from a previous
@@ -131,6 +152,7 @@ export function ResultsPage() {
       setCodeSubmissions([]);
       setCodingPaper(null);
       setCodingAssigned(new Set());
+      setPassMarks(new Map());
     }
   }, [selectedPrefix]);
 
@@ -192,6 +214,7 @@ export function ResultsPage() {
     const token = ++codingFetchToken.current;
     setCodingPaper(null);
     setCodingAssigned(new Set());
+    setPassMarks(new Map());
 
     const emails = Array.from(
       new Set(
@@ -205,13 +228,21 @@ export function ResultsPage() {
     // Silent: one unreachable candidate should cost that row its coding score,
     // not stack a red toast per candidate over the table.
     const assigned = await Promise.all(
-      emails.map(async (email): Promise<CodingAssignment | null> => {
+      emails.map(async (email): Promise<CandidateAssignment | null> => {
         try {
           const res = await assessmentService.getAllAssessmentsForCandidate(email, { silent: true });
-          const coding = asAssessmentList(res.data).find(
-            (a) => a.assessmentType === 'CODING' && a.jobPrefix === selectedPrefix,
-          );
-          return coding ? { email, id: coding.id } : null;
+          const mine = asAssessmentList(res.data).filter((a) => a.jobPrefix === selectedPrefix);
+          const coding = mine.find((a) => a.assessmentType === 'CODING');
+          const aptitude = mine.find((a) => a.assessmentType === 'APTITUDE');
+          // Returned even with no coding paper: the pass marks are wanted either
+          // way, and dropping the row would grade aptitude against the default.
+          return {
+            email,
+            codingId: coding?.id,
+            hasCoding: !!coding,
+            aptitudePassMark: passMarkOf(aptitude),
+            codingPassMark: passMarkOf(coding),
+          };
         } catch {
           return null;
         }
@@ -219,10 +250,13 @@ export function ResultsPage() {
     );
     if (token !== codingFetchToken.current) return;
 
-    const withCoding = assigned.filter((a): a is CodingAssignment => a !== null);
-    setCodingAssigned(new Set(withCoding.map((a) => a.email)));
+    const found = assigned.filter((a): a is CandidateAssignment => a !== null);
+    setCodingAssigned(new Set(found.filter((a) => a.hasCoding).map((a) => a.email)));
+    setPassMarks(
+      new Map(found.map((a) => [a.email, { aptitude: a.aptitudePassMark, coding: a.codingPassMark }])),
+    );
 
-    const paperId = withCoding.find((a) => a.id != null)?.id;
+    const paperId = found.find((a) => a.codingId != null)?.codingId;
     if (paperId == null) return;
 
     try {
@@ -247,6 +281,8 @@ export function ResultsPage() {
       aptitudeScore: null,
       codingScore: null,
       overallScore: null,
+      aptitudeVerdict: null,
+      codingVerdict: null,
     });
 
     for (const r of results) {
@@ -270,18 +306,8 @@ export function ResultsPage() {
       map.get(email)!.codeSubmissions.push(cs);
     }
 
-    // Compute overall status and the module percentages
+    // Compute the module percentages, then grade them
     for (const row of map.values()) {
-      const aptStatus = row.aptitudeResult?.status;
-      const codStatus = row.codingResult?.status;
-      if (aptStatus === 'PASSED' && codStatus === 'PASSED') {
-        row.overallStatus = 'PASSED';
-      } else if (aptStatus === 'FAILED' || codStatus === 'FAILED') {
-        row.overallStatus = 'FAILED';
-      } else {
-        row.overallStatus = 'PARTIAL';
-      }
-
       // Aptitude ships raw marks and coding ships 0, so both are re-derived
       // here with the same helpers the result detail page uses — and, now, the
       // same question paper, without which the two could not agree.
@@ -319,10 +345,29 @@ export function ResultsPage() {
       row.aptitudeScore = aptitudeScorePercent(row.aptitudeResult, aptitudeAnswers);
       row.codingScore = paperUsable ? codingScorePercent(codingRows, row.codingResult) : null;
       row.overallScore = overallScorePercent([row.aptitudeScore, row.codingScore]);
+
+      // Graded here rather than read off `Result.status`: that column compared
+      // raw marks against a hardcoded 50, so a 17/20 aptitude paper was stored
+      // FAILED and coding — which submits a literal score of 0 — always was.
+      // Deriving it re-grades historic results correctly on read.
+      const marks = passMarks.get(row.email);
+      const aptitudeMark = marks?.aptitude ?? DEFAULT_PASS_PERCENTAGE;
+      const codingMark = marks?.coding ?? DEFAULT_PASS_PERCENTAGE;
+
+      row.aptitudeVerdict = moduleVerdict(row.aptitudeScore, aptitudeMark);
+      row.codingVerdict = row.hasCoding ? moduleVerdict(row.codingScore, codingMark) : null;
+
+      // Only the bars for papers this candidate actually has count towards the
+      // overall, so an aptitude-only candidate is not held to a coding standard.
+      const applicable = [
+        ...(row.aptitudeResult ? [aptitudeMark] : []),
+        ...(row.hasCoding ? [codingMark] : []),
+      ];
+      row.overallStatus = overallVerdict(row.overallScore, applicable) ?? 'PARTIAL';
     }
 
     return Array.from(map.values());
-  }, [results, codeSubmissions, codingPaper, codingAssigned]);
+  }, [results, codeSubmissions, codingPaper, codingAssigned, passMarks]);
 
   // ── Filtering ────────────────────────────────────────────────────────
   const visibleRows = useMemo(() => {
@@ -713,7 +758,7 @@ function AptitudeCell({ row }: { row: CandidateRow }) {
   return (
     <ScoreBadge
       score={row.aptitudeScore}
-      status={row.aptitudeResult.status}
+      status={row.aptitudeVerdict}
       detail={`${score}${totalMarks ? `/${totalMarks}` : ''} marks`}
     />
   );
@@ -727,7 +772,7 @@ function CodingCell({ row }: { row: CandidateRow }) {
   }
   return (
     <div className="space-y-0.5">
-      <ScoreBadge score={row.codingScore} status={row.codingResult?.status} />
+      <ScoreBadge score={row.codingScore} status={row.codingVerdict} />
       <CodingSubmissionSummary submissions={row.codeSubmissions} />
     </div>
   );
@@ -743,7 +788,16 @@ function OverallScore({ row, className = '' }: { row: CandidateRow; className?: 
       <span
         className="text-sm font-bold tabular-nums"
         style={{
-          color: row.overallScore === null ? 'var(--textTertiary)' : scoreColor(row.overallScore),
+          // The verdict is passed so the number is not drawn amber beside its own
+          // green PASSED badge — 65% against a 60% pass mark is a pass, however
+          // the generic 80/60 colour bands would otherwise band it.
+          color:
+            row.overallScore === null
+              ? 'var(--textTertiary)'
+              : scoreColor(
+                  row.overallScore,
+                  row.overallStatus === 'PARTIAL' ? undefined : row.overallStatus,
+                ),
         }}
       >
         {row.overallScore === null ? '--' : `${row.overallScore}%`}
@@ -762,19 +816,25 @@ function ScoreBadge({
 }: {
   /** Percentage, or null when the module cannot be scored. */
   score: number | null;
-  status?: string;
+  /** Derived verdict; null when there is no score to grade. */
+  status?: string | null;
   detail?: string;
 }) {
   const isPassed = status === 'PASSED';
+  const isFailed = status === 'FAILED';
+  // An ungraded module reads amber, not red. Drawing a red cross against "--"
+  // said the candidate had failed something they were never scored on.
+  let tone = 'text-[var(--textTertiary)]';
+  if (isPassed) tone = 'text-green-600';
+  else if (isFailed) tone = 'text-red-600';
+
   return (
     <div>
       <div className="flex items-center gap-1.5">
-        {isPassed ? (
-          <CheckCircle size={14} className="text-green-500" />
-        ) : (
-          <XCircle size={14} className="text-red-500" />
-        )}
-        <span className={`text-sm font-semibold ${isPassed ? 'text-green-600' : 'text-red-600'}`}>
+        {isPassed && <CheckCircle size={14} className="text-green-500" />}
+        {isFailed && <XCircle size={14} className="text-red-500" />}
+        {!isPassed && !isFailed && <MinusCircle size={14} className="text-[var(--textTertiary)]" />}
+        <span className={`text-sm font-semibold ${tone}`}>
           {score === null ? '--' : `${score}%`}
         </span>
       </div>

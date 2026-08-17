@@ -88,6 +88,8 @@ export const assessmentService = {
         score: data.score,
         jobPrefix: data.jobPrefix,
         assessmentId: data.assessmentId,
+        totalMarks: data.totalMarks,
+        percentage: data.percentage,
       },
     });
   },

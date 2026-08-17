@@ -23,6 +23,12 @@ export interface Assessment {
   minutesPerQuestion?: number;
   /** A fixed whole-exam duration, which overrides the per-question maths. */
   durationMinutes?: number;
+  /**
+   * The mark this paper must reach to pass, as a percentage. Absent on
+   * assessments assigned before it was configurable — read it through
+   * `passMarkOf()` in utils/result.utils.ts, which applies the 60% default.
+   */
+  passPercentage?: number;
 }
 
 // Raw question shape from BE — options is Map<String,String> e.g. {"A":"…","B":"…"}
@@ -106,4 +112,11 @@ export interface AssessmentResult {
    * attempt a result belongs to.
    */
   assessmentId?: number;
+  /** What the paper was out of; omitted by exams with no marks (coding). */
+  totalMarks?: number;
+  /**
+   * The attempt as 0-100. This is what the pass mark is graded against, so an
+   * exam that can work it out should always send it — `score` is raw marks.
+   */
+  percentage?: number;
 }
