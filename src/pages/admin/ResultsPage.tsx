@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Loader2,
@@ -8,9 +8,14 @@ import {
   CheckCircle,
   XCircle,
   Code2,
+  FileSpreadsheet,
+  SearchX,
+  X,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Select } from '@/components/ui/Select';
+import { SearchInput } from '@/components/ui/SearchInput';
+import { Input } from '@/components/ui/Input';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
@@ -19,6 +24,9 @@ import { jobService } from '@/services/job.service';
 import { assessmentService } from '@/services/assessment.service';
 import { compilerService } from '@/services/compiler.service';
 import { usePersistentState } from '@/hooks/usePersistentState';
+import { useToast } from '@/components/ui/Toast';
+import { downloadBlob } from '@/utils/question-paper.utils';
+import { buildResultsWorkbook, resultsWorkbookFileName } from '@/utils/results-export.utils';
 import {
   aptitudeScorePercent,
   codingScorePercent,
@@ -50,6 +58,16 @@ function parseAnswers<T>(raw?: string): T[] {
   }
 }
 
+/** Result filters. `ALL` is the absence of a filter, not a value to match. */
+type StatusFilter = 'ALL' | 'PASSED' | 'FAILED' | 'PARTIAL';
+
+const STATUS_FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: 'ALL', label: 'All statuses' },
+  { value: 'PASSED', label: 'Passed' },
+  { value: 'FAILED', label: 'Failed' },
+  { value: 'PARTIAL', label: 'Pending' },
+];
+
 /** A candidate's coding assessment on the selected job, if they were set one. */
 interface CodingAssignment {
   email: string;
@@ -73,7 +91,9 @@ interface CandidateRow {
 
 export function ResultsPage() {
   const navigate = useNavigate();
+  const { showToast } = useToast();
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
+  const [exporting, setExporting] = useState(false);
   const [selectedPrefix, setSelectedPrefix] = usePersistentState('results:selectedPrefix', '');
   const [results, setResults] = useState<Result[]>([]);
   const [codeSubmissions, setCodeSubmissions] = useState<CodeSubmissionResponse[]>([]);
@@ -83,6 +103,13 @@ export function ResultsPage() {
   const [codingAssigned, setCodingAssigned] = useState<Set<string>>(new Set());
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [loadingResults, setLoadingResults] = useState(false);
+  // Not persisted, unlike the job selection: a filter left over from a previous
+  // visit looks like missing data, and the job is the thing worth remembering.
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
+  /** Submission-date bounds as `YYYY-MM-DD`; '' means that end is open. */
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   /** Discards a slow coding lookup that lands after the job selection moved on. */
   const codingFetchToken = useRef(0);
 
@@ -91,6 +118,12 @@ export function ResultsPage() {
   }, []);
 
   useEffect(() => {
+    // Filters describe a cohort, so they cannot outlive the job they were set
+    // against — carrying them over shows an empty table for a job that has results.
+    setSearchTerm('');
+    setStatusFilter('ALL');
+    setDateFrom('');
+    setDateTo('');
     if (selectedPrefix) {
       fetchResults();
     } else {
@@ -291,19 +324,94 @@ export function ResultsPage() {
     return Array.from(map.values());
   }, [results, codeSubmissions, codingPaper, codingAssigned]);
 
+  // ── Filtering ────────────────────────────────────────────────────────
+  const visibleRows = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    // Local midnight to local end-of-day, so a bound of the 14th includes
+    // everything submitted on the 14th. Parsed with an explicit time because
+    // `new Date('2026-08-14')` is read as UTC and shifts the day either side.
+    const from = dateFrom ? new Date(`${dateFrom}T00:00:00`) : null;
+    const to = dateTo ? new Date(`${dateTo}T23:59:59.999`) : null;
+
+    return candidateRows.filter((row) => {
+      if (statusFilter !== 'ALL' && row.overallStatus !== statusFilter) return false;
+      if (term && !row.email.toLowerCase().includes(term)) return false;
+
+      if (from || to) {
+        const submitted = submittedDateOf(row);
+        // No submission date cannot satisfy a date range. Excluding these is
+        // the honest reading of "submitted between X and Y".
+        if (!submitted) return false;
+        if (from && submitted < from) return false;
+        if (to && submitted > to) return false;
+      }
+      return true;
+    });
+  }, [candidateRows, searchTerm, statusFilter, dateFrom, dateTo]);
+
+  const filtersActive =
+    statusFilter !== 'ALL' || searchTerm.trim() !== '' || dateFrom !== '' || dateTo !== '';
+
+  /** Both ends set the wrong way round can only ever match nothing — say so. */
+  const dateRangeInverted = !!dateFrom && !!dateTo && dateFrom > dateTo;
+
+  const clearFilters = useCallback(() => {
+    setSearchTerm('');
+    setStatusFilter('ALL');
+    setDateFrom('');
+    setDateTo('');
+  }, []);
+
+  // SearchInput fires this from an effect keyed on the callback, so it has to be
+  // stable — an inline arrow would re-run the effect on every render.
+  const handleSearch = useCallback((value: string) => setSearchTerm(value), []);
+
   // ── Summary stats ────────────────────────────────────────────────────
+  // Counted over the visible rows so the cards, the table and the exported
+  // workbook always describe the same set of candidates.
   const stats = useMemo(() => {
-    const total = candidateRows.length;
-    const passed = candidateRows.filter((r) => r.overallStatus === 'PASSED').length;
-    const failed = candidateRows.filter((r) => r.overallStatus === 'FAILED').length;
+    const total = visibleRows.length;
+    const passed = visibleRows.filter((r) => r.overallStatus === 'PASSED').length;
+    const failed = visibleRows.filter((r) => r.overallStatus === 'FAILED').length;
     const partial = total - passed - failed;
     return { total, passed, failed, partial };
-  }, [candidateRows]);
+  }, [visibleRows]);
 
   const jobOptions = [
     { value: '', label: 'Select a job' },
     ...jobs.map((j) => ({ value: j.jobPrefix, label: `${j.jobTitle} (${j.jobPrefix})` })),
   ];
+
+  /**
+   * Exports exactly what the table is showing — the filtered rows, so a figure
+   * in the workbook can always be traced back to a row on screen. The filter is
+   * written into the Summary sheet: a partial export that does not say it is
+   * partial is the one way this file could mislead someone reading it later.
+   * The clock is read here rather than inside the builder to keep that pure.
+   */
+  async function handleExportExcel() {
+    if (exporting || visibleRows.length === 0) return;
+    setExporting(true);
+    try {
+      const input = {
+        jobTitle: jobs.find((j) => j.jobPrefix === selectedPrefix)?.jobTitle ?? selectedPrefix,
+        jobPrefix: selectedPrefix,
+        rows: visibleRows,
+        totalCandidates: candidateRows.length,
+        filters: {
+          status: STATUS_FILTER_OPTIONS.find((o) => o.value === statusFilter)?.label ?? 'All statuses',
+          search: searchTerm.trim(),
+          dateRange: describeDateRange(dateFrom, dateTo),
+        },
+        generatedAt: new Date(),
+      };
+      downloadBlob(await buildResultsWorkbook(input), resultsWorkbookFileName(input));
+    } catch {
+      showToast('Could not build the Excel report. Please try again.', 'error');
+    } finally {
+      setExporting(false);
+    }
+  }
 
   if (loadingJobs) {
     return (
@@ -340,10 +448,77 @@ export function ResultsPage() {
 
       {selectedPrefix && (
         <>
+          {/* Filters — hidden until there is something to filter. */}
+          {!loadingResults && candidateRows.length > 0 && (
+            <Card>
+              <CardContent>
+                <div className="flex flex-wrap items-end gap-3">
+                  <SearchInput
+                    onSearch={handleSearch}
+                    initialValue={searchTerm}
+                    placeholder="Search by candidate email..."
+                    className="w-full sm:w-72"
+                  />
+                  <div className="w-full sm:w-44">
+                    <Select
+                      options={STATUS_FILTER_OPTIONS}
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+                    />
+                  </div>
+                  {/* Submitted between. Each end is optional, so "everything
+                      since the 10th" needs only the one field. */}
+                  <div className="w-full sm:w-44">
+                    <Input
+                      type="date"
+                      label="Submitted from"
+                      value={dateFrom}
+                      max={dateTo || undefined}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                    />
+                  </div>
+                  <div className="w-full sm:w-44">
+                    <Input
+                      type="date"
+                      label="Submitted to"
+                      value={dateTo}
+                      min={dateFrom || undefined}
+                      onChange={(e) => setDateTo(e.target.value)}
+                    />
+                  </div>
+                  {filtersActive && (
+                    <Button variant="ghost" size="sm" leftIcon={<X size={14} />} onClick={clearFilters}>
+                      Clear
+                    </Button>
+                  )}
+                </div>
+
+                {dateRangeInverted && (
+                  <p className="mt-3 text-sm text-[var(--error)]">
+                    The "from" date is after the "to" date, so nothing can match.
+                  </p>
+                )}
+
+                {/* Says plainly that the numbers below describe a subset — the
+                    stat cards and the export both follow the filter. */}
+                {filtersActive && !dateRangeInverted && (
+                  <p className="mt-3 text-sm text-[var(--textSecondary)]">
+                    Showing <strong className="text-[var(--text)]">{visibleRows.length}</strong> of{' '}
+                    {candidateRows.length} candidate{candidateRows.length === 1 ? '' : 's'}.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
           {/* Summary Statistics */}
           {!loadingResults && candidateRows.length > 0 && (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <StatCard label="Total Candidates" value={stats.total} color="var(--primary)" />
+              <StatCard
+                label={filtersActive ? 'Matching Candidates' : 'Total Candidates'}
+                value={stats.total}
+                color="var(--primary)"
+              />
               <StatCard label="All Passed" value={stats.passed} color="#22c55e" />
               <StatCard label="Failed" value={stats.failed} color="#ef4444" />
               <StatCard label="Pending" value={stats.partial} color="#f59e0b" />
@@ -353,9 +528,25 @@ export function ResultsPage() {
           {/* Results Table */}
           <Card>
             <CardHeader>
-              <div className="flex items-center gap-2">
-                <FileBarChart size={20} className="text-[var(--primary)]" />
-                <CardTitle>Candidate Results</CardTitle>
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <FileBarChart size={20} className="text-[var(--primary)]" />
+                  <CardTitle>Candidate Results</CardTitle>
+                </div>
+                {/* Hidden while there is nothing to export, rather than
+                    disabled: an empty workbook is not a useful thing to hand
+                    someone, and the button would only invite the click. */}
+                {!loadingResults && visibleRows.length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    leftIcon={<FileSpreadsheet size={16} />}
+                    isLoading={exporting}
+                    onClick={handleExportExcel}
+                  >
+                    {filtersActive ? `Download Excel (${visibleRows.length})` : 'Download Excel'}
+                  </Button>
+                )}
               </div>
             </CardHeader>
             <CardContent>
@@ -369,13 +560,23 @@ export function ResultsPage() {
                   title="No assessment results"
                   description="No assessments have been completed for this job yet."
                 />
+              ) : visibleRows.length === 0 ? (
+                /* Distinct from the empty job above: there are results here, the
+                   filter just excludes all of them, and the way out is to clear
+                   it rather than to go looking for missing data. */
+                <EmptyState
+                  icon={<SearchX size={48} />}
+                  title="No matching candidates"
+                  description={`None of the ${candidateRows.length} candidates on this job match the current filters.`}
+                  action={{ label: 'Clear filters', onClick: clearFilters }}
+                />
               ) : (
                 <>
                   {/* Mobile: one card per candidate. Six columns — one of them a
                       full email address — cannot be read on a phone, and the
                       overall score matters more than any of them, so it leads. */}
                   <div className="lg:hidden space-y-3">
-                    {candidateRows.map((row) => (
+                    {visibleRows.map((row) => (
                       <div
                         key={row.email}
                         className="rounded-2xl border border-[var(--borderMuted,var(--border))] bg-[var(--cardBg)] p-4 space-y-3"
@@ -438,7 +639,7 @@ export function ResultsPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {candidateRows.map((row) => (
+                        {visibleRows.map((row) => (
                           <TableRow key={row.email}>
                             <TableCell className="font-medium align-top break-all">
                               {row.email}
@@ -606,9 +807,30 @@ function CodingSubmissionSummary({ submissions }: { submissions: CodeSubmissionR
   );
 }
 
-function getSubmittedDate(row: CandidateRow): string {
-  const date =
+/**
+ * The submitted-between filter in words, for the workbook's Summary sheet.
+ * Empty when neither end is set, which is what marks the export as unfiltered.
+ */
+function describeDateRange(from: string, to: string): string {
+  const day = (value: string) => new Date(`${value}T00:00:00`).toLocaleDateString();
+  if (from && to) return `${day(from)} to ${day(to)}`;
+  if (from) return `From ${day(from)}`;
+  if (to) return `Up to ${day(to)}`;
+  return '';
+}
+
+/**
+ * The date a candidate's attempt is filed under. Shared by the Submitted column
+ * and the date filter so the two cannot disagree about which day a row is on.
+ */
+function submittedDateOf(row: CandidateRow): Date | null {
+  const raw =
     row.aptitudeResult?.submittedAt ?? row.codingResult?.submittedAt ?? row.aptitudeResult?.createdAt;
-  if (!date) return '--';
-  return new Date(date).toLocaleDateString();
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getSubmittedDate(row: CandidateRow): string {
+  return submittedDateOf(row)?.toLocaleDateString() ?? '--';
 }

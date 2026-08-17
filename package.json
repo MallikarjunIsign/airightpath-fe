@@ -19,6 +19,7 @@
     "baseline-browser-mapping": "^2.10.40",
     "caniuse-lite": "^1.0.30001800",
     "date-fns": "^4.1.0",
+    "exceljs": "^4.4.0",
     "face-api.js": "^0.22.2",
     "jspdf": "^4.2.1",
     "lucide-react": "^0.344.0",
