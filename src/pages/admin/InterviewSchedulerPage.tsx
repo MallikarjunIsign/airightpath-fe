@@ -3,7 +3,8 @@ import { Loader2, Video, Send, Mail, Calendar } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
-import { DateTimeField } from '@/components/ui/DateTimeField';
+import { DateTimeInput } from '@/components/ui/DateTimeInput';
+import { nowDateTimeLocal, isPast } from '@/utils/datetime.utils';
 import { Select } from '@/components/ui/Select';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
@@ -21,6 +22,9 @@ export function InterviewSchedulerPage() {
   const [candidates, setCandidates] = useState<JobApplicationDTO[]>([]);
   const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set());
   const [deadlineTime, setDeadlineTime] = useState('');
+  /** Floor for the deadline picker, fixed on mount. */
+  const [minDateTime] = useState(nowDateTimeLocal);
+  const deadlineInPast = !!deadlineTime && isPast(deadlineTime);
   const [sendEmail, setSendEmail] = useState(true);
   const [questionsFromDate, setQuestionsFromDate] = useState('');
   const [questionsToDate, setQuestionsToDate] = useState('');
@@ -96,6 +100,10 @@ export function InterviewSchedulerPage() {
     }
     if (selectedEmails.size === 0) {
       showToast(MESSAGES.admin.common.selectCandidate, 'warning');
+      return;
+    }
+    if (deadlineTime && isPast(deadlineTime)) {
+      showToast(MESSAGES.admin.candidates.dateTimeInPast, 'warning');
       return;
     }
     if (!deadlineTime) {
@@ -224,11 +232,17 @@ export function InterviewSchedulerPage() {
               </div>
             )}
 
-            {/* Deadline */}
-            <DateTimeField
+            {/* Deadline. Native datetime-local, same as the date fields just
+                below it and everywhere else in the app. */}
+            <DateTimeInput
               label="Interview Deadline"
+              required
+              min={minDateTime}
               value={deadlineTime}
               onChange={setDeadlineTime}
+              leftIcon={<Calendar size={16} />}
+              helperText={deadlineInPast ? undefined : 'Pick from the calendar — cannot be in the past'}
+              error={deadlineInPast ? 'The deadline has already passed' : undefined}
             />
 
             {/* Question Date Range */}

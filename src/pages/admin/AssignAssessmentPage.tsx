@@ -14,12 +14,12 @@ import {
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { DateTimeField } from '@/components/ui/DateTimeField';
 import { BackLink } from '@/components/ui/BackLink';
 import { QuestionPaperExportDialog } from '@/components/admin/QuestionPaperExportDialog';
 import { ExamDurationFields } from '@/components/admin/ExamDurationFields';
 import { PassMarkField } from '@/components/admin/PassMarkField';
 import { DEFAULT_PASS_PERCENTAGE } from '@/utils/result.utils';
+import { DateTimeInput } from '@/components/ui/DateTimeInput';
 import { Select } from '@/components/ui/Select';
 import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -30,7 +30,7 @@ import { jobApplicationService } from '@/services/job-application.service';
 import { assessmentService } from '@/services/assessment.service';
 import { promptService } from '@/services/prompt.service';
 import { ROUTES } from '@/config/routes';
-import { nowDateTimeLocal } from '@/utils/datetime.utils';
+import { nowDateTimeLocal, isPast } from '@/utils/datetime.utils';
 import { parseQuestionPaper } from '@/utils/question-paper.utils';
 import {
   clampMinutesPerQuestion,
@@ -143,6 +143,16 @@ export function AssignAssessmentPage() {
   const [deadline, setDeadline] = useState('');
   // Floor for the date-time pickers (computed once on mount).
   const [minDateTime] = useState(nowDateTimeLocal);
+
+  // Shown against the fields themselves rather than only as a toast on submit,
+  // so an impossible window is visible while it is being chosen. `min` on the
+  // input does not cover a typed value, nor one that expires while the form is
+  // open — the submit guards still run, these just surface the same rules early.
+  const startInPast = !!startTime && isPast(startTime);
+  const deadlineInvalid =
+    !!deadline &&
+    (isPast(deadline) ||
+      (!!startTime && new Date(deadline).getTime() <= new Date(startTime).getTime()));
 
   // Checkbox state for assessment types
   const [aptitudeChecked, setAptitudeChecked] = useState(false);
@@ -875,21 +885,27 @@ export function AssignAssessmentPage() {
               </div>
             )}
 
-            {/* Date/Time Pickers */}
+            {/* Exam window. Picker-only, so `min` cannot be typed past; the
+                errors still catch a window that went stale while the form sat
+                open, or one walked backwards with the arrow keys. */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <DateTimeField
+              <DateTimeInput
                 label="Start Time"
+                required
                 min={minDateTime}
-                helperText="Cannot be in the past"
                 value={startTime}
                 onChange={setStartTime}
+                helperText={startInPast ? undefined : 'Pick from the calendar — cannot be in the past'}
+                error={startInPast ? 'Start time cannot be in the past' : undefined}
               />
-              <DateTimeField
+              <DateTimeInput
                 label="Deadline"
+                required
                 min={startTime || minDateTime}
-                helperText="Must be after the start time"
                 value={deadline}
                 onChange={setDeadline}
+                helperText={deadlineInvalid ? undefined : 'Must be after the start time'}
+                error={deadlineInvalid ? 'Deadline must be after the start time' : undefined}
               />
             </div>
 

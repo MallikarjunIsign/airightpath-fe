@@ -2,7 +2,7 @@ import { CalendarClock } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Textarea } from '@/components/ui/Textarea';
-import { DateTimeField } from '@/components/ui/DateTimeField';
+import { DateTimeInput } from '@/components/ui/DateTimeInput';
 import { formatScheduleForEmail, isPast } from '@/utils/datetime.utils';
 
 interface BulkActionModalProps {
@@ -65,35 +65,29 @@ export function BulkActionModal({
 
         {hasDateTime && (
           <div className="space-y-2">
-            <DateTimeField
+            {/* Picker-only, so the past cannot be typed past `min`. The check
+                below still runs: an open modal can outlive the slot it was
+                showing, and arrow keys can still walk the value backwards. */}
+            <DateTimeInput
               label="Date & Time"
               value={dateTime}
               onChange={onDateTimeChange}
               min={minDateTime}
               required={dateTimeRequired}
-              helperText="Cannot be in the past"
+              helperText={scheduledInPast ? undefined : 'Pick from the calendar — cannot be in the past'}
+              error={scheduledInPast ? 'That date & time has already passed' : undefined}
             />
 
-            {/* Show the schedule exactly as the candidate will read it. */}
-            {dateTime && (
-              <div
-                className={`flex items-start gap-2 px-3 py-2 rounded-lg border text-sm ${
-                  scheduledInPast
-                    ? 'border-[var(--error)] text-[var(--error)]'
-                    : 'border-[var(--border)] text-[var(--textSecondary)]'
-                }`}
-              >
+            {/* Show the schedule exactly as the candidate will read it. Hidden
+                once the slot is in the past: the field's own error already says
+                so, and repeating it here just crowded the modal. */}
+            {dateTime && !scheduledInPast && (
+              <div className="flex items-start gap-2 px-3 py-2 rounded-lg border border-[var(--border)] text-sm text-[var(--textSecondary)]">
                 <CalendarClock size={15} className="flex-shrink-0 mt-0.5" />
-                {scheduledInPast ? (
-                  <span>That date &amp; time has already passed — pick a future slot.</span>
-                ) : (
-                  <span>
-                    Candidates will see:{' '}
-                    <strong className="text-[var(--text)]">
-                      {formatScheduleForEmail(dateTime)}
-                    </strong>
-                  </span>
-                )}
+                <span>
+                  Candidates will see:{' '}
+                  <strong className="text-[var(--text)]">{formatScheduleForEmail(dateTime)}</strong>
+                </span>
               </div>
             )}
           </div>
