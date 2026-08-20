@@ -49,6 +49,8 @@ import {
 } from '@/components/admin/result/ResultModals';
 import { ProctoringCaptures } from '@/components/admin/result/ProctoringCaptures';
 import { AnswerSheetExportDialog } from '@/components/admin/result/AnswerSheetExportDialog';
+import { ResumeViewerModal } from '@/components/admin/ResumeViewerModal';
+import { useResumeViewer } from '@/hooks/useResumeViewer';
 import { QuestionPaperExportDialog } from '@/components/admin/QuestionPaperExportDialog';
 import type { AnswerSheetData } from '@/utils/answer-sheet.utils';
 import {
@@ -195,6 +197,12 @@ export function CandidateResultDetailPage() {
   const [papersError, setPapersError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>('overview');
   const [exportingSheet, setExportingSheet] = useState(false);
+  const {
+    resume,
+    loading: resumeLoading,
+    open: openResume,
+    close: closeResume,
+  } = useResumeViewer();
 
   useEffect(() => {
     if (jobPrefix && email) fetchData();
@@ -471,6 +479,18 @@ export function CandidateResultDetailPage() {
               >
                 Download Answer Sheet
               </Button>
+              {/* The CV the candidate applied with — read next to the score,
+                  and downloadable the same way the answer sheet is. */}
+              <Button
+                variant="secondary"
+                size="sm"
+                leftIcon={<FileText size={15} />}
+                onClick={() => openResume(email)}
+                isLoading={resumeLoading}
+                disabled={!email}
+              >
+                Resume
+              </Button>
               <Badge variant={statusVariant(overallStatus)} size="lg">
                 {overallStatus}
               </Badge>
@@ -657,6 +677,8 @@ export function CandidateResultDetailPage() {
       {exportingSheet && (
         <AnswerSheetExportDialog data={answerSheet} onClose={() => setExportingSheet(false)} />
       )}
+
+      {resume && <ResumeViewerModal resume={resume} onClose={closeResume} />}
     </div>
   );
 }
