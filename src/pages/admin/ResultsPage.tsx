@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Loader2,
   FileBarChart,
@@ -21,6 +21,8 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { BackLink } from '@/components/ui/BackLink';
+import { ROUTES } from '@/config/routes';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
 import { assessmentService } from '@/services/assessment.service';
@@ -38,6 +40,8 @@ import {
   scoreColor,
   splitResultsJson,
   orderedAttempts,
+  orderedAssessments,
+  submissionsForAttempt,
   summarizeAptitude,
   groupCodingByBand,
   normalizeBand,
@@ -91,6 +95,12 @@ interface CandidateAssignment {
   email: string;
   /** Their coding assessment id, when they were set one. */
   codingId?: number;
+  /**
+   * Every coding assessment they hold on this job, oldest first — one per
+   * assignment. Kept so a re-sit's code runs can be told from the original's,
+   * which share the same question ids and arrive in one undivided list.
+   */
+  codingAssessments: Assessment[];
   hasCoding: boolean;
   /** The pass mark each paper was assigned with, defaulted where absent. */
   aptitudePassMark: number;
@@ -171,6 +181,7 @@ interface CandidateRow {
 
 export function ResultsPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { showToast } = useToast();
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
   const [exporting, setExporting] = useState(false);
@@ -305,14 +316,23 @@ export function ResultsPage() {
       emails.map(async (email): Promise<CandidateAssignment | null> => {
         try {
           const res = await assessmentService.getAllAssessmentsForCandidate(email, { silent: true });
-          const mine = asAssessmentList(res.data).filter((a) => a.jobPrefix === selectedPrefix);
-          const coding = mine.find((a) => a.assessmentType === 'CODING');
-          const aptitude = mine.find((a) => a.assessmentType === 'APTITUDE');
+          const mine = orderedAssessments(
+            asAssessmentList(res.data).filter((a) => a.jobPrefix === selectedPrefix),
+          );
+          // The last of each type, not the first. This table scores the latest
+          // attempt, so reading the paper, the pass mark and the exam window off
+          // the original assignment graded a re-sit against the wrong paper —
+          // and put the table at odds with the detail page for the same person.
+          const codingAssessments = mine.filter((a) => a.assessmentType === 'CODING');
+          const aptitudeAssessments = mine.filter((a) => a.assessmentType === 'APTITUDE');
+          const coding = codingAssessments[codingAssessments.length - 1];
+          const aptitude = aptitudeAssessments[aptitudeAssessments.length - 1];
           // Returned even with no coding paper: the pass marks are wanted either
           // way, and dropping the row would grade aptitude against the default.
           return {
             email,
             codingId: coding?.id,
+            codingAssessments,
             hasCoding: !!coding,
             aptitudePassMark: passMarkOf(aptitude),
             codingPassMark: passMarkOf(coding),
@@ -423,9 +443,17 @@ export function ResultsPage() {
         codingPaper.length > 0 &&
         (codingAnswers.length === 0 ? row.hasCoding : codingPaper.length === codingAnswers.length);
 
+      // Only the runs from the attempt being scored. The endpoint returns every
+      // run on the job, and a re-sit repeats the question ids, so the latest
+      // attempt was being credited with whichever run happened to come first.
+      const codingAssessments = assignments.get(row.email)?.codingAssessments ?? [];
       const codingRows = buildCodingRows(
         paperUsable ? codingPaper : [],
-        row.codeSubmissions,
+        submissionsForAttempt(
+          row.codeSubmissions,
+          codingAssessments,
+          codingAssessments[codingAssessments.length - 1],
+        ),
         codingAnswers,
       );
       row.aptitudeScore = aptitudeScorePercent(row.aptitudeResult, aptitudeAnswers);
@@ -567,6 +595,19 @@ export function ResultsPage() {
     return { total, passed, failed, partial };
   }, [visibleRows]);
 
+  /**
+   * What the detail page should offer as its way back.
+   *
+   * `state` carries this page's own router state along, so a candidate opened
+   * from here and closed again lands back on a Results screen that still knows
+   * it was reached from Candidates.
+   */
+  const detailOrigin = {
+    label: 'Assessment Results',
+    path: ROUTES.ADMIN.ASSESSMENTS_RESULTS,
+    state: location.state,
+  };
+
   const jobOptions = [
     { value: '', label: 'Select a job' },
     ...jobs.map((j) => ({ value: j.jobPrefix, label: `${j.jobTitle} (${j.jobPrefix})` })),
@@ -613,6 +654,9 @@ export function ResultsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Shown only when another screen sent us here */}
+      <BackLink />
+
       <div>
         <h1 className="text-3xl font-bold text-[var(--text)]">Assessment Results</h1>
         <p className="text-[var(--textSecondary)] mt-1">
@@ -803,7 +847,8 @@ export function ResultsPage() {
                             leftIcon={<Eye size={14} />}
                             onClick={() =>
                               navigate(
-                                `/admin/assessments/results/${selectedPrefix}/${encodeURIComponent(row.email)}`
+                                ROUTES.ADMIN.candidateResultDetail(selectedPrefix, row.email),
+                                { state: { from: detailOrigin } }
                               )
                             }
                           >
@@ -854,7 +899,8 @@ export function ResultsPage() {
                                 leftIcon={<Eye size={14} />}
                                 onClick={() =>
                                   navigate(
-                                    `/admin/assessments/results/${selectedPrefix}/${encodeURIComponent(row.email)}`
+                                    ROUTES.ADMIN.candidateResultDetail(selectedPrefix, row.email),
+                                    { state: { from: detailOrigin } }
                                   )
                                 }
                               >

@@ -22,6 +22,8 @@ export const ROUTES = {
     ASSESSMENTS_UPLOAD: '/admin/assessments/upload',
     ASSESSMENTS_RESULTS: '/admin/assessments/results',
     CANDIDATE_RESULT_DETAIL: '/admin/assessments/results/:jobPrefix/:email',
+    candidateResultDetail: (jobPrefix: string, email: string) =>
+      `/admin/assessments/results/${encodeURIComponent(jobPrefix)}/${encodeURIComponent(email)}`,
     INTERVIEWS_SCHEDULE: '/admin/interviews/schedule',
     INTERVIEWS_RESULTS: '/admin/interviews/results',
     PROMPTS: '/admin/prompts',
