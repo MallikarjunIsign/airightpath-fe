@@ -436,7 +436,12 @@ export function ResultsPage() {
       // attempt was being credited with whichever run happened to come first.
       const codingRows = buildCodingRows(
         paperUsable ? codingPaper : [],
-        submissionsForAttempt(row.codeSubmissions, row.codingAttempts, row.codingResult),
+        submissionsForAttempt(
+          row.codeSubmissions,
+          row.codingAttempts,
+          row.codingResult,
+          assignments.get(row.email)?.codingId,
+        ),
         codingAnswers,
       );
       row.aptitudeScore = aptitudeScorePercent(row.aptitudeResult, aptitudeAnswers);

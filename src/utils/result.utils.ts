@@ -796,16 +796,37 @@ export function isWithinAttempt(stamp: string | undefined | null, window: Attemp
 /**
  * The code runs belonging to one attempt.
  *
- * Submissions are fetched per job and carry no attempt marker, so a re-sit's
- * runs arrive in the same list as the original's and the same question ids
- * appear twice. Splitting them by when they were made is what stops attempt 2
- * from being scored on code written for attempt 1.
+ * Runs are fetched per job, so a re-sit's arrive in the same list as the
+ * original's with the same question ids. Two ways to tell them apart, in order:
+ *
+ *  1. The assessment the run was filed against. Exact — the server records it
+ *     on every run, from the paper the candidate had open.
+ *  2. When it was made. Only for rows recorded before that id was returned:
+ *     the run's timestamp is the candidate's browser clock while the attempt's
+ *     is the server's, so this compares two clocks and can misplace a run at
+ *     the boundary. Good enough to place historic rows, not to be preferred
+ *     over an exact answer.
+ *
+ * With neither — a single attempt — there is nothing to separate and the list
+ * is returned untouched.
  */
 export function submissionsForAttempt(
   submissions: CodeSubmissionResponse[],
   attempts: Result[],
   selected?: Result,
+  assessmentId?: number,
 ): CodeSubmissionResponse[] {
+  if (attempts.length <= 1) return submissions;
+
+  if (assessmentId !== undefined) {
+    const filed = submissions.filter(
+      (sub) => sub.assessmentId != null && String(sub.assessmentId) === String(assessmentId),
+    );
+    // Only trusted when something matched. An empty result here means these runs
+    // predate the id being recorded, not that the attempt had no code.
+    if (filed.length > 0) return filed;
+  }
+
   const window = attemptWindow(attempts, selected);
   if (window.from === null && window.to === null) return submissions;
   return submissions.filter((sub) => isWithinAttempt(sub.createdAt, window));
