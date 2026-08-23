@@ -535,8 +535,8 @@ export function CandidateResultDetailPage() {
   // candidate made on the job, and a re-sit repeats the same question ids, so an
   // unfiltered list scored attempt 2 on attempt 1's code.
   const attemptSubmissions = useMemo(
-    () => submissionsForAttempt(codeSubmissions, codingAttempts, codingResult),
-    [codeSubmissions, codingAttempts, codingResult],
+    () => submissionsForAttempt(codeSubmissions, codingAttempts, codingResult, codingAssessment?.id),
+    [codeSubmissions, codingAttempts, codingResult, codingAssessment],
   );
 
   /**
@@ -570,7 +570,7 @@ export function CandidateResultDetailPage() {
         const { answers } = splitResultsJson<CodingAnswer>(result.resultsJson);
         const rows = buildCodingRows(
           parseArray<RawCodingQuestion>(questions),
-          submissionsForAttempt(codeSubmissions, attempts, result),
+          submissionsForAttempt(codeSubmissions, attempts, result, record?.id),
           answers,
         );
         return { type, result, index, score: codingScorePercent(rows, result) };

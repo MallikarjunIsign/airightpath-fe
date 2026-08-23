@@ -173,7 +173,12 @@ export function buildCandidateStandings(input: ScoreboardInput): Map<string, Can
       ? codingScorePercent(
           buildCodingRows(
             codingPaper ?? [],
-            submissionsForAttempt(ownSubmissions, codingAttempts, codingResult),
+            submissionsForAttempt(
+              ownSubmissions,
+              codingAttempts,
+              codingResult,
+              codingPapers[codingPapers.length - 1]?.id,
+            ),
             codingAnswers,
           ),
           codingResult,

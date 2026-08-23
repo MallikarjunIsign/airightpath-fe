@@ -43,6 +43,12 @@ export interface CodeSubmissionResponse {
    */
   passed?: boolean | null;
   status?: CodeRunStatus;
+  /**
+   * The assessment this run was made against — how a re-sit's runs are told
+   * from the original's. Absent on rows recorded before it was returned, which
+   * fall back to being placed by time.
+   */
+  assessmentId?: string | number | null;
 }
 
 // ── Individual test result — matches BE TestCaseDTO response ────────
