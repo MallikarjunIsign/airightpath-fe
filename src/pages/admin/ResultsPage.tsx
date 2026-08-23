@@ -31,6 +31,7 @@ import { usePersistentState } from '@/hooks/usePersistentState';
 import { useToast } from '@/components/ui/Toast';
 import { downloadBlob } from '@/utils/question-paper.utils';
 import { getAppEmail } from '@/utils/application.utils';
+import { toAssessmentList } from '@/utils/assessment.utils';
 import { buildResultsWorkbook, resultsWorkbookFileName } from '@/utils/results-export.utils';
 import {
   aptitudeScorePercent,
@@ -58,17 +59,11 @@ import {
   DEFAULT_PASS_PERCENTAGE,
 } from '@/utils/result.utils';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
-import type { Assessment, RawCodingQuestion } from '@/types/assessment.types';
+import type { RawCodingQuestion } from '@/types/assessment.types';
 import type { Result, AptitudeAnswer, CodingAnswer } from '@/types/result.types';
 import type { CodeSubmissionResponse } from '@/types/compiler.types';
 
 /** Tolerate both a bare array and an `{ data: [...] }` envelope from the API. */
-function asAssessmentList(body: unknown): Assessment[] {
-  if (Array.isArray(body)) return body as Assessment[];
-  const inner = (body as { data?: unknown })?.data;
-  return Array.isArray(inner) ? (inner as Assessment[]) : [];
-}
-
 /** Results/answers are stored as a JSON string on the result row. */
 function parseAnswers<T>(raw?: string): T[] {
   if (!raw) return [];
@@ -311,7 +306,7 @@ export function ResultsPage() {
         try {
           const res = await assessmentService.getAllAssessmentsForCandidate(email, { silent: true });
           const mine = orderedAssessments(
-            asAssessmentList(res.data).filter((a) => a.jobPrefix === selectedPrefix),
+            toAssessmentList(res.data).filter((a) => a.jobPrefix === selectedPrefix),
           );
           // The last of each type, not the first. This table scores the latest
           // attempt, so reading the paper, the pass mark and the exam window off

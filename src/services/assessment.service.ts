@@ -120,9 +120,15 @@ export const assessmentService = {
     });
   },
 
-  getResultsByJobPrefix(jobPrefix: string) {
+  /**
+   * `silent` suppresses the global error toast — for reads that decorate a
+   * screen rather than being the reason it was opened, where a failure should
+   * cost that decoration and nothing else.
+   */
+  getResultsByJobPrefix(jobPrefix: string, opts?: { silent?: boolean }) {
     return api.get<Result[]>(ENDPOINTS.ASSESSMENTS.GET_RESULTS_BY_JOB_PREFIX, {
       params: { jobPrefix },
+      _skipErrorToast: opts?.silent,
     });
   },
 };

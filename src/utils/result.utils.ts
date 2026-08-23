@@ -739,7 +739,7 @@ export interface AttemptWindow {
 }
 
 /** An attempt's own timestamp, or null when it carries nothing usable. */
-function attemptTime(attempt?: Result): number | null {
+export function attemptTime(attempt?: Result): number | null {
   const stamp = attempt?.submittedAt ?? attempt?.createdAt;
   const time = stamp ? new Date(stamp).getTime() : Number.NaN;
   return Number.isNaN(time) ? null : time;
@@ -809,6 +809,55 @@ export function submissionsForAttempt(
   const window = attemptWindow(attempts, selected);
   if (window.from === null && window.to === null) return submissions;
   return submissions.filter((sub) => isWithinAttempt(sub.createdAt, window));
+}
+
+/**
+ * Splits a candidate's work on one job into rounds — an "attempt" as a reviewer
+ * counts them, rather than as one module counts them.
+ *
+ * A round is everything that happened before a module came round a second time:
+ * an aptitude paper and a coding paper handed over together are one attempt, and
+ * re-assigning coding alone opens a second attempt holding only coding. Ordered
+ * by time first, so a module added a day later joins the round already in
+ * progress instead of starting one of its own.
+ *
+ * Deliberately shape-agnostic: results and assessment records are grouped the
+ * same way on the result screen and the candidate pipeline, and they must agree
+ * on what "attempt 2" means.
+ */
+export function groupRounds<T>(
+  items: T[],
+  typeOf: (item: T) => string,
+  timeOf: (item: T) => number | null,
+): T[][] {
+  const ordered = items
+    .map((item, position) => ({ item, position, at: timeOf(item) }))
+    .sort((a, b) => {
+      // Undated entries sort last and keep their original order — they cannot
+      // be placed in time, and guessing would reshuffle real rounds around them.
+      if (a.at === null && b.at === null) return a.position - b.position;
+      if (a.at === null) return 1;
+      if (b.at === null) return -1;
+      return a.at === b.at ? a.position - b.position : a.at - b.at;
+    });
+
+  const rounds: T[][] = [];
+  let current: T[] = [];
+  let seen = new Set<string>();
+
+  for (const { item } of ordered) {
+    const type = typeOf(item);
+    if (seen.has(type)) {
+      rounds.push(current);
+      current = [];
+      seen = new Set<string>();
+    }
+    seen.add(type);
+    current.push(item);
+  }
+  if (current.length > 0) rounds.push(current);
+
+  return rounds;
 }
 
 // ── Pass marks ─────────────────────────────────────────────────────────

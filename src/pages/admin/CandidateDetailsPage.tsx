@@ -29,6 +29,7 @@ import { jobApplicationService } from '@/services/job-application.service';
 import { resumeService } from '@/services/resume.service';
 import axios from 'axios';
 import { usePersistentState, writePersistentValue } from '@/hooks/usePersistentState';
+import { useJobScoreboard } from '@/hooks/useJobScoreboard';
 import { useToast } from '@/components/ui/Toast';
 import { ROUTES } from '@/config/routes';
 import { getAppEmail } from '@/utils/application.utils';
@@ -67,6 +68,21 @@ const ASSIGN_STAGES: JobApplicationStatus[] = [
  * are excluded because the results screen would only have an empty row for them.
  */
 const RESULT_STAGES: JobApplicationStatus[] = [
+  'EXAM_COMPLETED',
+  'INTERVIEW_SCHEDULED',
+  'INTERVIEW_COMPLETED',
+  'SELECTED',
+];
+
+/**
+ * Stages where a paper has been sent, so there is an assessment to report on.
+ *
+ * From EXAM_SENT rather than EXAM_COMPLETED: "Exam Sent" is exactly the stage
+ * where an admin needs to know *which* paper is outstanding, and whether this
+ * candidate is on their second go at it.
+ */
+const EXAM_STAGES: JobApplicationStatus[] = [
+  'EXAM_SENT',
   'EXAM_COMPLETED',
   'INTERVIEW_SCHEDULED',
   'INTERVIEW_COMPLETED',
@@ -295,6 +311,26 @@ export function CandidateDetailsPage() {
       setActiveStage('APPLIED');
     }
   }, [activeStage, legacyCount, loadingCandidates, setActiveStage]);
+
+  /**
+   * Scored only for the stage being looked at, not the whole job: the standings
+   * cost one request per candidate, and a recruiter on "Applied" is not asking
+   * about exam results.
+   */
+  const showStandings = EXAM_STAGES.includes(activeStage);
+  // Every candidate past the send, not just the stage on screen: moving between
+  // Exam Sent and Exam Completed is the normal way to work this page, and
+  // scoping the load to one stage re-ran the whole thing on each switch.
+  const standingEmails = showStandings
+    ? candidates
+        .filter((c) => EXAM_STAGES.includes(c.status as JobApplicationStatus))
+        .map((c) => getAppEmail(c))
+        .filter(Boolean)
+    : [];
+  const { standings, loading: standingsLoading } = useJobScoreboard(
+    showStandings ? selectedPrefix : '',
+    standingEmails,
+  );
 
   // Available actions for the current stage
   const availableActions = STAGE_ACTIONS[activeStage] ?? [];
@@ -859,6 +895,8 @@ export function CandidateDetailsPage() {
                     RESULT_STAGES.includes(activeStage) ? handleViewCandidateResult : undefined
                   }
                   statusLabels={STAGE_LABELS}
+                  standings={showStandings ? standings : undefined}
+                  standingsLoading={standingsLoading}
                 />
               )}
             </CardContent>
@@ -896,6 +934,7 @@ export function CandidateDetailsPage() {
           validatingReferral={validatingReferral}
           onViewResume={openResume}
           resumeLoading={resumeLoading}
+          jobPrefix={selectedPrefix}
           onViewResult={
             RESULT_STAGES.includes(selectedCandidate.status as JobApplicationStatus)
               ? handleViewCandidateResult

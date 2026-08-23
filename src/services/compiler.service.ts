@@ -23,9 +23,11 @@ export const compilerService = {
     });
   },
 
-  getResultsByJobPrefix(jobPrefix: string) {
+  /** `silent` suppresses the global error toast — see the assessment service. */
+  getResultsByJobPrefix(jobPrefix: string, opts?: { silent?: boolean }) {
     return api.get<CodeSubmissionResponse[]>(ENDPOINTS.COMPILER.RESULTS_BY_JOB_PREFIX, {
       params: { jobPrefix },
+      _skipErrorToast: opts?.silent,
     });
   },
 };
