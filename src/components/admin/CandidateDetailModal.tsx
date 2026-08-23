@@ -3,6 +3,7 @@ import { Modal } from '@/components/ui/Modal';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ReferralFields } from '@/components/application/ReferralFields';
+import { CandidateExamAssignments } from './CandidateExamAssignments';
 import { getAppEmail } from '@/utils/application.utils';
 import { formatDateTime, formatRelativeTime } from '@/utils/format.utils';
 import { hasReferral, referralStatusLabel } from '@/utils/referral.utils';
@@ -25,6 +26,11 @@ interface CandidateDetailModalProps {
    * been sat — before that there is nothing on the results screen to show.
    */
   onViewResult?: (candidate: JobApplicationDTO) => void;
+  /**
+   * The job being reviewed. Without it the assignments section cannot tell this
+   * job's papers from another job's, so it is left out rather than shown wrong.
+   */
+  jobPrefix?: string;
 }
 
 function statusBadgeVariant(status: string) {
@@ -53,6 +59,7 @@ export function CandidateDetailModal({
   onViewResume,
   resumeLoading,
   onViewResult,
+  jobPrefix,
 }: Readonly<CandidateDetailModalProps>) {
   const referralStatus = candidate.referralStatus?.toUpperCase();
 
@@ -206,6 +213,13 @@ export function CandidateDetailModal({
               </div>
             </div>
           </div>
+        )}
+
+        {/* What was assigned, attempt by attempt — the detail the pipeline
+            stage alone cannot give: "Exam Sent" says nothing about which
+            paper, nor whether this is the candidate's second go at it. */}
+        {jobPrefix && (
+          <CandidateExamAssignments email={getAppEmail(candidate)} jobPrefix={jobPrefix} />
         )}
 
         {/* Application Status Details */}

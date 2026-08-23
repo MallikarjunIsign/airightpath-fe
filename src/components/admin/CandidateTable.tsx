@@ -4,7 +4,9 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { getAppEmail } from '@/utils/application.utils';
 import { ReferralTag } from './ReferralTag';
+import { AssessmentStanding } from './AssessmentStanding';
 import type { JobApplicationDTO } from '@/types/job.types';
+import type { CandidateStanding } from '@/utils/scoreboard.utils';
 
 interface CandidateTableProps {
   candidates: JobApplicationDTO[];
@@ -20,6 +22,15 @@ interface CandidateTableProps {
   onViewResult?: (candidate: JobApplicationDTO) => void;
   /** Maps a raw status to its display label (falls back to the raw status). */
   statusLabels: Record<string, string>;
+  /**
+   * What each candidate was set and how it went, keyed by lowercased email.
+   *
+   * Omitted at stages before an exam exists, where the column would be a row of
+   * "No exam set" and nothing else.
+   */
+  standings?: Map<string, CandidateStanding>;
+  /** The standings are still arriving, so absence isn't reported as fact. */
+  standingsLoading?: boolean;
 }
 
 const CHECKBOX_CLASS =
@@ -40,6 +51,8 @@ export function CandidateTable({
   onView,
   onViewResult,
   statusLabels,
+  standings,
+  standingsLoading,
 }: Readonly<CandidateTableProps>) {
   const allSelected = selectedEmails.size === candidates.length && candidates.length > 0;
 
@@ -112,6 +125,16 @@ export function CandidateTable({
                 </div>
               </dl>
 
+              {standings && (
+                <div className="min-w-0">
+                  <p className="text-xs text-[var(--textTertiary)] mb-1">Assessment</p>
+                  <AssessmentStanding
+                    standing={standings.get(email.toLowerCase())}
+                    loading={standingsLoading}
+                  />
+                </div>
+              )}
+
               <div className="flex flex-wrap justify-end gap-2 pt-1">
                 <Button
                   variant="outline"
@@ -151,12 +174,13 @@ export function CandidateTable({
                   className={CHECKBOX_CLASS}
                 />
               </TableHead>
-              <TableHead className="px-3 w-[26%]">Candidate</TableHead>
-              <TableHead className="px-3 w-[13%]">Mobile</TableHead>
-              <TableHead className="px-3 w-[11%]">Experience</TableHead>
-              <TableHead className="px-3 w-[14%]">Role</TableHead>
-              <TableHead className="px-3 w-[14%]">Source</TableHead>
-              <TableHead className="px-3 w-[13%]">Status</TableHead>
+              <TableHead className="px-3 w-[22%]">Candidate</TableHead>
+              <TableHead className="px-3 w-[11%]">Mobile</TableHead>
+              <TableHead className="px-3 w-[8%]">Experience</TableHead>
+              <TableHead className="px-3 w-[11%]">Role</TableHead>
+              <TableHead className="px-3 w-[10%]">Source</TableHead>
+              {standings && <TableHead className="px-3 w-[19%]">Assessment</TableHead>}
+              <TableHead className="px-3 w-[11%]">Status</TableHead>
               <TableHead className="px-3 w-[8%]">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -198,6 +222,15 @@ export function CandidateTable({
                   <TableCell className="px-3 py-3 align-top">
                     <ReferralTag candidate={candidate} />
                   </TableCell>
+
+                  {standings && (
+                    <TableCell className="px-3 py-3 align-top">
+                      <AssessmentStanding
+                        standing={standings.get(email.toLowerCase())}
+                        loading={standingsLoading}
+                      />
+                    </TableCell>
+                  )}
 
                   <TableCell className="px-3 py-3 align-top">
                     <Badge variant="info" size="sm">

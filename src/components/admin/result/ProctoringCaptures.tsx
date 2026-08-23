@@ -29,8 +29,19 @@ import type { ProctoringCapture } from '@/types/proctoring.types';
  */
 
 interface ProctoringCapturesProps {
-  /** The attempt to show captures for. Nothing is fetched without it. */
+  /** The attempt to show captures for; captures name the paper they were filed against. */
   assessmentId?: number;
+  /**
+   * The candidate and job, which together list every capture across their
+   * attempts.
+   *
+   * Preferred over asking for one assessment's captures: it survives the
+   * attempt being filed against a paper the review screen resolved differently,
+   * and it is the only way to tell "nothing was captured for this attempt" from
+   * "the images are here, just filed elsewhere".
+   */
+  candidateEmail?: string;
+  jobPrefix?: string;
   /**
    * Why the caller could not determine the assessment id, when it could not.
    *
@@ -79,8 +90,47 @@ function describeFailure(err: unknown): string {
   return extractApiError(err).message;
 }
 
+/**
+ * The captures belonging to the attempt on screen, out of everything on file for
+ * the candidate.
+ *
+ * Three rules, tried in order, because no single one holds in every case:
+ *
+ *  1. The assessment id a capture was filed against. Authoritative — it names
+ *     the paper the candidate had open when the shutter fired.
+ *  2. Failing that, when the capture was taken. This is what rescues an earlier
+ *     attempt whose captures were filed against a paper this screen resolved
+ *     differently: matching only on id showed the re-sit's photos and reported
+ *     the first attempt as never captured, when its images were on file all
+ *     along.
+ *  3. Failing both — a single attempt, so no window to judge against — show
+ *     everything. There is nothing to separate it from.
+ *
+ * Returns nothing when captures exist but belong to other attempts, which the
+ * card states rather than papering over with someone else's photo.
+ */
+function selectForAttempt(
+  all: ProctoringCapture[],
+  assessmentId: number | undefined,
+  window: AttemptWindow,
+): ProctoringCapture[] {
+  if (assessmentId !== undefined) {
+    const filed = all.filter((capture) => capture.assessmentId === assessmentId);
+    if (filed.length > 0) return filed;
+  }
+
+  const bounded = window.from !== null || window.to !== null;
+  if (bounded) {
+    return all.filter((capture) => isWithinAttempt(capture.capturedAt ?? capture.uploadedAt, window));
+  }
+
+  return all;
+}
+
 export function ProctoringCaptures({
   assessmentId,
+  candidateEmail,
+  jobPrefix,
   lookupError,
   moduleLabel,
   attemptWindow,
@@ -88,14 +138,22 @@ export function ProctoringCaptures({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [items, setItems] = useState<LoadedCapture[]>([]);
+  /** Captures on file for this candidate that belong to a different attempt. */
+  const [elsewhere, setElsewhere] = useState(0);
   const [preview, setPreview] = useState<LoadedCapture | null>(null);
   /** Bumped to re-run the load after a failure. */
   const [attempt, setAttempt] = useState(0);
 
   const objectUrlsRef = useRef<string[]>([]);
 
+  // Primitives, not the window object: a fresh `{from, to}` on every render
+  // would restart the load on every render.
+  const windowFrom = attemptWindow?.from ?? null;
+  const windowTo = attemptWindow?.to ?? null;
+  const canLookUp = (!!candidateEmail && !!jobPrefix) || assessmentId !== undefined;
+
   useEffect(() => {
-    if (!assessmentId) return;
+    if (!canLookUp) return;
     let cancelled = false;
 
     // URLs from a previous assessment are released before the next load.
@@ -105,20 +163,33 @@ export function ProctoringCaptures({
     setLoading(true);
     setError(null);
     setItems([]);
+    setElsewhere(0);
 
     (async () => {
       try {
-        const res = await examProctoringService.getCapturesForAssessment(assessmentId);
+        // Everything on file for this candidate and job, so a capture filed
+        // against a paper this screen resolved differently is still found.
+        // Falls back to the single-assessment read when the caller could not
+        // supply both.
+        const res =
+          candidateEmail && jobPrefix
+            ? await examProctoringService.getCapturesForCandidate(candidateEmail, jobPrefix)
+            : await examProctoringService.getCapturesForAssessment(assessmentId!);
+
         // Tolerate both the ApiResponse envelope and a bare array, since older
         // endpoints in this API return the list unwrapped.
         const body = res.data as unknown;
-        const captures: ProctoringCapture[] = Array.isArray(body)
+        const all: ProctoringCapture[] = Array.isArray(body)
           ? (body as ProctoringCapture[])
           : ((body as { data?: ProctoringCapture[] })?.data ?? []);
         if (cancelled) return;
 
-        // The bytes are fetched per capture; one unreadable image leaves a
-        // placeholder rather than emptying the whole card.
+        const captures = selectForAttempt(all, assessmentId, { from: windowFrom, to: windowTo });
+        if (!cancelled) setElsewhere(all.length - captures.length);
+
+        // The bytes are fetched per capture — and only for the ones being shown,
+        // so a re-sit does not download the other attempt's images too. One
+        // unreadable image leaves a placeholder rather than emptying the card.
         const loaded = await Promise.all(
           captures.map(async (capture) => {
             try {
@@ -143,7 +214,7 @@ export function ProctoringCaptures({
     return () => {
       cancelled = true;
     };
-  }, [assessmentId, attempt]);
+  }, [canLookUp, assessmentId, candidateEmail, jobPrefix, windowFrom, windowTo, attempt]);
 
   useEffect(() => {
     return () => {
@@ -152,17 +223,8 @@ export function ProctoringCaptures({
     };
   }, []);
 
-  const hasAssessment = assessmentId !== undefined;
-
-  // Only what was captured during the attempt on screen. Without this the card
-  // took the first photo on file, which for a re-sit is the one from the
-  // original sitting — the picker said attempt 2 while the photo was dated to
-  // attempt 1.
-  const mine = attemptWindow
-    ? items.filter((i) =>
-        isWithinAttempt(i.capture.capturedAt ?? i.capture.uploadedAt, attemptWindow),
-      )
-    : items;
+  const hasAssessment = canLookUp;
+  const mine = items;
 
   const photo = mine.find((i) => i.capture.captureType === 'IDENTITY_PHOTO');
   const frames = mine
@@ -170,12 +232,12 @@ export function ProctoringCaptures({
     .sort((a, b) => a.capture.frameIndex - b.capture.frameIndex);
 
   /**
-   * Captures exist for this assessment, but none from this attempt.
+   * Captures exist for this candidate, but none belong to this attempt.
    *
    * Worth saying out loud rather than falling back to another attempt's photo:
    * the whole point of the check is to confirm who sat *this* paper.
    */
-  const otherAttemptOnly = items.length > 0 && mine.length === 0;
+  const otherAttemptOnly = mine.length === 0 && elsewhere > 0;
 
   // Every path below renders the card. Returning null when there is nothing to
   // show reads as a broken page — the reviewer cannot tell "no photo was taken"
@@ -238,7 +300,7 @@ export function ProctoringCaptures({
           </div>
         )}
 
-        {hasAssessment && !loading && !error && items.length === 0 && (
+        {hasAssessment && !loading && !error && items.length === 0 && elsewhere === 0 && (
           <EmptyRow
             text={`Nothing was captured for this ${moduleLabel.toLowerCase()} attempt. Expected for exams sat before the pre-exam check was switched on, or while it was turned off.`}
           />
@@ -246,7 +308,7 @@ export function ProctoringCaptures({
 
         {hasAssessment && !loading && !error && otherAttemptOnly && (
           <EmptyRow
-            text={`Nothing was captured during this ${moduleLabel.toLowerCase()} attempt — the ${items.length === 1 ? 'capture' : 'captures'} on file ${items.length === 1 ? 'was' : 'were'} taken for another attempt at this exam.`}
+            text={`Nothing was captured during this ${moduleLabel.toLowerCase()} attempt — the ${elsewhere === 1 ? 'capture' : `${elsewhere} captures`} on file for this candidate ${elsewhere === 1 ? 'belongs' : 'belong'} to another attempt at this exam.`}
           />
         )}
 

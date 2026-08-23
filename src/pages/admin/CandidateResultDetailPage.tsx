@@ -22,6 +22,8 @@ import {
   TrendingDown,
   Terminal,
   Download,
+  History,
+  Eye,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -85,7 +87,10 @@ import {
   assessmentForAttempt,
   submissionsForAttempt,
   attemptWindow,
+  attemptTime,
+  groupRounds,
 } from '@/utils/result.utils';
+import { toAssessmentList } from '@/utils/assessment.utils';
 import { SubmissionInfo } from '@/components/result/SubmissionInfo';
 import type { CodingRow, AttemptWindow } from '@/utils/result.utils';
 import type { Result, AptitudeAnswer, CodingAnswer, SubmissionMeta } from '@/types/result.types';
@@ -147,6 +152,173 @@ function AttemptPicker({
         <span className="text-xs text-[var(--textSecondary)]">(latest)</span>
       )}
     </div>
+  );
+}
+
+/** One module's attempt, with the figure the cards quote for it. */
+interface AttemptSummary {
+  type: 'APTITUDE' | 'CODING';
+  result: Result;
+  /** Position in that module's own attempt list — what the pickers index by. */
+  index: number;
+  score: number | null;
+}
+
+/** How much of one round is on screen. */
+type RoundState = 'full' | 'partial' | 'none';
+
+/**
+ * Fill and border per state. The selected round is filled, not merely outlined:
+ * "which of these am I reading" is the only question these cards exist to
+ * answer, and an outline alone does not carry across a row of them.
+ */
+const ROUND_TONE: Record<RoundState, string> = {
+  full: 'border-[var(--primary)] bg-[var(--primaryLight)] ring-1 ring-[var(--primary)]',
+  partial: 'border-[var(--primary)] bg-[var(--primaryMuted)]',
+  none: 'border-[var(--borderMuted,var(--border))] bg-[var(--surface1)] hover:bg-[var(--surface2)] hover:border-[var(--primary)]',
+};
+
+/** The day a round was sat, taken from the first module submitted in it. */
+function roundDate(round: AttemptSummary[]): string | null {
+  const stamps = round
+    .map((entry) => entry.result.submittedAt)
+    .filter((stamp): stamp is string => !!stamp);
+  if (stamps.length === 0) return null;
+  return new Date(stamps.sort()[0]).toLocaleDateString();
+}
+
+/**
+ * What each attempt at this exam consisted of.
+ *
+ * A re-assignment is rarely the whole exam again — a candidate is far more
+ * often given just the coding paper a second time — so "attempt 2" means
+ * different things for different modules, and the per-module pickers on the
+ * tabs cannot show that. This is the one place the reviewer can see the shape
+ * of the whole history: which papers each round held, how each one went, and
+ * which of them the page is currently showing.
+ *
+ * Hidden for a single round, where there is no history to explain.
+ */
+function AttemptRounds({
+  rounds,
+  selected,
+  onSelect,
+}: {
+  rounds: AttemptSummary[][];
+  /** The attempt index on screen for each module. */
+  selected: Partial<Record<'APTITUDE' | 'CODING', number>>;
+  onSelect: (type: 'APTITUDE' | 'CODING', index: number) => void;
+}) {
+  if (rounds.length < 2) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2.5">
+          <div
+            className="w-8 h-8 rounded-lg flex items-center justify-center"
+            style={{ background: 'var(--warningMuted, rgba(245,158,11,0.12))' }}
+          >
+            <History size={16} style={{ color: 'var(--warning)' }} />
+          </div>
+          <CardTitle>Attempts ({rounds.length})</CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          {rounds.map((round, idx) => {
+            const when = roundDate(round);
+            const isLatest = idx === rounds.length - 1;
+
+            // Which of this round's papers the page is currently showing. A
+            // candidate who re-sat coding alone leaves the screen on a mix —
+            // aptitude from the first round, coding from the second — and a
+            // card that claimed to be "the" selected one would be lying about
+            // half the page.
+            const showing = round.filter((entry) => selected[entry.type] === entry.index);
+            let state: RoundState = 'none';
+            if (showing.length === round.length) state = 'full';
+            else if (showing.length > 0) state = 'partial';
+
+            return (
+              <button
+                key={round.map((e) => `${e.type}-${e.result.id}`).join('|')}
+                type="button"
+                aria-pressed={state === 'full'}
+                title={
+                  state === 'full'
+                    ? `Attempt ${idx + 1} is the one on screen`
+                    : `Show attempt ${idx + 1}`
+                }
+                onClick={() => round.forEach((entry) => onSelect(entry.type, entry.index))}
+                className={`w-full text-left rounded-xl border p-3 space-y-2.5 transition-colors ${ROUND_TONE[state]}`}
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--textTertiary)]">
+                    Attempt {idx + 1}
+                    {isLatest && rounds.length > 1 && (
+                      <span className="ml-1.5 font-medium normal-case tracking-normal text-[var(--textQuaternary)]">
+                        (latest)
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-xs text-[var(--textSecondary)]">{when ?? 'not submitted'}</p>
+                </div>
+
+                {/* One chip per paper sat in this round, so "aptitude and
+                    coding" reads differently from "coding again". */}
+                <div className="flex flex-wrap gap-1.5">
+                  {round.map((entry) => {
+                    const label = entry.type === 'APTITUDE' ? 'Aptitude' : 'Coding';
+                    return (
+                      <span
+                        key={`${entry.type}-${entry.result.id}`}
+                        className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-[var(--borderMuted,var(--border))] bg-[var(--cardBg)] text-xs"
+                      >
+                        {entry.type === 'APTITUDE' ? (
+                          <BookOpen size={12} style={{ color: 'var(--info)' }} />
+                        ) : (
+                          <Code2 size={12} style={{ color: '#a855f7' }} />
+                        )}
+                        <span className="font-semibold text-[var(--textSecondary)]">{label}</span>
+                        <span className="font-bold text-[var(--text)]">
+                          {entry.score !== null ? `${entry.score}%` : '--'}
+                        </span>
+                        {entry.result.status && (
+                          <Badge variant={statusVariant(entry.result.status)} size="sm">
+                            {entry.result.status}
+                          </Badge>
+                        )}
+                      </span>
+                    );
+                  })}
+                </div>
+
+                {/* Says in words what the fill says in colour, since "which
+                    summary am I reading" is the whole question this answers. */}
+                <p className="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--primary)] min-h-[16px]">
+                  {state === 'full' && (
+                    <>
+                      <Eye size={12} />
+                      Showing this attempt below
+                    </>
+                  )}
+                  {state === 'partial' && (
+                    <>
+                      <Eye size={12} />
+                      Showing {showing.map((e) => (e.type === 'APTITUDE' ? 'aptitude' : 'coding')).join(' + ')} from this attempt
+                    </>
+                  )}
+                  {state === 'none' && (
+                    <span className="text-[var(--textTertiary)] font-medium">Click to show</span>
+                  )}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -266,17 +438,10 @@ export function CandidateResultDetailPage() {
       // sat the exam. It returned an empty list every time, which read as
       // "no assessment record" and cost us both the paper and the captures.
       const res = await assessmentService.getAllAssessmentsForCandidate(email!);
-      // Tolerate both a bare array and an { data: [...] } envelope — the same
-      // defence the rest of this codebase applies to list endpoints. Calling
+      // Tolerate both a bare array and an { data: [...] } envelope — calling
       // .filter on an envelope throws, and the catch below would then report a
       // lookup failure for what is really a shape mismatch.
-      const body = res.data as unknown;
-      let list: Assessment[] = [];
-      if (Array.isArray(body)) {
-        list = body;
-      } else if (Array.isArray((body as { data?: unknown })?.data)) {
-        list = (body as { data: Assessment[] }).data;
-      }
+      const list = toAssessmentList(res.data);
 
       // Every record for this job, not the first of each type: a re-assigned
       // exam has one per attempt, and `.find()` handed all of them the paper,
@@ -373,6 +538,81 @@ export function CandidateResultDetailPage() {
     () => submissionsForAttempt(codeSubmissions, codingAttempts, codingResult),
     [codeSubmissions, codingAttempts, codingResult],
   );
+
+  /**
+   * Every attempt at either module, scored the same way the tab that owns it
+   * scores it — each against its own paper and, for coding, its own runs.
+   *
+   * Computed for all of them, not only the two on screen, so the attempt cards
+   * can state what each round came to without the reviewer having to click
+   * through them one at a time.
+   */
+  const attemptSummaries = useMemo(() => {
+    const summarize = (
+      type: 'APTITUDE' | 'CODING',
+      attempts: Result[],
+      records: Assessment[],
+    ): AttemptSummary[] =>
+      attempts.map((result, index) => {
+        const record = assessmentForAttempt(records, result, index);
+        const questions = record ? papersById.get(record.id) : undefined;
+
+        if (type === 'APTITUDE') {
+          const { answers } = splitResultsJson<AptitudeAnswer>(result.resultsJson);
+          return {
+            type,
+            result,
+            index,
+            score: aptitudeScorePercent(result, answers, parseArray<RawQuestion>(questions)),
+          };
+        }
+
+        const { answers } = splitResultsJson<CodingAnswer>(result.resultsJson);
+        const rows = buildCodingRows(
+          parseArray<RawCodingQuestion>(questions),
+          submissionsForAttempt(codeSubmissions, attempts, result),
+          answers,
+        );
+        return { type, result, index, score: codingScorePercent(rows, result) };
+      });
+
+    return [
+      ...summarize('APTITUDE', aptitudeAttempts, assessments.aptitude),
+      ...summarize('CODING', codingAttempts, assessments.coding),
+    ];
+  }, [aptitudeAttempts, codingAttempts, assessments, papersById, codeSubmissions]);
+
+  /**
+   * The attempts grouped into rounds — attempt 1, attempt 2 — as a reviewer
+   * counts them, rather than per module.
+   */
+  const attemptRounds = useMemo(
+    () =>
+      groupRounds(
+        attemptSummaries,
+        (entry) => entry.type,
+        (entry) => attemptTime(entry.result),
+      ),
+    [attemptSummaries],
+  );
+
+  /** Which attempt of each module is on screen, by its own index. */
+  const selectedAttempts = useMemo(
+    () => ({
+      APTITUDE: aptitudeResult
+        ? aptitudeAttempts.findIndex((a) => a.id === aptitudeResult.id)
+        : undefined,
+      CODING: codingResult
+        ? codingAttempts.findIndex((c) => c.id === codingResult.id)
+        : undefined,
+    }),
+    [aptitudeAttempts, codingAttempts, aptitudeResult, codingResult],
+  );
+
+  const selectAttempt = (type: 'APTITUDE' | 'CODING', index: number) => {
+    if (type === 'APTITUDE') setAptitudeAttemptIdx(index);
+    else setCodingAttemptIdx(index);
+  };
 
   // `resultsJson` holds the answers plus, at the end, the record of how the
   // attempt was submitted — split so the metadata is never scored as an answer.
@@ -712,6 +952,9 @@ export function CandidateResultDetailPage() {
           codingSubmission={codingParsed.submission}
           codingRows={codingRows}
           codingStats={codingStats}
+          rounds={attemptRounds}
+          selectedAttempts={selectedAttempts}
+          onSelectAttempt={selectAttempt}
           onOpenTab={setActiveTab}
         />
       )}
@@ -731,6 +974,7 @@ export function CandidateResultDetailPage() {
           examWindow={examWindows.aptitude}
           assessmentId={aptitudeAssessment?.id}
           attemptWindow={aptitudeWindow}
+          candidateEmail={email}
           lookupError={papersError}
           jobPrefix={jobPrefix ?? ''}
         />
@@ -751,6 +995,7 @@ export function CandidateResultDetailPage() {
           examWindow={examWindows.coding}
           assessmentId={codingAssessment?.id}
           attemptWindow={codingWindow}
+          candidateEmail={email}
           lookupError={papersError}
           paper={codingQuestions}
           jobPrefix={jobPrefix ?? ''}
@@ -952,6 +1197,9 @@ function OverviewTab({
   codingSubmission,
   codingRows,
   codingStats,
+  rounds,
+  selectedAttempts,
+  onSelectAttempt,
   onOpenTab,
 }: {
   aptitude?: Result;
@@ -964,6 +1212,10 @@ function OverviewTab({
   codingSubmission?: SubmissionMeta;
   codingRows: CodingRow[];
   codingStats: ReturnType<typeof summarizeCoding>;
+  /** Every attempt at this exam, grouped into rounds. */
+  rounds: AttemptSummary[][];
+  selectedAttempts: Partial<Record<'APTITUDE' | 'CODING', number>>;
+  onSelectAttempt: (type: 'APTITUDE' | 'CODING', index: number) => void;
   onOpenTab: (tab: DetailTab) => void;
 }) {
   const aptitudeBands = useMemo(() => groupAptitudeByBand(aptitudeAnswers), [aptitudeAnswers]);
@@ -981,7 +1233,16 @@ function OverviewTab({
   }, [codingRows]);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div className="space-y-6">
+      {/* What each round of this exam consisted of — only when there was more
+          than one, since a single attempt has no history to explain. */}
+      <AttemptRounds
+        rounds={rounds}
+        selected={selectedAttempts}
+        onSelect={onSelectAttempt}
+      />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       {/* Aptitude Summary Card */}
       {aptitude && (
         <Card>
@@ -1138,6 +1399,7 @@ function OverviewTab({
           </CardContent>
         </Card>
       )}
+      </div>
     </div>
   );
 }
@@ -1152,6 +1414,7 @@ function AptitudeTab({
   examWindow,
   assessmentId,
   attemptWindow,
+  candidateEmail,
   lookupError,
   jobPrefix,
 }: Readonly<{
@@ -1164,6 +1427,8 @@ function AptitudeTab({
   assessmentId?: number;
   /** When that attempt was live, so a re-sit shows its own captures. */
   attemptWindow?: AttemptWindow;
+  /** The candidate, so captures can be looked up across all their attempts. */
+  candidateEmail?: string;
   /** Set when the assessment lookup failed, so absence isn't reported as fact. */
   lookupError?: string | null;
   jobPrefix: string;
@@ -1296,6 +1561,8 @@ function AptitudeTab({
       {/* Who sat this exam, and the room they sat it in */}
       <ProctoringCaptures
         attemptWindow={attemptWindow}
+        candidateEmail={candidateEmail}
+        jobPrefix={jobPrefix}
         assessmentId={assessmentId}
         lookupError={lookupError}
         moduleLabel="Aptitude"
@@ -1457,6 +1724,7 @@ function CodingTab({
   examWindow,
   assessmentId,
   attemptWindow,
+  candidateEmail,
   lookupError,
   paper,
   jobPrefix,
@@ -1469,6 +1737,8 @@ function CodingTab({
   assessmentId?: number;
   /** When that attempt was live, so a re-sit shows its own captures. */
   attemptWindow?: AttemptWindow;
+  /** The candidate, so captures can be looked up across all their attempts. */
+  candidateEmail?: string;
   /** Set when the assessment lookup failed, so absence isn't reported as fact. */
   lookupError?: string | null;
   paper: RawCodingQuestion[];
@@ -1589,6 +1859,8 @@ function CodingTab({
       {/* Who sat this exam, and the room they sat it in */}
       <ProctoringCaptures
         attemptWindow={attemptWindow}
+        candidateEmail={candidateEmail}
+        jobPrefix={jobPrefix}
         assessmentId={assessmentId}
         lookupError={lookupError}
         moduleLabel="Coding"
