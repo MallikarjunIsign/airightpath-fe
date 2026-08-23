@@ -15,6 +15,8 @@ import { Modal } from '@/components/ui/Modal';
 import { examProctoringService } from '@/services/exam-proctoring.service';
 import { extractApiError } from '@/services/api.service';
 import { downloadBlob } from '@/utils/question-paper.utils';
+import { isWithinAttempt } from '@/utils/result.utils';
+import type { AttemptWindow } from '@/utils/result.utils';
 import type { ProctoringCapture } from '@/types/proctoring.types';
 
 /**
@@ -40,6 +42,16 @@ interface ProctoringCapturesProps {
   lookupError?: string | null;
   /** "Aptitude" or "Coding" — used in the copy only. */
   moduleLabel: string;
+  /**
+   * When the attempt being reviewed was live, so a re-sit shows its own photo.
+   *
+   * A candidate given the exam twice is photographed twice. Whether both sets
+   * come back under one assessment id depends on how the re-assignment was
+   * recorded, so the card cannot assume the list it fetched belongs to the
+   * attempt on screen — it keeps only what was captured inside this window.
+   * Omitted for a single attempt, where there is nothing to separate.
+   */
+  attemptWindow?: AttemptWindow;
 }
 
 /** A capture paired with the object URL its bytes were loaded into. */
@@ -71,6 +83,7 @@ export function ProctoringCaptures({
   assessmentId,
   lookupError,
   moduleLabel,
+  attemptWindow,
 }: Readonly<ProctoringCapturesProps>) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -140,10 +153,29 @@ export function ProctoringCaptures({
   }, []);
 
   const hasAssessment = assessmentId !== undefined;
-  const photo = items.find((i) => i.capture.captureType === 'IDENTITY_PHOTO');
-  const frames = items
+
+  // Only what was captured during the attempt on screen. Without this the card
+  // took the first photo on file, which for a re-sit is the one from the
+  // original sitting — the picker said attempt 2 while the photo was dated to
+  // attempt 1.
+  const mine = attemptWindow
+    ? items.filter((i) =>
+        isWithinAttempt(i.capture.capturedAt ?? i.capture.uploadedAt, attemptWindow),
+      )
+    : items;
+
+  const photo = mine.find((i) => i.capture.captureType === 'IDENTITY_PHOTO');
+  const frames = mine
     .filter((i) => i.capture.captureType === 'ROOM_SCAN_FRAME')
     .sort((a, b) => a.capture.frameIndex - b.capture.frameIndex);
+
+  /**
+   * Captures exist for this assessment, but none from this attempt.
+   *
+   * Worth saying out loud rather than falling back to another attempt's photo:
+   * the whole point of the check is to confirm who sat *this* paper.
+   */
+  const otherAttemptOnly = items.length > 0 && mine.length === 0;
 
   // Every path below renders the card. Returning null when there is nothing to
   // show reads as a broken page — the reviewer cannot tell "no photo was taken"
@@ -212,7 +244,13 @@ export function ProctoringCaptures({
           />
         )}
 
-        {hasAssessment && !loading && !error && items.length > 0 && (
+        {hasAssessment && !loading && !error && otherAttemptOnly && (
+          <EmptyRow
+            text={`Nothing was captured during this ${moduleLabel.toLowerCase()} attempt — the ${items.length === 1 ? 'capture' : 'captures'} on file ${items.length === 1 ? 'was' : 'were'} taken for another attempt at this exam.`}
+          />
+        )}
+
+        {hasAssessment && !loading && !error && mine.length > 0 && (
           <div className="space-y-5">
             <div>
               <p className="text-[10px] font-bold text-[var(--textTertiary)] uppercase tracking-widest mb-2.5">

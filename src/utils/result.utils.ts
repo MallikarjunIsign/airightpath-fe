@@ -726,42 +726,89 @@ export function assessmentForAttempt<T extends AttemptAssessment>(
 }
 
 /**
+ * The stretch of time one attempt occupied, as epoch milliseconds.
+ *
+ * `null` at either end means unbounded — nothing before the first attempt, and
+ * nothing after one that was never submitted.
+ */
+export interface AttemptWindow {
+  /** Exclusive: the moment the previous attempt went in. */
+  from: number | null;
+  /** Inclusive: the moment this attempt went in. */
+  to: number | null;
+}
+
+/** An attempt's own timestamp, or null when it carries nothing usable. */
+function attemptTime(attempt?: Result): number | null {
+  const stamp = attempt?.submittedAt ?? attempt?.createdAt;
+  const time = stamp ? new Date(stamp).getTime() : Number.NaN;
+  return Number.isNaN(time) ? null : time;
+}
+
+/**
+ * When one attempt was live: after the previous attempt went in, up to and
+ * including its own submission.
+ *
+ * Read off the results rather than the assessment records deliberately. A
+ * re-assignment may or may not create a second assessment row depending on the
+ * backend, but it always creates a second result — so this is the one boundary
+ * that exists in every case, and it is the same boundary the attempt picker
+ * shows the reviewer.
+ *
+ * Everything an attempt produced — its code runs, its pre-exam captures —
+ * happened inside this window, because it all precedes the submission that ends
+ * it. A single attempt has no boundary to draw and returns an open window.
+ */
+export function attemptWindow(attempts: Result[], selected?: Result): AttemptWindow {
+  const open: AttemptWindow = { from: null, to: null };
+  if (attempts.length <= 1 || !selected) return open;
+
+  const at = attempts.findIndex((a) => a.id === selected.id);
+  if (at < 0) return open;
+
+  // The latest attempt is left open above. Nothing can belong to an attempt
+  // that does not exist yet, and an open end keeps a run recorded a moment
+  // after the submit it belongs to — or one still being made, on an attempt not
+  // yet handed in — inside the attempt that produced it.
+  const isLatest = at === attempts.length - 1;
+
+  return {
+    from: attemptTime(attempts[at - 1]),
+    to: isLatest ? null : (attemptTime(attempts[at]) ?? attemptTime(attempts[at + 1])),
+  };
+}
+
+/**
+ * Did something recorded at `stamp` happen during this attempt?
+ *
+ * Anything undatable counts as inside. It cannot be placed, and hiding it would
+ * silently drop a code run or a photo that is on file — the reviewer is better
+ * served seeing it than being told it does not exist.
+ */
+export function isWithinAttempt(stamp: string | undefined | null, window: AttemptWindow): boolean {
+  if (window.from === null && window.to === null) return true;
+  const made = stamp ? new Date(stamp).getTime() : Number.NaN;
+  if (Number.isNaN(made)) return true;
+  if (window.from !== null && made <= window.from) return false;
+  return !(window.to !== null && made > window.to);
+}
+
+/**
  * The code runs belonging to one attempt.
  *
- * Submissions are fetched per job and carry no assessment id, so a re-sit's runs
- * arrive in the same list as the original's and the same question id appears
- * twice. They are told apart by when they were made: a run belongs to the
- * attempt whose paper was current at the time — from when that paper was handed
- * over until the next one was. With nothing to separate — a single assessment,
- * so a single attempt — the list is returned untouched.
- *
- * Runs with no usable `createdAt` are kept in every attempt. They cannot be
- * placed, and dropping them would silently lose code the reviewer can see today.
+ * Submissions are fetched per job and carry no attempt marker, so a re-sit's
+ * runs arrive in the same list as the original's and the same question ids
+ * appear twice. Splitting them by when they were made is what stops attempt 2
+ * from being scored on code written for attempt 1.
  */
 export function submissionsForAttempt(
   submissions: CodeSubmissionResponse[],
-  ordered: AttemptAssessment[],
-  current?: AttemptAssessment,
+  attempts: Result[],
+  selected?: Result,
 ): CodeSubmissionResponse[] {
-  if (ordered.length <= 1 || !current) return submissions;
-  const at = ordered.findIndex((a) => a.id === current.id);
-  if (at < 0) return submissions;
-
-  // The first attempt takes everything up to the re-assignment, with no lower
-  // bound: a run stamped a moment before its own paper's start time is a clock
-  // difference, not a run from some earlier exam, and dropping it would blank
-  // out code the reviewer could see before.
-  const from = at > 0 ? assignedTime(current) : null;
-  const next = ordered[at + 1];
-  const to = next ? assignedTime(next) : null;
-  if (from === null && to === null) return submissions;
-
-  return submissions.filter((sub) => {
-    const made = sub.createdAt ? new Date(sub.createdAt).getTime() : Number.NaN;
-    if (Number.isNaN(made)) return true;
-    if (from !== null && made < from) return false;
-    return !(to !== null && made >= to);
-  });
+  const window = attemptWindow(attempts, selected);
+  if (window.from === null && window.to === null) return submissions;
+  return submissions.filter((sub) => isWithinAttempt(sub.createdAt, window));
 }
 
 // ── Pass marks ─────────────────────────────────────────────────────────
