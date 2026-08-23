@@ -655,6 +655,115 @@ export function orderedAttempts(
     .sort((a, b) => attemptOrder(a) - attemptOrder(b));
 }
 
+/**
+ * The assessment record side of an attempt — the paper that was handed over,
+ * its window, and the id the proctoring captures are filed under.
+ *
+ * Structural rather than the full `Assessment` so the maths here stays free of
+ * the API types.
+ */
+export interface AttemptAssessment {
+  id: number;
+  assignedAt?: string;
+  startTime?: string;
+}
+
+/** When the candidate was given this paper; null when the record cannot say. */
+function assignedTime(a: AttemptAssessment): number | null {
+  const stamp = a.startTime ?? a.assignedAt;
+  const time = stamp ? new Date(stamp).getTime() : Number.NaN;
+  return Number.isNaN(time) ? null : time;
+}
+
+/**
+ * Assessment records oldest first, so index 0 is the paper assigned first —
+ * the same ordering `orderedAttempts` gives the results.
+ */
+export function orderedAssessments<T extends AttemptAssessment>(list: T[]): T[] {
+  return [...list].sort((a, b) => {
+    const ta = assignedTime(a);
+    const tb = assignedTime(b);
+    if (ta !== null && tb !== null) return ta - tb;
+    return a.id - b.id;
+  });
+}
+
+/**
+ * The assessment one attempt was sat under.
+ *
+ * A re-assigned exam gets its own assessment record, with its own question
+ * paper, its own window and its own captures. Reading the first record of the
+ * type — which is what a `.find()` does — pinned every attempt to the paper the
+ * candidate sat first, so switching to attempt 2 changed the score but left the
+ * paper, the exam window and the identity photo showing attempt 1.
+ *
+ * Matched by time rather than by position: the paper an attempt was sat under
+ * is the last one handed over at or before it was submitted, which stays right
+ * when an assigned paper was never sat and the two lists are different lengths.
+ * `index` is the positional fallback for results with no usable timestamp, and
+ * -1 there means "the latest", as everywhere else on the result screens.
+ */
+export function assessmentForAttempt<T extends AttemptAssessment>(
+  ordered: T[],
+  attempt: Result | undefined,
+  index: number,
+): T | undefined {
+  if (ordered.length <= 1) return ordered[0];
+
+  const stamp = attempt?.submittedAt ?? attempt?.createdAt;
+  const sat = stamp ? new Date(stamp).getTime() : Number.NaN;
+  if (!Number.isNaN(sat)) {
+    let match: T | undefined;
+    for (const assessment of ordered) {
+      const assigned = assignedTime(assessment);
+      if (assigned === null || assigned > sat) break;
+      match = assessment;
+    }
+    if (match) return match;
+  }
+
+  return ordered[index] ?? ordered[ordered.length - 1];
+}
+
+/**
+ * The code runs belonging to one attempt.
+ *
+ * Submissions are fetched per job and carry no assessment id, so a re-sit's runs
+ * arrive in the same list as the original's and the same question id appears
+ * twice. They are told apart by when they were made: a run belongs to the
+ * attempt whose paper was current at the time — from when that paper was handed
+ * over until the next one was. With nothing to separate — a single assessment,
+ * so a single attempt — the list is returned untouched.
+ *
+ * Runs with no usable `createdAt` are kept in every attempt. They cannot be
+ * placed, and dropping them would silently lose code the reviewer can see today.
+ */
+export function submissionsForAttempt(
+  submissions: CodeSubmissionResponse[],
+  ordered: AttemptAssessment[],
+  current?: AttemptAssessment,
+): CodeSubmissionResponse[] {
+  if (ordered.length <= 1 || !current) return submissions;
+  const at = ordered.findIndex((a) => a.id === current.id);
+  if (at < 0) return submissions;
+
+  // The first attempt takes everything up to the re-assignment, with no lower
+  // bound: a run stamped a moment before its own paper's start time is a clock
+  // difference, not a run from some earlier exam, and dropping it would blank
+  // out code the reviewer could see before.
+  const from = at > 0 ? assignedTime(current) : null;
+  const next = ordered[at + 1];
+  const to = next ? assignedTime(next) : null;
+  if (from === null && to === null) return submissions;
+
+  return submissions.filter((sub) => {
+    const made = sub.createdAt ? new Date(sub.createdAt).getTime() : Number.NaN;
+    if (Number.isNaN(made)) return true;
+    if (from !== null && made < from) return false;
+    return !(to !== null && made >= to);
+  });
+}
+
 // ── Pass marks ─────────────────────────────────────────────────────────
 
 /** Applied to any paper assigned before the pass mark was configurable. */

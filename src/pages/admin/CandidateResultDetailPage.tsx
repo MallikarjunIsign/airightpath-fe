@@ -81,6 +81,9 @@ import {
   normalizeBand,
   splitResultsJson,
   orderedAttempts,
+  orderedAssessments,
+  assessmentForAttempt,
+  submissionsForAttempt,
 } from '@/utils/result.utils';
 import { SubmissionInfo } from '@/components/result/SubmissionInfo';
 import type { CodingRow } from '@/utils/result.utils';
@@ -159,13 +162,16 @@ interface ExamWindows {
 }
 
 /**
- * Assessment ids per type. Proctoring captures are keyed by attempt, so the
- * aptitude tab can only show the aptitude photo once we know which attempt it
- * belongs to.
+ * Every assessment record this candidate holds for the job, per type, oldest
+ * first — one per attempt.
+ *
+ * Each re-assignment brings its own question paper, its own window and its own
+ * proctoring captures, so the screen cannot hold a single paper or a single id:
+ * which one is right depends on the attempt being viewed.
  */
-interface AssessmentIds {
-  aptitude?: number;
-  coding?: number;
+interface AssessmentsByType {
+  aptitude: Assessment[];
+  coding: Assessment[];
 }
 
 const ALL_BANDS = '__all__';
@@ -202,10 +208,17 @@ export function CandidateResultDetailPage() {
   const [loading, setLoading] = useState(true);
   const [results, setResults] = useState<Result[]>([]);
   const [codeSubmissions, setCodeSubmissions] = useState<CodeSubmissionResponse[]>([]);
-  const [codingQuestions, setCodingQuestions] = useState<RawCodingQuestion[]>([]);
-  const [aptitudePaper, setAptitudePaper] = useState<RawQuestion[]>([]);
-  const [examWindows, setExamWindows] = useState<ExamWindows>({});
-  const [assessmentIds, setAssessmentIds] = useState<AssessmentIds>({});
+  const [assessments, setAssessments] = useState<AssessmentsByType>({
+    aptitude: [],
+    coding: [],
+  });
+  /**
+   * Question papers keyed by assessment id — one per attempt, fetched together.
+   *
+   * Keyed rather than stored as "the paper" so switching attempts is instant and
+   * cannot leave the previous attempt's questions on screen.
+   */
+  const [papersById, setPapersById] = useState<Map<number, unknown>>(new Map());
   /** Why the assessment lookup failed, when it did — see fetchPapers. */
   const [papersError, setPapersError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>('overview');
@@ -264,23 +277,26 @@ export function CandidateResultDetailPage() {
         list = (body as { data: Assessment[] }).data;
       }
 
-      const mine = list.filter((a) => a.jobPrefix === jobPrefix);
-      const aptitude = mine.find((a) => a.assessmentType === 'APTITUDE');
-      const coding = mine.find((a) => a.assessmentType === 'CODING');
-
-      setExamWindows({
-        aptitude: formatDurationBetween(aptitude?.startTime, aptitude?.deadline),
-        coding: formatDurationBetween(coding?.startTime, coding?.deadline),
+      // Every record for this job, not the first of each type: a re-assigned
+      // exam has one per attempt, and `.find()` handed all of them the paper,
+      // window and captures of whichever the candidate sat first.
+      const mine = orderedAssessments(list.filter((a) => a.jobPrefix === jobPrefix));
+      setAssessments({
+        aptitude: mine.filter((a) => a.assessmentType === 'APTITUDE'),
+        coding: mine.filter((a) => a.assessmentType === 'CODING'),
       });
-      setAssessmentIds({ aptitude: aptitude?.id, coding: coding?.id });
 
-      const [aptPaper, codePaper] = await Promise.all([
-        aptitude?.id ? assessmentService.fetchQuestions(aptitude.id).catch(() => null) : null,
-        coding?.id ? assessmentService.fetchQuestions(coding.id).catch(() => null) : null,
-      ]);
-
-      setAptitudePaper(parseArray<RawQuestion>(aptPaper?.data?.questions));
-      setCodingQuestions(parseArray<RawCodingQuestion>(codePaper?.data?.questions));
+      // Fetched up front and kept by id, so moving between attempts swaps the
+      // paper without a round trip. One failed paper costs only its own attempt.
+      const papers = await Promise.all(
+        mine.map((a) =>
+          assessmentService
+            .fetchQuestions(a.id)
+            .then((res) => [a.id, res.data?.questions] as const)
+            .catch(() => [a.id, null] as const),
+        ),
+      );
+      setPapersById(new Map(papers.filter(([, questions]) => questions != null)));
     } catch (err) {
       // The papers themselves are optional context, but this same call is what
       // supplies the assessment ids the capture cards are keyed on. Swallowing
@@ -308,6 +324,44 @@ export function CandidateResultDetailPage() {
   const aptitudeResult = pickAttempt(aptitudeAttempts, aptitudeAttemptIdx);
   const codingResult = pickAttempt(codingAttempts, codingAttemptIdx);
 
+  // The assessment record behind the attempt on screen. Everything that is a
+  // property of the paper rather than of the answers — the questions, the exam
+  // window, the captures — hangs off this and so follows the picker.
+  const aptitudeAssessment = useMemo(
+    () => assessmentForAttempt(assessments.aptitude, aptitudeResult, aptitudeAttemptIdx),
+    [assessments.aptitude, aptitudeResult, aptitudeAttemptIdx],
+  );
+  const codingAssessment = useMemo(
+    () => assessmentForAttempt(assessments.coding, codingResult, codingAttemptIdx),
+    [assessments.coding, codingResult, codingAttemptIdx],
+  );
+
+  const aptitudePaper = useMemo(
+    () => parseArray<RawQuestion>(aptitudeAssessment && papersById.get(aptitudeAssessment.id)),
+    [papersById, aptitudeAssessment],
+  );
+  const codingQuestions = useMemo(
+    () => parseArray<RawCodingQuestion>(codingAssessment && papersById.get(codingAssessment.id)),
+    [papersById, codingAssessment],
+  );
+
+  const examWindows: ExamWindows = useMemo(
+    () => ({
+      aptitude: formatDurationBetween(aptitudeAssessment?.startTime, aptitudeAssessment?.deadline),
+      coding: formatDurationBetween(codingAssessment?.startTime, codingAssessment?.deadline),
+    }),
+    [aptitudeAssessment, codingAssessment],
+  );
+
+  // Only the runs made while this attempt's paper was current — the endpoint
+  // returns every run the candidate made on the job, and a re-sit repeats the
+  // same question ids, so an unfiltered list scored attempt 1 with attempt 2's
+  // code.
+  const attemptSubmissions = useMemo(
+    () => submissionsForAttempt(codeSubmissions, assessments.coding, codingAssessment),
+    [codeSubmissions, assessments.coding, codingAssessment],
+  );
+
   // `resultsJson` holds the answers plus, at the end, the record of how the
   // attempt was submitted — split so the metadata is never scored as an answer.
   const aptitudeParsed = useMemo(
@@ -325,8 +379,8 @@ export function CandidateResultDetailPage() {
   const codingAnswers = codingParsed.answers;
 
   const codingRows = useMemo(
-    () => buildCodingRows(codingQuestions, codeSubmissions, codingAnswers),
-    [codingQuestions, codeSubmissions, codingAnswers],
+    () => buildCodingRows(codingQuestions, attemptSubmissions, codingAnswers),
+    [codingQuestions, attemptSubmissions, codingAnswers],
   );
 
   // Counted off the question paper so unattempted questions are part of the
@@ -657,12 +711,13 @@ export function CandidateResultDetailPage() {
           onSelect={setAptitudeAttemptIdx}
         />
         <AptitudeTab
+          key={aptitudeResult.id ?? aptitudeAttemptIdx}
           result={aptitudeResult}
           score={aptitudeScore}
           answers={aptitudeAnswers}
           paper={aptitudePaper}
           examWindow={examWindows.aptitude}
-          assessmentId={assessmentIds.aptitude}
+          assessmentId={aptitudeAssessment?.id}
           lookupError={papersError}
           jobPrefix={jobPrefix ?? ''}
         />
@@ -676,11 +731,12 @@ export function CandidateResultDetailPage() {
           onSelect={setCodingAttemptIdx}
         />
         <CodingTab
+          key={codingResult?.id ?? codingAttemptIdx}
           result={codingResult}
           score={codingScore}
           rows={codingRows}
           examWindow={examWindows.coding}
-          assessmentId={assessmentIds.coding}
+          assessmentId={codingAssessment?.id}
           lookupError={papersError}
           paper={codingQuestions}
           jobPrefix={jobPrefix ?? ''}
