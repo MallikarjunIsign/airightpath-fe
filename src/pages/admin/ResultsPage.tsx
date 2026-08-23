@@ -95,12 +95,6 @@ interface CandidateAssignment {
   email: string;
   /** Their coding assessment id, when they were set one. */
   codingId?: number;
-  /**
-   * Every coding assessment they hold on this job, oldest first — one per
-   * assignment. Kept so a re-sit's code runs can be told from the original's,
-   * which share the same question ids and arrive in one undivided list.
-   */
-  codingAssessments: Assessment[];
   hasCoding: boolean;
   /** The pass mark each paper was assigned with, defaulted where absent. */
   aptitudePassMark: number;
@@ -332,7 +326,6 @@ export function ResultsPage() {
           return {
             email,
             codingId: coding?.id,
-            codingAssessments,
             hasCoding: !!coding,
             aptitudePassMark: passMarkOf(aptitude),
             codingPassMark: passMarkOf(coding),
@@ -446,14 +439,9 @@ export function ResultsPage() {
       // Only the runs from the attempt being scored. The endpoint returns every
       // run on the job, and a re-sit repeats the question ids, so the latest
       // attempt was being credited with whichever run happened to come first.
-      const codingAssessments = assignments.get(row.email)?.codingAssessments ?? [];
       const codingRows = buildCodingRows(
         paperUsable ? codingPaper : [],
-        submissionsForAttempt(
-          row.codeSubmissions,
-          codingAssessments,
-          codingAssessments[codingAssessments.length - 1],
-        ),
+        submissionsForAttempt(row.codeSubmissions, row.codingAttempts, row.codingResult),
         codingAnswers,
       );
       row.aptitudeScore = aptitudeScorePercent(row.aptitudeResult, aptitudeAnswers);

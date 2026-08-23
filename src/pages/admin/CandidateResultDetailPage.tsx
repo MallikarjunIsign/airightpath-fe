@@ -84,9 +84,10 @@ import {
   orderedAssessments,
   assessmentForAttempt,
   submissionsForAttempt,
+  attemptWindow,
 } from '@/utils/result.utils';
 import { SubmissionInfo } from '@/components/result/SubmissionInfo';
-import type { CodingRow } from '@/utils/result.utils';
+import type { CodingRow, AttemptWindow } from '@/utils/result.utils';
 import type { Result, AptitudeAnswer, CodingAnswer, SubmissionMeta } from '@/types/result.types';
 import type { CodeSubmissionResponse } from '@/types/compiler.types';
 import type { Assessment, RawCodingQuestion, RawQuestion } from '@/types/assessment.types';
@@ -353,13 +354,24 @@ export function CandidateResultDetailPage() {
     [aptitudeAssessment, codingAssessment],
   );
 
-  // Only the runs made while this attempt's paper was current — the endpoint
-  // returns every run the candidate made on the job, and a re-sit repeats the
-  // same question ids, so an unfiltered list scored attempt 1 with attempt 2's
-  // code.
+  // When each attempt was live. Everything it produced that is filed per
+  // candidate rather than per attempt — the code runs, the pre-exam captures —
+  // is picked out by these.
+  const aptitudeWindow = useMemo(
+    () => attemptWindow(aptitudeAttempts, aptitudeResult),
+    [aptitudeAttempts, aptitudeResult],
+  );
+  const codingWindow = useMemo(
+    () => attemptWindow(codingAttempts, codingResult),
+    [codingAttempts, codingResult],
+  );
+
+  // Only the runs made during this attempt — the endpoint returns every run the
+  // candidate made on the job, and a re-sit repeats the same question ids, so an
+  // unfiltered list scored attempt 2 on attempt 1's code.
   const attemptSubmissions = useMemo(
-    () => submissionsForAttempt(codeSubmissions, assessments.coding, codingAssessment),
-    [codeSubmissions, assessments.coding, codingAssessment],
+    () => submissionsForAttempt(codeSubmissions, codingAttempts, codingResult),
+    [codeSubmissions, codingAttempts, codingResult],
   );
 
   // `resultsJson` holds the answers plus, at the end, the record of how the
@@ -718,6 +730,7 @@ export function CandidateResultDetailPage() {
           paper={aptitudePaper}
           examWindow={examWindows.aptitude}
           assessmentId={aptitudeAssessment?.id}
+          attemptWindow={aptitudeWindow}
           lookupError={papersError}
           jobPrefix={jobPrefix ?? ''}
         />
@@ -737,6 +750,7 @@ export function CandidateResultDetailPage() {
           rows={codingRows}
           examWindow={examWindows.coding}
           assessmentId={codingAssessment?.id}
+          attemptWindow={codingWindow}
           lookupError={papersError}
           paper={codingQuestions}
           jobPrefix={jobPrefix ?? ''}
@@ -1137,6 +1151,7 @@ function AptitudeTab({
   paper,
   examWindow,
   assessmentId,
+  attemptWindow,
   lookupError,
   jobPrefix,
 }: Readonly<{
@@ -1147,6 +1162,8 @@ function AptitudeTab({
   examWindow?: string | null;
   /** Attempt these proctoring captures belong to. */
   assessmentId?: number;
+  /** When that attempt was live, so a re-sit shows its own captures. */
+  attemptWindow?: AttemptWindow;
   /** Set when the assessment lookup failed, so absence isn't reported as fact. */
   lookupError?: string | null;
   jobPrefix: string;
@@ -1278,6 +1295,7 @@ function AptitudeTab({
 
       {/* Who sat this exam, and the room they sat it in */}
       <ProctoringCaptures
+        attemptWindow={attemptWindow}
         assessmentId={assessmentId}
         lookupError={lookupError}
         moduleLabel="Aptitude"
@@ -1438,6 +1456,7 @@ function CodingTab({
   rows,
   examWindow,
   assessmentId,
+  attemptWindow,
   lookupError,
   paper,
   jobPrefix,
@@ -1448,6 +1467,8 @@ function CodingTab({
   examWindow?: string | null;
   /** Attempt these proctoring captures belong to. */
   assessmentId?: number;
+  /** When that attempt was live, so a re-sit shows its own captures. */
+  attemptWindow?: AttemptWindow;
   /** Set when the assessment lookup failed, so absence isn't reported as fact. */
   lookupError?: string | null;
   paper: RawCodingQuestion[];
@@ -1567,6 +1588,7 @@ function CodingTab({
 
       {/* Who sat this exam, and the room they sat it in */}
       <ProctoringCaptures
+        attemptWindow={attemptWindow}
         assessmentId={assessmentId}
         lookupError={lookupError}
         moduleLabel="Coding"
