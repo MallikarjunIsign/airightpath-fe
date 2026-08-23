@@ -1,4 +1,4 @@
-import { Mail, Phone, Clock, CalendarClock, Briefcase, MapPin, CheckCircle, XCircle, FileText, Loader2, Eye } from 'lucide-react';
+import { Mail, Phone, Clock, CalendarClock, Briefcase, MapPin, CheckCircle, XCircle, FileText, Loader2, Eye, BarChart3 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -20,6 +20,11 @@ interface CandidateDetailModalProps {
   validatingReferral: boolean;
   onViewResume: (candidate: JobApplicationDTO) => void;
   resumeLoading: boolean;
+  /**
+   * Opens this candidate's assessment scorecard. Only passed once the exam has
+   * been sat — before that there is nothing on the results screen to show.
+   */
+  onViewResult?: (candidate: JobApplicationDTO) => void;
 }
 
 function statusBadgeVariant(status: string) {
@@ -47,6 +52,7 @@ export function CandidateDetailModal({
   validatingReferral,
   onViewResume,
   resumeLoading,
+  onViewResult,
 }: Readonly<CandidateDetailModalProps>) {
   const referralStatus = candidate.referralStatus?.toUpperCase();
 
@@ -57,10 +63,19 @@ export function CandidateDetailModal({
       title="Candidate Details"
       size="lg"
       footer={
-        <div className="flex w-full items-center justify-between gap-2">
+        <div className="flex w-full flex-wrap items-center justify-between gap-2">
           <Button variant="ghost" onClick={onClose}>
             Close
           </Button>
+          {onViewResult && (
+            <Button
+              variant="outline"
+              leftIcon={<BarChart3 size={16} />}
+              onClick={() => onViewResult(candidate)}
+            >
+              View Assessment Result
+            </Button>
+          )}
           {/* Rejected candidates can be overruled — an ATS score is advice, and
               the admin needs a way back without re-applying. */}
           {(candidate.status === 'APPLIED' || candidate.status === 'REJECTED') && (

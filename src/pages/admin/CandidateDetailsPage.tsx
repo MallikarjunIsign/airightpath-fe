@@ -13,6 +13,7 @@ import {
   ClipboardList,
   Download,
   ExternalLink,
+  BarChart3,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -55,6 +56,21 @@ const ASSIGN_STAGES: JobApplicationStatus[] = [
   'RECONFIRMED',
   'EXAM_SENT',
   'EXAM_COMPLETED',
+];
+
+/**
+ * Stages where an exam has already been sat, so a result exists to look at.
+ *
+ * Everything from EXAM_COMPLETED on: a candidate scheduled for an interview or
+ * already selected still got there through the paper, and their score is what an
+ * admin wants in front of them while they decide the next step. Earlier stages
+ * are excluded because the results screen would only have an empty row for them.
+ */
+const RESULT_STAGES: JobApplicationStatus[] = [
+  'EXAM_COMPLETED',
+  'INTERVIEW_SCHEDULED',
+  'INTERVIEW_COMPLETED',
+  'SELECTED',
 ];
 
 /**
@@ -463,6 +479,35 @@ export function CandidateDetailsPage() {
     });
   }
 
+  /** Where the results screens should send the admin back to. */
+  const resultsOrigin = { label: 'Candidates', path: ROUTES.ADMIN.CANDIDATES };
+
+  /**
+   * Open Assessment Results for this job.
+   *
+   * The results screen keeps its own job selection, so seed it before leaving —
+   * otherwise the admin lands on a job picker and has to choose the job they
+   * were already looking at.
+   */
+  function handleViewResults() {
+    if (!selectedPrefix) {
+      showToast(MESSAGES.admin.common.selectJobFirst, 'warning');
+      return;
+    }
+    writePersistentValue('results:selectedPrefix', selectedPrefix);
+    navigate(ROUTES.ADMIN.ASSESSMENTS_RESULTS, { state: { from: resultsOrigin } });
+  }
+
+  /** Straight to one candidate's scorecard, skipping the results list. */
+  function handleViewCandidateResult(candidate: JobApplicationDTO) {
+    const email = getAppEmail(candidate);
+    if (!selectedPrefix || !email) return;
+    writePersistentValue('results:selectedPrefix', selectedPrefix);
+    navigate(ROUTES.ADMIN.candidateResultDetail(selectedPrefix, email), {
+      state: { from: resultsOrigin },
+    });
+  }
+
   async function handleSendAction() {
     if (!modalAction || !selectedPrefix) return;
 
@@ -682,6 +727,7 @@ export function CandidateDetailsPage() {
           {(availableActions.length > 0 ||
             activeStage === ('APPLIED' as JobApplicationStatus) ||
             activeStage === ('REJECTED' as JobApplicationStatus) ||
+            RESULT_STAGES.includes(activeStage) ||
             ASSIGN_STAGES.includes(activeStage)) && (
             <div className="flex flex-wrap gap-2">
               {activeStage === ('APPLIED' as JobApplicationStatus) && (
@@ -743,6 +789,19 @@ export function CandidateDetailsPage() {
                   {assignButtonLabel(activeStage)}
                 </Button>
               )}
+              {/* Once the paper has been sat, the score is the next thing an
+                  admin looks at — this is the shortcut to it for the whole job,
+                  with the per-row action going straight to one scorecard. */}
+              {RESULT_STAGES.includes(activeStage) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  leftIcon={<BarChart3 size={16} />}
+                  onClick={handleViewResults}
+                >
+                  View Assessment Results
+                </Button>
+              )}
               {availableActions.map((key) => {
                 const config = BULK_ACTION_CONFIG[key];
                 return (
@@ -796,6 +855,9 @@ export function CandidateDetailsPage() {
                   onToggleEmail={toggleEmail}
                   onToggleAll={toggleAll}
                   onView={setSelectedCandidate}
+                  onViewResult={
+                    RESULT_STAGES.includes(activeStage) ? handleViewCandidateResult : undefined
+                  }
                   statusLabels={STAGE_LABELS}
                 />
               )}
@@ -834,6 +896,11 @@ export function CandidateDetailsPage() {
           validatingReferral={validatingReferral}
           onViewResume={openResume}
           resumeLoading={resumeLoading}
+          onViewResult={
+            RESULT_STAGES.includes(selectedCandidate.status as JobApplicationStatus)
+              ? handleViewCandidateResult
+              : undefined
+          }
         />
       )}
 

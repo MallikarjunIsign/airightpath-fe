@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   Loader2,
   ArrowLeft,
@@ -27,6 +27,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ROUTES } from '@/config/routes';
+import type { NavOrigin } from '@/components/ui/BackLink';
 import { assessmentService } from '@/services/assessment.service';
 import { extractApiError } from '@/services/api.service';
 import { compilerService } from '@/services/compiler.service';
@@ -184,6 +185,18 @@ function parseArray<T>(raw: unknown): T[] {
 
 export function CandidateResultDetailPage() {
   const { jobPrefix, email } = useParams<{ jobPrefix: string; email: string }>();
+  const location = useLocation();
+
+  /**
+   * Where "back" goes. This page is reachable from the results list and, for a
+   * candidate past the exam, straight from the Candidates pipeline — sending
+   * everyone to the results list would strand the second group on a screen they
+   * never opened. Falls back to the list when nothing recorded an origin.
+   */
+  const back: NavOrigin = (location.state as { from?: NavOrigin } | null)?.from ?? {
+    label: 'Assessment Results',
+    path: ROUTES.ADMIN.ASSESSMENTS_RESULTS,
+  };
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
@@ -421,11 +434,12 @@ export function CandidateResultDetailPage() {
     <div className="space-y-8 pb-10">
       {/* ── Back nav ──────────────────────────────────────────────────── */}
       <button
-        onClick={() => navigate(ROUTES.ADMIN.ASSESSMENTS_RESULTS)}
+        type="button"
+        onClick={() => navigate(back.path, { state: back.state })}
         className="inline-flex items-center gap-2 text-sm font-medium text-[var(--textSecondary)] hover:text-[var(--primary)] transition-colors"
       >
         <ArrowLeft size={16} />
-        Back to Assessment Results
+        Back to {back.label}
       </button>
 
       {/* ── Candidate Header ─────────────────────────────────────────── */}

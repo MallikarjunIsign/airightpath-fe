@@ -1,4 +1,4 @@
-import { Eye } from 'lucide-react';
+import { Eye, BarChart3 } from 'lucide-react';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -12,6 +12,12 @@ interface CandidateTableProps {
   onToggleEmail: (email: string) => void;
   onToggleAll: () => void;
   onView: (candidate: JobApplicationDTO) => void;
+  /**
+   * Opens the candidate's assessment scorecard. Omitted at stages where no exam
+   * has been sat yet, and the action is then left off the row entirely rather
+   * than shown leading to an empty result.
+   */
+  onViewResult?: (candidate: JobApplicationDTO) => void;
   /** Maps a raw status to its display label (falls back to the raw status). */
   statusLabels: Record<string, string>;
 }
@@ -32,6 +38,7 @@ export function CandidateTable({
   onToggleEmail,
   onToggleAll,
   onView,
+  onViewResult,
   statusLabels,
 }: Readonly<CandidateTableProps>) {
   const allSelected = selectedEmails.size === candidates.length && candidates.length > 0;
@@ -105,7 +112,7 @@ export function CandidateTable({
                 </div>
               </dl>
 
-              <div className="flex justify-end pt-1">
+              <div className="flex flex-wrap justify-end gap-2 pt-1">
                 <Button
                   variant="outline"
                   size="sm"
@@ -114,6 +121,16 @@ export function CandidateTable({
                 >
                   View
                 </Button>
+                {onViewResult && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onViewResult(candidate)}
+                    leftIcon={<BarChart3 size={14} />}
+                  >
+                    Result
+                  </Button>
+                )}
               </div>
             </div>
           );
@@ -189,15 +206,29 @@ export function CandidateTable({
                   </TableCell>
 
                   <TableCell className="px-3 py-3 align-top">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="px-2"
-                      onClick={() => onView(candidate)}
-                      leftIcon={<Eye size={14} />}
-                    >
-                      View
-                    </Button>
+                    <div className="flex flex-col items-start gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="px-2"
+                        onClick={() => onView(candidate)}
+                        leftIcon={<Eye size={14} />}
+                      >
+                        View
+                      </Button>
+                      {onViewResult && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="px-2"
+                          title="Open this candidate's assessment result"
+                          onClick={() => onViewResult(candidate)}
+                          leftIcon={<BarChart3 size={14} />}
+                        >
+                          Result
+                        </Button>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               );

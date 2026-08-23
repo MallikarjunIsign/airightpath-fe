@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Loader2,
   FileBarChart,
@@ -21,6 +21,8 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { BackLink } from '@/components/ui/BackLink';
+import { ROUTES } from '@/config/routes';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
 import { assessmentService } from '@/services/assessment.service';
@@ -171,6 +173,7 @@ interface CandidateRow {
 
 export function ResultsPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { showToast } = useToast();
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
   const [exporting, setExporting] = useState(false);
@@ -567,6 +570,19 @@ export function ResultsPage() {
     return { total, passed, failed, partial };
   }, [visibleRows]);
 
+  /**
+   * What the detail page should offer as its way back.
+   *
+   * `state` carries this page's own router state along, so a candidate opened
+   * from here and closed again lands back on a Results screen that still knows
+   * it was reached from Candidates.
+   */
+  const detailOrigin = {
+    label: 'Assessment Results',
+    path: ROUTES.ADMIN.ASSESSMENTS_RESULTS,
+    state: location.state,
+  };
+
   const jobOptions = [
     { value: '', label: 'Select a job' },
     ...jobs.map((j) => ({ value: j.jobPrefix, label: `${j.jobTitle} (${j.jobPrefix})` })),
@@ -613,6 +629,9 @@ export function ResultsPage() {
 
   return (
     <div className="space-y-6">
+      {/* Shown only when another screen sent us here */}
+      <BackLink />
+
       <div>
         <h1 className="text-3xl font-bold text-[var(--text)]">Assessment Results</h1>
         <p className="text-[var(--textSecondary)] mt-1">
@@ -803,7 +822,8 @@ export function ResultsPage() {
                             leftIcon={<Eye size={14} />}
                             onClick={() =>
                               navigate(
-                                `/admin/assessments/results/${selectedPrefix}/${encodeURIComponent(row.email)}`
+                                ROUTES.ADMIN.candidateResultDetail(selectedPrefix, row.email),
+                                { state: { from: detailOrigin } }
                               )
                             }
                           >
@@ -854,7 +874,8 @@ export function ResultsPage() {
                                 leftIcon={<Eye size={14} />}
                                 onClick={() =>
                                   navigate(
-                                    `/admin/assessments/results/${selectedPrefix}/${encodeURIComponent(row.email)}`
+                                    ROUTES.ADMIN.candidateResultDetail(selectedPrefix, row.email),
+                                    { state: { from: detailOrigin } }
                                   )
                                 }
                               >
