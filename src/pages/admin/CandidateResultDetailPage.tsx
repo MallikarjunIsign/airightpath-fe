@@ -974,6 +974,7 @@ export function CandidateResultDetailPage() {
           examWindow={examWindows.aptitude}
           assessmentId={aptitudeAssessment?.id}
           attemptWindow={aptitudeWindow}
+          candidateEmail={email}
           lookupError={papersError}
           jobPrefix={jobPrefix ?? ''}
         />
@@ -994,6 +995,7 @@ export function CandidateResultDetailPage() {
           examWindow={examWindows.coding}
           assessmentId={codingAssessment?.id}
           attemptWindow={codingWindow}
+          candidateEmail={email}
           lookupError={papersError}
           paper={codingQuestions}
           jobPrefix={jobPrefix ?? ''}
@@ -1412,6 +1414,7 @@ function AptitudeTab({
   examWindow,
   assessmentId,
   attemptWindow,
+  candidateEmail,
   lookupError,
   jobPrefix,
 }: Readonly<{
@@ -1424,6 +1427,8 @@ function AptitudeTab({
   assessmentId?: number;
   /** When that attempt was live, so a re-sit shows its own captures. */
   attemptWindow?: AttemptWindow;
+  /** The candidate, so captures can be looked up across all their attempts. */
+  candidateEmail?: string;
   /** Set when the assessment lookup failed, so absence isn't reported as fact. */
   lookupError?: string | null;
   jobPrefix: string;
@@ -1556,6 +1561,8 @@ function AptitudeTab({
       {/* Who sat this exam, and the room they sat it in */}
       <ProctoringCaptures
         attemptWindow={attemptWindow}
+        candidateEmail={candidateEmail}
+        jobPrefix={jobPrefix}
         assessmentId={assessmentId}
         lookupError={lookupError}
         moduleLabel="Aptitude"
@@ -1717,6 +1724,7 @@ function CodingTab({
   examWindow,
   assessmentId,
   attemptWindow,
+  candidateEmail,
   lookupError,
   paper,
   jobPrefix,
@@ -1729,6 +1737,8 @@ function CodingTab({
   assessmentId?: number;
   /** When that attempt was live, so a re-sit shows its own captures. */
   attemptWindow?: AttemptWindow;
+  /** The candidate, so captures can be looked up across all their attempts. */
+  candidateEmail?: string;
   /** Set when the assessment lookup failed, so absence isn't reported as fact. */
   lookupError?: string | null;
   paper: RawCodingQuestion[];
@@ -1849,6 +1859,8 @@ function CodingTab({
       {/* Who sat this exam, and the room they sat it in */}
       <ProctoringCaptures
         attemptWindow={attemptWindow}
+        candidateEmail={candidateEmail}
+        jobPrefix={jobPrefix}
         assessmentId={assessmentId}
         lookupError={lookupError}
         moduleLabel="Coding"
