@@ -2,7 +2,7 @@
  * Shared reading of a candidate's assessment records — the papers assigned to
  * them, as opposed to the results those papers produced.
  */
-import { groupRounds } from './result.utils';
+import { groupRounds, parseStamp } from './result.utils';
 import type { Assessment } from '@/types/assessment.types';
 
 /**
@@ -21,9 +21,7 @@ export function toAssessmentList(body: unknown): Assessment[] {
 
 /** When a paper was handed to the candidate. */
 function assignedTime(assessment: Assessment): number | null {
-  const stamp = assessment.assignedAt ?? assessment.startTime;
-  const time = stamp ? new Date(stamp).getTime() : Number.NaN;
-  return Number.isNaN(time) ? null : time;
+  return parseStamp(assessment.assignedAt ?? assessment.startTime);
 }
 
 /**

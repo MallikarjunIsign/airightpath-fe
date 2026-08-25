@@ -670,9 +670,7 @@ export interface AttemptAssessment {
 
 /** When the candidate was given this paper; null when the record cannot say. */
 function assignedTime(a: AttemptAssessment): number | null {
-  const stamp = a.startTime ?? a.assignedAt;
-  const time = stamp ? new Date(stamp).getTime() : Number.NaN;
-  return Number.isNaN(time) ? null : time;
+  return parseStamp(a.startTime ?? a.assignedAt);
 }
 
 /**
@@ -738,11 +736,31 @@ export interface AttemptWindow {
   to: number | null;
 }
 
+/**
+ * A stored timestamp as epoch milliseconds, or null when it says nothing.
+ *
+ * The API mixes two spellings of the same instant. The server serialises its
+ * `LocalDateTime` columns bare — `2026-08-14T08:23:27.592148` — while anything
+ * the browser recorded arrives as `2026-08-14T08:23:29.657Z`. Both are UTC: a
+ * result's own submission time and the meta the exam page wrote alongside it
+ * land within seconds of each other.
+ *
+ * `new Date()` does not know that. It reads the bare form as *local* time, so
+ * on an IST machine the two spellings sit 5½ hours apart, and comparing one
+ * against the other pushed an attempt's own code runs outside its own window —
+ * the first attempt then reported none of its test results. Anything with no
+ * zone is read as UTC, which is what it is.
+ */
+export function parseStamp(stamp?: string | null): number | null {
+  if (!stamp) return null;
+  const zoned = /(?:Z|[+-]\d{2}:?\d{2})$/.test(stamp) ? stamp : `${stamp}Z`;
+  const time = new Date(zoned).getTime();
+  return Number.isNaN(time) ? null : time;
+}
+
 /** An attempt's own timestamp, or null when it carries nothing usable. */
 export function attemptTime(attempt?: Result): number | null {
-  const stamp = attempt?.submittedAt ?? attempt?.createdAt;
-  const time = stamp ? new Date(stamp).getTime() : Number.NaN;
-  return Number.isNaN(time) ? null : time;
+  return parseStamp(attempt?.submittedAt ?? attempt?.createdAt);
 }
 
 /**
@@ -787,8 +805,8 @@ export function attemptWindow(attempts: Result[], selected?: Result): AttemptWin
  */
 export function isWithinAttempt(stamp: string | undefined | null, window: AttemptWindow): boolean {
   if (window.from === null && window.to === null) return true;
-  const made = stamp ? new Date(stamp).getTime() : Number.NaN;
-  if (Number.isNaN(made)) return true;
+  const made = parseStamp(stamp);
+  if (made === null) return true;
   if (window.from !== null && made <= window.from) return false;
   return !(window.to !== null && made > window.to);
 }
