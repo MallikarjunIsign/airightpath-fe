@@ -71,6 +71,8 @@ export const ENDPOINTS = {
     GENERATE_QUESTIONS: "/api/generate-questions",
     GENERATE_CODING_QUESTIONS: "/api/generate-coding-questions",
     FETCH_QUESTIONS: (id: number) => `/api/fetchAssessment/${id}`,
+    // Moves the exam window of a paper the candidate has not sat yet.
+    SCHEDULE: (id: number) => `/api/assessments/${id}/schedule`,
   },
   // Pre-exam proctoring captures (identity photo, room scan). Writes are
   // candidate-facing; the reads below require ASSESSMENT_READ.

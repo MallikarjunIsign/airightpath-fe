@@ -11,6 +11,12 @@ export interface Assessment {
   assignedAt: string;
   startTime?: string;
   deadline: string;
+  /**
+   * When the candidate actually opened the paper, as opposed to `startTime`,
+   * which is when its window was scheduled to open. Absent on attempts sat
+   * before it was recorded — those are placed from the submission record.
+   */
+  examStartedAt?: string;
   jobPrefix: string;
   containerName?: string;
   fileName?: string;

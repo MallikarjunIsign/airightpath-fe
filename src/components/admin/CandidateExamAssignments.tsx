@@ -1,9 +1,28 @@
-import { useState, useEffect } from 'react';
-import { Loader2, BookOpen, Code2, ClipboardList, AlertTriangle } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import {
+  Loader2,
+  BookOpen,
+  Code2,
+  ClipboardList,
+  AlertTriangle,
+  CalendarClock,
+  PlayCircle,
+  Send,
+} from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import { assessmentService } from '@/services/assessment.service';
 import { extractApiError } from '@/services/api.service';
-import { formatDateTime } from '@/utils/format.utils';
+import { formatDateTime, formatServerDateTime } from '@/utils/format.utils';
+import { RescheduleExamModal } from './RescheduleExamModal';
+import {
+  orderedAttempts,
+  orderedAssessments,
+  assessmentForAttempt,
+  splitResultsJson,
+  examStartedAt,
+} from '@/utils/result.utils';
+import type { Result } from '@/types/result.types';
 import {
   toAssessmentList,
   groupAssignmentRounds,
@@ -50,7 +69,7 @@ function roundSentOn(round: Assessment[]): string | null {
     .map((a) => a.assignedAt ?? a.startTime)
     .filter((stamp): stamp is string => !!stamp);
   if (stamps.length === 0) return null;
-  return formatDateTime([...stamps].sort()[0]);
+  return formatServerDateTime([...stamps].sort()[0]);
 }
 
 export function CandidateExamAssignments({
@@ -58,8 +77,15 @@ export function CandidateExamAssignments({
   jobPrefix,
 }: Readonly<CandidateExamAssignmentsProps>) {
   const [rounds, setRounds] = useState<Assessment[][]>([]);
+  /** The attempt sat on each paper, keyed by assessment id. */
+  const [sittings, setSittings] = useState<Map<number, Result>>(new Map());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rescheduling, setRescheduling] = useState<Assessment | null>(null);
+  /** Bumped to re-read after the window has been moved. */
+  const [reloads, setReloads] = useState(0);
+
+  const reload = useCallback(() => setReloads((n) => n + 1), []);
 
   useEffect(() => {
     if (!email || !jobPrefix) return;
@@ -68,16 +94,37 @@ export function CandidateExamAssignments({
     setLoading(true);
     setError(null);
     setRounds([]);
+    setSittings(new Map());
 
     // Silent: this section is context beside the candidate's details, and a
     // failure here should cost the section rather than put a red toast over a
-    // modal the admin opened to read something else.
-    assessmentService
-      .getAllAssessmentsForCandidate(email, { silent: true })
-      .then((res) => {
+    // modal the admin opened to read something else. The results ride along so
+    // each paper can say when it was actually sat; they are optional, and a
+    // failure there costs only those two lines.
+    Promise.all([
+      assessmentService.getAllAssessmentsForCandidate(email, { silent: true }),
+      assessmentService.getResultsByEmailAndJobPrefix(email, jobPrefix).catch(() => null),
+    ])
+      .then(([assessmentsRes, resultsRes]) => {
         if (cancelled) return;
-        const mine = toAssessmentList(res.data).filter((a) => a.jobPrefix === jobPrefix);
+        const mine = orderedAssessments(
+          toAssessmentList(assessmentsRes.data).filter((a) => a.jobPrefix === jobPrefix),
+        );
         setRounds(groupAssignmentRounds(mine));
+
+        // Results name no assessment, so each attempt is paired with the paper
+        // it was sat under by the same rule the result screens use — keeping
+        // the two screens from disagreeing about which sitting is which.
+        const results = resultsRes?.data ?? [];
+        const paired = new Map<number, Result>();
+        for (const type of ['APTITUDE', 'CODING'] as const) {
+          const papers = mine.filter((a) => a.assessmentType === type);
+          orderedAttempts(results, type).forEach((attempt, index) => {
+            const paper = assessmentForAttempt(papers, attempt, index);
+            if (paper) paired.set(paper.id, attempt);
+          });
+        }
+        setSittings(paired);
       })
       .catch((err) => {
         if (!cancelled) setError(extractApiError(err).message);
@@ -89,7 +136,7 @@ export function CandidateExamAssignments({
     return () => {
       cancelled = true;
     };
-  }, [email, jobPrefix]);
+  }, [email, jobPrefix, reloads]);
 
   return (
     <div className="space-y-3">
@@ -146,50 +193,128 @@ export function CandidateExamAssignments({
               </p>
             </div>
 
-            {/* One chip per paper in the round, so "aptitude and coding" reads
-                differently from "coding again". */}
-            <div className="flex flex-wrap gap-1.5">
-              {round.map((assessment) => {
-                const state = assignmentState(assessment);
-                const isAptitude = assessment.assessmentType === 'APTITUDE';
-                return (
-                  <span
-                    key={assessment.id}
-                    className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-[var(--borderMuted,var(--border))] bg-[var(--cardBg)] text-xs"
-                    title={[
-                      `Pass mark ${passMarkOf(assessment)}%${assessment.passPercentage ? '' : ' (standard mark — none was set for this paper)'}`,
-                      assessment.deadline
-                        ? `Window closes ${formatDateTime(assessment.deadline)}`
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  >
-                    {isAptitude ? (
-                      <BookOpen size={12} style={{ color: 'var(--info)' }} />
-                    ) : (
-                      <Code2 size={12} style={{ color: '#a855f7' }} />
-                    )}
-                    <span className="font-semibold text-[var(--text)]">
-                      {isAptitude ? 'Aptitude' : 'Coding'}
-                    </span>
-                    <Badge variant={STATE_VARIANT[state]} size="sm">
-                      {STATE_LABEL[state]}
-                    </Badge>
-                    {/* The bar this paper is graded against. Shown per paper
-                        because it is set per paper at assign time — and falls
-                        back to the standard mark for papers assigned before it
-                        was configurable, which is the mark they are actually
-                        graded on. */}
-                    <span className="text-[var(--textTertiary)]">
-                      pass {passMarkOf(assessment)}%
-                    </span>
-                  </span>
-                );
-              })}
+            {/* One block per paper in the round: what it is, how far the
+                candidate got with it, and the window it lives in. */}
+            <div className="space-y-2">
+              {round.map((assessment) => (
+                <PaperRow
+                  key={assessment.id}
+                  assessment={assessment}
+                  sitting={sittings.get(assessment.id)}
+                  onReschedule={() => setRescheduling(assessment)}
+                />
+              ))}
             </div>
           </div>
         ))}
+
+      {rescheduling && (
+        <RescheduleExamModal
+          assessment={rescheduling}
+          onClose={() => setRescheduling(null)}
+          onSaved={reload}
+        />
+      )}
+    </div>
+  );
+}
+
+/** A labelled moment, or nothing at all when it was never recorded. */
+function TimeRow({
+  icon,
+  label,
+  value,
+}: Readonly<{ icon: React.ReactNode; label: string; value: string | null }>) {
+  if (!value) return null;
+  return (
+    <p className="flex items-center gap-1.5 text-xs text-[var(--textSecondary)]">
+      <span className="text-[var(--textTertiary)]">{icon}</span>
+      <span className="text-[var(--textTertiary)]">{label}</span>
+      <span className="text-[var(--text)]">{value}</span>
+    </p>
+  );
+}
+
+/**
+ * One assigned paper: its state, its pass mark, the window it can be sat in,
+ * and — once it has been — when the candidate actually opened and handed it in.
+ *
+ * The scheduled window and the real sitting are kept apart on purpose. "Opens
+ * 11:10" is what the recruiter arranged; "started 06:45" is what the candidate
+ * did, and a recruiter chasing a no-show needs to see that the two are not the
+ * same thing.
+ */
+function PaperRow({
+  assessment,
+  sitting,
+  onReschedule,
+}: Readonly<{
+  assessment: Assessment;
+  sitting?: Result;
+  onReschedule: () => void;
+}>) {
+  const state = assignmentState(assessment);
+  const isAptitude = assessment.assessmentType === 'APTITUDE';
+
+  const { submission } = splitResultsJson(sitting?.resultsJson);
+  const started = examStartedAt(assessment, sitting?.submittedAt, submission);
+
+  const window =
+    assessment.startTime && assessment.deadline
+      ? `${formatDateTime(assessment.startTime)} → ${formatDateTime(assessment.deadline)}`
+      : null;
+
+  return (
+    <div className="rounded-lg border border-[var(--borderMuted,var(--border))] bg-[var(--cardBg)] p-2.5 space-y-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {isAptitude ? (
+          <BookOpen size={12} style={{ color: 'var(--info)' }} />
+        ) : (
+          <Code2 size={12} style={{ color: '#a855f7' }} />
+        )}
+        <span className="text-xs font-semibold text-[var(--text)]">
+          {isAptitude ? 'Aptitude' : 'Coding'}
+        </span>
+        <Badge variant={STATE_VARIANT[state]} size="sm">
+          {STATE_LABEL[state]}
+        </Badge>
+        <span
+          className="text-xs text-[var(--textTertiary)]"
+          title={
+            assessment.passPercentage
+              ? undefined
+              : 'The standard mark — none was set for this paper'
+          }
+        >
+          pass {passMarkOf(assessment)}%
+        </span>
+
+        {/* Only a paper still to be sat can move. Once it is in, the window it
+            was sat under is part of the record. */}
+        {state !== 'sat' && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto px-2"
+            leftIcon={<CalendarClock size={13} />}
+            onClick={onReschedule}
+          >
+            Change window
+          </Button>
+        )}
+      </div>
+
+      <TimeRow icon={<CalendarClock size={12} />} label="Window" value={window} />
+      <TimeRow
+        icon={<PlayCircle size={12} />}
+        label="Started"
+        value={started === null ? null : formatServerDateTime(new Date(started).toISOString())}
+      />
+      <TimeRow
+        icon={<Send size={12} />}
+        label="Submitted"
+        value={sitting?.submittedAt ? formatServerDateTime(sitting.submittedAt) : null}
+      />
     </div>
   );
 }

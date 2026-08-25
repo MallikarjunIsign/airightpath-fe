@@ -953,6 +953,33 @@ export function groupRounds<T>(
   return rounds;
 }
 
+/**
+ * When the candidate actually opened the paper.
+ *
+ * Prefers the server's own stamp, taken as the exam page reports the paper
+ * attended. Attempts sat before that was recorded fall back to working
+ * backwards from the submission: the exam page writes down how long the clock
+ * ran and how much was left on it, and the difference is how long the candidate
+ * was in the paper. Null when neither is available — better silent than a
+ * start time invented from a duration nobody recorded.
+ */
+export function examStartedAt(
+  assessment?: { examStartedAt?: string | null },
+  submittedAt?: string | null,
+  meta?: SubmissionMeta,
+): number | null {
+  const stamped = parseStamp(assessment?.examStartedAt);
+  if (stamped !== null) return stamped;
+
+  const submitted = parseStamp(submittedAt);
+  const duration = meta?.durationSeconds;
+  const left = meta?.secondsLeft;
+  if (submitted === null || !isNumber(duration) || duration <= 0 || !isNumber(left)) return null;
+
+  const spentMs = Math.max(0, duration - left) * 1000;
+  return submitted - spentMs;
+}
+
 // ── Pass marks ─────────────────────────────────────────────────────────
 
 /** Applied to any paper assigned before the pass mark was configurable. */
