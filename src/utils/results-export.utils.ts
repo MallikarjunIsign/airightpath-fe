@@ -320,6 +320,7 @@ export async function buildResultsWorkbook(input: ResultsExportInput): Promise<B
   workbook.created = input.generatedAt;
 
   addSummarySheet(workbook, input);
+  addFinalSummarySheet(workbook, input);
   addCandidateDetailsSheet(workbook, input);
   addResultsSheet(workbook, input);
   addAptitudeAnswersSheet(workbook, input);
@@ -420,6 +421,239 @@ function addSummarySheet(workbook: Workbook, input: ResultsExportInput): void {
   }
 
   styleHeader(sheet, 2);
+  styleBody(sheet);
+}
+
+/** The three difficulty bands, in the order a paper climbs through them. */
+const SUMMARY_BANDS = ['Basic', 'Intermediate', 'Advanced'] as const;
+
+/** A band's tally, or nothing when the paper had no questions at that level. */
+function bandTally(
+  bands: ExportCodingBand[] | undefined,
+  name: string,
+): { passed: number | null; total: number | null; rate: number | null } {
+  const band = bands?.find((entry) => entry.name === name);
+  if (!band || band.testsTotal === 0) return { passed: null, total: null, rate: null };
+  return {
+    passed: band.testsPassed,
+    total: band.testsTotal,
+    rate: band.testsPassed / band.testsTotal,
+  };
+}
+
+/** Every language the candidate wrote in, in the order the paper asked. */
+function languagesUsed(questions: ExportCodingQuestion[] | undefined): string | null {
+  const seen: string[] = [];
+  for (const question of questions ?? []) {
+    const language = question.language?.trim();
+    if (language && !seen.includes(language)) seen.push(language);
+  }
+  return seen.length > 0 ? seen.join(', ') : null;
+}
+
+/**
+ * Coding totals taken off the paper rather than off what was run, so a question
+ * the candidate never opened still counts against them.
+ */
+function codingTally(row: ExportCandidateRow): {
+  questions: number | null;
+  solved: number | null;
+  unsolved: number | null;
+  testsPassed: number | null;
+  testsTotal: number | null;
+} {
+  const questions = row.codingQuestions ?? [];
+  if (questions.length === 0) {
+    return { questions: null, solved: null, unsolved: null, testsPassed: null, testsTotal: null };
+  }
+  const solved = questions.filter((question) => question.outcome === 'pass').length;
+  return {
+    questions: questions.length,
+    solved,
+    unsolved: questions.length - solved,
+    testsPassed: questions.reduce((sum, question) => sum + question.testsPassed, 0),
+    testsTotal: questions.reduce((sum, question) => sum + question.testsTotal, 0),
+  };
+}
+
+/**
+ * The one-line reading of a candidate, for the column a recruiter scans before
+ * deciding anything.
+ *
+ * Only the things that change what the numbers beside them mean: a re-sit, a
+ * paper never sat, an exam that ended itself, a score that could not be derived,
+ * and the bands the candidate is weakest in. Silence means the row already says
+ * everything there is to say.
+ */
+function summaryRemarks(row: ExportCandidateRow): string | null {
+  const notes: string[] = [];
+
+  const aptitudeAttempts = row.aptitudeAttempts?.length ?? 0;
+  const codingAttempts = row.codingAttempts?.length ?? 0;
+  if (aptitudeAttempts > 1) notes.push(`Aptitude sat ${aptitudeAttempts} times`);
+  if (codingAttempts > 1) notes.push(`Coding sat ${codingAttempts} times`);
+
+  if (!row.aptitudeResult) notes.push('Aptitude not sat');
+  if (!row.hasCoding) notes.push('No coding paper assigned');
+  else if (!row.codingResult) notes.push('Coding not sat');
+
+  // A percentage that could not be derived is not a zero, and the reader has to
+  // be told which of the two they are looking at.
+  if (row.aptitudeResult && row.aptitudeScore === null) notes.push('Aptitude score unavailable');
+  if (row.codingResult && row.codingScore === null) notes.push('Coding score unavailable');
+
+  for (const attempt of [attemptFacts(row.aptitudeResult), attemptFacts(row.codingResult)]) {
+    if (attempt.submission && attempt.submission !== 'Submitted by candidate') {
+      notes.push(attempt.submission);
+    }
+  }
+
+  const weak = (row.codingBands ?? [])
+    .filter((band) => band.testsTotal > 0 && band.testsPassed / band.testsTotal < 0.6)
+    .map((band) => band.name);
+  if (weak.length > 0) notes.push(`Weak: ${weak.join(', ')}`);
+
+  return notes.length > 0 ? notes.join('; ') : null;
+}
+
+/**
+ * One row per candidate, holding everything a hiring decision is made on.
+ *
+ * The sheets that follow each go deep on one thing — the answer sheet, the
+ * code, the difficulty split. This is the sheet that gets read first and, for
+ * most candidates, only: every figure the result screen shows, on one line,
+ * sortable and filterable.
+ *
+ * Second in the book, straight after the run's own details. Kept alongside
+ * "Candidate Results" rather than replacing it — that sheet is organised around
+ * the timings of each sitting, this one around the outcome.
+ */
+function addFinalSummarySheet(workbook: Workbook, input: ResultsExportInput): void {
+  const sheet = workbook.addWorksheet('Final Summary');
+  const MINUTES = '0.0';
+
+  sheet.columns = [
+    { header: 'Assessment Date', key: 'assessmentDate', width: 20, style: { numFmt: DATE_FORMAT } },
+    { header: 'Candidate Name', key: 'name', width: 24 },
+    { header: 'Candidate Email', key: 'email', width: 32 },
+    { header: 'Overall Score (%)', key: 'overallScore', width: 16, style: { numFmt: PERCENT_FORMAT } },
+    { header: 'Overall Result', key: 'overallResult', width: 15 },
+    { header: 'Aptitude Score (%)', key: 'aptitudeScore', width: 17, style: { numFmt: PERCENT_FORMAT } },
+    { header: 'Aptitude Total Questions', key: 'aptitudeTotal', width: 22 },
+    { header: 'Aptitude Correct', key: 'aptitudeCorrect', width: 16 },
+    { header: 'Aptitude Incorrect', key: 'aptitudeIncorrect', width: 17 },
+    { header: 'Aptitude Answered', key: 'aptitudeAnswered', width: 17 },
+    { header: 'Aptitude Skipped', key: 'aptitudeSkipped', width: 16 },
+    { header: 'Aptitude Result', key: 'aptitudeResult', width: 16 },
+    { header: 'Coding Score (%)', key: 'codingScore', width: 16, style: { numFmt: PERCENT_FORMAT } },
+    { header: 'Coding Questions', key: 'codingQuestions', width: 17 },
+    { header: 'Coding Solved', key: 'codingSolved', width: 14 },
+    { header: 'Coding Unsolved', key: 'codingUnsolved', width: 16 },
+    { header: 'Total Test Cases', key: 'testsTotal', width: 16 },
+    { header: 'Test Cases Passed', key: 'testsPassed', width: 18 },
+    { header: 'Test Cases Failed', key: 'testsFailed', width: 17 },
+    { header: 'Coding Result', key: 'codingResult', width: 15 },
+    { header: 'Basic Passed', key: 'basicPassed', width: 13 },
+    { header: 'Basic Total', key: 'basicTotal', width: 12 },
+    { header: 'Basic %', key: 'basicRate', width: 10, style: { numFmt: PERCENT_FORMAT } },
+    { header: 'Intermediate Passed', key: 'intermediatePassed', width: 19 },
+    { header: 'Intermediate Total', key: 'intermediateTotal', width: 18 },
+    { header: 'Intermediate %', key: 'intermediateRate', width: 15, style: { numFmt: PERCENT_FORMAT } },
+    { header: 'Advanced Passed', key: 'advancedPassed', width: 16 },
+    { header: 'Advanced Total', key: 'advancedTotal', width: 15 },
+    { header: 'Advanced %', key: 'advancedRate', width: 12, style: { numFmt: PERCENT_FORMAT } },
+    { header: 'Programming Language', key: 'languages', width: 20 },
+    { header: 'Aptitude Submission Status', key: 'aptitudeSubmission', width: 26 },
+    { header: 'Coding Submission Status', key: 'codingSubmission', width: 26 },
+    { header: 'Remarks', key: 'remarks', width: 46 },
+    // Appended rather than woven in, so the columns above keep the order they
+    // were asked for and this month's sheet lines up against last month's.
+    { header: 'Mobile', key: 'mobile', width: 16 },
+    { header: 'Experience', key: 'experience', width: 18 },
+    { header: 'Role', key: 'role', width: 18 },
+    { header: 'Aptitude Marks', key: 'aptitudeMarks', width: 15 },
+    { header: 'Aptitude Time (min)', key: 'aptitudeMinutes', width: 18, style: { numFmt: MINUTES } },
+    { header: 'Coding Time (min)', key: 'codingMinutes', width: 17, style: { numFmt: MINUTES } },
+    { header: 'Aptitude Attempts', key: 'aptitudeAttempts', width: 17 },
+    { header: 'Coding Attempts', key: 'codingAttempts', width: 16 },
+  ];
+
+  for (const row of input.rows) {
+    const aptitude = row.aptitudeResult;
+    const aptitudeAttempt = attemptFacts(aptitude);
+    const codingAttempt = attemptFacts(row.codingResult);
+    const coding = codingTally(row);
+    const [basic, intermediate, advanced] = SUMMARY_BANDS.map((name) =>
+      bandTally(row.codingBands, name),
+    );
+
+    const total = row.aptitudeSummary?.total ?? null;
+    const answered = row.aptitudeSummary?.answered ?? null;
+    const correct = row.aptitudeSummary?.correct ?? null;
+
+    // The day the exam was sat, from the later of the two papers: a coding
+    // re-sit nine days after the aptitude dates the row to the sitting being
+    // reported, not to the first thing the candidate ever did.
+    const sat =
+      [aptitudeAttempt.submittedAt, codingAttempt.submittedAt]
+        .filter((date): date is Date => date !== null)
+        .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+
+    sheet.addRow({
+      assessmentDate: sat,
+      name: candidateName(row.profile),
+      email: row.email,
+      overallScore: percentCell(row.overallScore),
+      overallResult: OVERALL_LABELS[row.overallStatus],
+      aptitudeScore: percentCell(row.aptitudeScore),
+      aptitudeTotal: total,
+      aptitudeCorrect: correct,
+      // Wrong answers only. A blank is not a wrong answer, and a sheet that adds
+      // the two together cannot tell a guesser from someone who ran out of time.
+      aptitudeIncorrect: answered !== null && correct !== null ? answered - correct : null,
+      aptitudeAnswered: answered,
+      aptitudeSkipped: total !== null && answered !== null ? total - answered : null,
+      aptitudeResult: moduleStatus(aptitude, !!aptitude, row.aptitudeVerdict),
+      codingScore: percentCell(row.codingScore),
+      codingQuestions: coding.questions,
+      codingSolved: coding.solved,
+      codingUnsolved: coding.unsolved,
+      testsTotal: coding.testsTotal,
+      testsPassed: coding.testsPassed,
+      testsFailed:
+        coding.testsTotal !== null && coding.testsPassed !== null
+          ? coding.testsTotal - coding.testsPassed
+          : null,
+      codingResult: moduleStatus(row.codingResult, row.hasCoding, row.codingVerdict),
+      basicPassed: basic.passed,
+      basicTotal: basic.total,
+      basicRate: basic.rate,
+      intermediatePassed: intermediate.passed,
+      intermediateTotal: intermediate.total,
+      intermediateRate: intermediate.rate,
+      advancedPassed: advanced.passed,
+      advancedTotal: advanced.total,
+      advancedRate: advanced.rate,
+      languages: languagesUsed(row.codingQuestions),
+      aptitudeSubmission: aptitudeAttempt.submission,
+      codingSubmission: codingAttempt.submission,
+      remarks: summaryRemarks(row),
+      mobile: row.profile?.mobileNumber ?? null,
+      experience: row.profile?.experience ?? null,
+      role: row.profile?.jobRole ?? null,
+      aptitudeMarks: aptitudeMarksLabel(aptitude),
+      aptitudeMinutes: aptitudeAttempt.minutesTaken,
+      codingMinutes: codingAttempt.minutesTaken,
+      aptitudeAttempts: row.aptitudeAttempts?.length || null,
+      codingAttempts: row.codingAttempts?.length || null,
+    });
+  }
+
+  if (sheet.rowCount === 1) {
+    sheet.addRow({ email: 'No candidates matched this export.' });
+  }
+
+  styleHeader(sheet, sheet.columns.length);
   styleBody(sheet);
 }
 
