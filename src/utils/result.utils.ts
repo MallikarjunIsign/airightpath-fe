@@ -794,21 +794,62 @@ export function isWithinAttempt(stamp: string | undefined | null, window: Attemp
 }
 
 /**
+ * The items belonging to one attempt, out of everything on file for the
+ * candidate — code runs, pre-exam captures, anything filed per sitting.
+ *
+ * Two signals, and both are needed:
+ *
+ *  - The assessment an item was filed against. Exact, and immune to clocks. But
+ *    it only separates attempts when each sitting has its own assessment row;
+ *    where two sittings share one, every item carries the same id.
+ *  - When it happened. Separates sittings under a shared id, and rescues items
+ *    filed against a record this screen resolved differently. Weaker: an item's
+ *    timestamp comes from the candidate's browser while the attempt's comes from
+ *    the server, so the two are not the same clock and a boundary comparison can
+ *    land the wrong side.
+ *
+ * So the id narrows first and time narrows within it, and neither is allowed to
+ * return nothing on its own: when the id matches items but none of them sit in
+ * the window, the id is trusted and the clock is not. Returning empty means the
+ * candidate really has nothing from this attempt — which the caller states,
+ * rather than showing another sitting's work.
+ */
+export function pickForAttempt<T>(
+  items: T[],
+  assessmentId: number | string | undefined,
+  window: AttemptWindow,
+  read: {
+    assessmentIdOf: (item: T) => string | number | null | undefined;
+    timeOf: (item: T) => string | null | undefined;
+  },
+): T[] {
+  const filed =
+    assessmentId === undefined
+      ? []
+      : items.filter((item) => {
+          const own = read.assessmentIdOf(item);
+          return own != null && String(own) === String(assessmentId);
+        });
+
+  const pool = filed.length > 0 ? filed : items;
+
+  if (window.from === null && window.to === null) return pool;
+
+  const inWindow = pool.filter((item) => isWithinAttempt(read.timeOf(item), window));
+  if (inWindow.length > 0) return inWindow;
+
+  // The clock disagrees with the filing. The filing wins.
+  return filed;
+}
+
+/**
  * The code runs belonging to one attempt.
  *
  * Runs are fetched per job, so a re-sit's arrive in the same list as the
- * original's with the same question ids. Two ways to tell them apart, in order:
+ * original's with the same question ids. Split by {@link pickForAttempt}: the
+ * assessment the run was filed against, narrowed by when it was made.
  *
- *  1. The assessment the run was filed against. Exact — the server records it
- *     on every run, from the paper the candidate had open.
- *  2. When it was made. Only for rows recorded before that id was returned:
- *     the run's timestamp is the candidate's browser clock while the attempt's
- *     is the server's, so this compares two clocks and can misplace a run at
- *     the boundary. Good enough to place historic rows, not to be preferred
- *     over an exact answer.
- *
- * With neither — a single attempt — there is nothing to separate and the list
- * is returned untouched.
+ * A single attempt has nothing to separate and keeps the list untouched.
  */
 export function submissionsForAttempt(
   submissions: CodeSubmissionResponse[],
@@ -818,18 +859,10 @@ export function submissionsForAttempt(
 ): CodeSubmissionResponse[] {
   if (attempts.length <= 1) return submissions;
 
-  if (assessmentId !== undefined) {
-    const filed = submissions.filter(
-      (sub) => sub.assessmentId != null && String(sub.assessmentId) === String(assessmentId),
-    );
-    // Only trusted when something matched. An empty result here means these runs
-    // predate the id being recorded, not that the attempt had no code.
-    if (filed.length > 0) return filed;
-  }
-
-  const window = attemptWindow(attempts, selected);
-  if (window.from === null && window.to === null) return submissions;
-  return submissions.filter((sub) => isWithinAttempt(sub.createdAt, window));
+  return pickForAttempt(submissions, assessmentId, attemptWindow(attempts, selected), {
+    assessmentIdOf: (sub) => sub.assessmentId,
+    timeOf: (sub) => sub.createdAt,
+  });
 }
 
 /**
