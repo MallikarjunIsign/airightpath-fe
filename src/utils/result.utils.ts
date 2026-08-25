@@ -42,9 +42,11 @@ export function statusVariant(status?: string): 'success' | 'error' | 'warning' 
  * Returns null when either end is missing or the range is inverted.
  */
 export function formatDurationBetween(start?: string, end?: string): string | null {
-  if (!start || !end) return null;
-  const ms = new Date(end).getTime() - new Date(start).getTime();
-  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const from = parseStamp(start);
+  const to = parseStamp(end);
+  if (from === null || to === null) return null;
+  const ms = to - from;
+  if (ms <= 0) return null;
   const mins = Math.round(ms / 60000);
   if (mins < 60) return `${mins} min`;
   const hours = Math.floor(mins / 60);
@@ -632,9 +634,8 @@ export function overallScorePercent(parts: (number | null | undefined)[]): numbe
  * whatever the database felt like returning last.
  */
 function attemptOrder(result: Result): number {
-  const stamp = result.submittedAt ?? result.createdAt;
-  const time = stamp ? new Date(stamp).getTime() : Number.NaN;
-  return Number.isNaN(time) ? (result.id ?? 0) : time;
+  const time = parseStamp(result.submittedAt ?? result.createdAt);
+  return time === null ? (result.id ?? 0) : time;
 }
 
 /**
@@ -708,9 +709,15 @@ export function assessmentForAttempt<T extends AttemptAssessment>(
 ): T | undefined {
   if (ordered.length <= 1) return ordered[0];
 
-  const stamp = attempt?.submittedAt ?? attempt?.createdAt;
-  const sat = stamp ? new Date(stamp).getTime() : Number.NaN;
-  if (!Number.isNaN(sat)) {
+  // Read through parseStamp, like the assessment side of this comparison. The
+  // two are compared against each other, so parsing one bare stamp as local and
+  // the other as UTC put them a whole timezone apart: on an IST machine the
+  // attempt looked 5½ hours earlier than it was, no assessment qualified as
+  // "assigned at or before it", and the attempt fell back to the paper before —
+  // which is how a re-sit came to show the first attempt's questions, sample
+  // input/output and test cases.
+  const sat = parseStamp(attempt?.submittedAt ?? attempt?.createdAt);
+  if (sat !== null) {
     let match: T | undefined;
     for (const assessment of ordered) {
       const assigned = assignedTime(assessment);
