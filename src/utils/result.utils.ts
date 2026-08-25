@@ -669,9 +669,23 @@ export interface AttemptAssessment {
   startTime?: string;
 }
 
-/** When the candidate was given this paper; null when the record cannot say. */
+/**
+ * When the candidate was given this paper; null when the record cannot say.
+ *
+ * `assignedAt`, not `startTime`. Both sit on the assessment, but they are not
+ * the same clock: `assignedAt` is stamped by the server, in UTC, which is the
+ * clock a result's `submittedAt` is also on — while `startTime` is the
+ * wall-clock the admin typed into the scheduler and is stored exactly as typed.
+ *
+ * Reading `startTime` first compared a typed 11:10 against a submission of
+ * 08:12 UTC and concluded the paper had been handed over after the attempt that
+ * sat it. The re-sit then matched nothing, fell back to the paper before it, and
+ * was rendered with the previous attempt's questions, sample input/output and
+ * test cases — and scored on that attempt's code runs, so both attempts showed
+ * the same result.
+ */
 function assignedTime(a: AttemptAssessment): number | null {
-  return parseStamp(a.startTime ?? a.assignedAt);
+  return parseStamp(a.assignedAt) ?? parseStamp(a.startTime);
 }
 
 /**

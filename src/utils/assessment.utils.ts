@@ -19,9 +19,15 @@ export function toAssessmentList(body: unknown): Assessment[] {
   return Array.isArray(inner) ? (inner as Assessment[]) : [];
 }
 
-/** When a paper was handed to the candidate. */
+/**
+ * When a paper was handed to the candidate.
+ *
+ * `assignedAt` first: it is the server's own UTC stamp, whereas `startTime` is
+ * the wall-clock an admin typed and is stored as typed. See the note on the
+ * matching helper in result.utils.
+ */
 function assignedTime(assessment: Assessment): number | null {
-  return parseStamp(assessment.assignedAt ?? assessment.startTime);
+  return parseStamp(assessment.assignedAt) ?? parseStamp(assessment.startTime);
 }
 
 /**
