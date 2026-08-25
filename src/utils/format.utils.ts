@@ -12,6 +12,29 @@ export function formatDateTime(dateStr: string): string {
   return formatDate(dateStr, 'MMM dd, yyyy HH:mm');
 }
 
+/**
+ * A timestamp the server stamped, shown in the reader's own timezone.
+ *
+ * The server writes its `LocalDateTime` columns bare — `2026-08-14T08:23:27` —
+ * and they are UTC. `parseISO` reads a bare stamp as local time, so putting one
+ * through {@link formatDateTime} prints the UTC digits unchanged and an admin in
+ * IST reads 08:23 for something that happened at 13:53 their time.
+ *
+ * Use this for anything the server recorded: when a paper was assigned, opened
+ * or handed in. NOT for the exam window: `startTime` and `deadline` are the
+ * wall-clock a recruiter typed into the scheduler and are stored as typed, so
+ * they must be shown back exactly as typed — {@link formatDateTime} does that.
+ */
+export function formatServerDateTime(dateStr?: string | null): string {
+  if (!dateStr) return '';
+  const zoned = /(?:Z|[+-]\d{2}:?\d{2})$/.test(dateStr) ? dateStr : `${dateStr.replace(' ', 'T')}Z`;
+  try {
+    return format(parseISO(zoned), 'MMM dd, yyyy HH:mm');
+  } catch {
+    return dateStr;
+  }
+}
+
 export function formatRelativeTime(dateStr: string): string {
   try {
     return formatDistanceToNow(parseISO(dateStr), { addSuffix: true });

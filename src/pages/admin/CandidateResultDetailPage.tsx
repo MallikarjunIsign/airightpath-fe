@@ -91,6 +91,7 @@ import {
   groupRounds,
 } from '@/utils/result.utils';
 import { toAssessmentList } from '@/utils/assessment.utils';
+import { formatDateTime } from '@/utils/format.utils';
 import { SubmissionInfo } from '@/components/result/SubmissionInfo';
 import type { CodingRow, AttemptWindow } from '@/utils/result.utils';
 import type { Result, AptitudeAnswer, CodingAnswer, SubmissionMeta } from '@/types/result.types';
@@ -510,6 +511,24 @@ export function CandidateResultDetailPage() {
     () => parseArray<RawCodingQuestion>(codingAssessment && papersById.get(codingAssessment.id)),
     [papersById, codingAssessment],
   );
+
+  /**
+   * The window as the recruiter scheduled it.
+   *
+   * Shown as typed rather than converted: `startTime` and `deadline` are the
+   * wall-clock an admin entered and are stored exactly as entered, so putting
+   * them through a timezone would move a window nobody moved.
+   */
+  const examSchedules: ExamWindows = useMemo(() => {
+    const describe = (record?: Assessment) =>
+      record?.startTime && record?.deadline
+        ? `${formatDateTime(record.startTime)} → ${formatDateTime(record.deadline)}`
+        : null;
+    return {
+      aptitude: describe(aptitudeAssessment),
+      coding: describe(codingAssessment),
+    };
+  }, [aptitudeAssessment, codingAssessment]);
 
   const examWindows: ExamWindows = useMemo(
     () => ({
@@ -972,6 +991,7 @@ export function CandidateResultDetailPage() {
           answers={aptitudeAnswers}
           paper={aptitudePaper}
           examWindow={examWindows.aptitude}
+          examSchedule={examSchedules.aptitude}
           assessmentId={aptitudeAssessment?.id}
           attemptWindow={aptitudeWindow}
           candidateEmail={email}
@@ -993,6 +1013,7 @@ export function CandidateResultDetailPage() {
           score={codingScore}
           rows={codingRows}
           examWindow={examWindows.coding}
+          examSchedule={examSchedules.coding}
           assessmentId={codingAssessment?.id}
           attemptWindow={codingWindow}
           candidateEmail={email}
@@ -1412,6 +1433,7 @@ function AptitudeTab({
   answers,
   paper,
   examWindow,
+  examSchedule,
   assessmentId,
   attemptWindow,
   candidateEmail,
@@ -1423,6 +1445,8 @@ function AptitudeTab({
   answers: AptitudeAnswer[];
   paper: RawQuestion[];
   examWindow?: string | null;
+  /** The scheduled window itself, e.g. "Aug 23, 2026 11:10 → Aug 24, 2026 12:06". */
+  examSchedule?: string | null;
   /** Attempt these proctoring captures belong to. */
   assessmentId?: number;
   /** When that attempt was live, so a re-sit shows its own captures. */
@@ -1548,9 +1572,15 @@ function AptitudeTab({
             <div className="flex flex-wrap items-center justify-between gap-4">
               <AreasToImprove areas={aptitudeAreasToImprove(bands)} suffix="Aptitude" />
               {examWindow && (
-                <span className="inline-flex items-center gap-1.5 text-xs text-[var(--textSecondary)]">
+                <span
+                  className="inline-flex items-center gap-1.5 text-xs text-[var(--textSecondary)]"
+                  title={examSchedule ?? undefined}
+                >
                   <Clock size={13} className="text-[var(--textTertiary)]" />
                   Exam window: <strong className="text-[var(--text)]">{examWindow}</strong>
+                  {examSchedule && (
+                    <span className="text-[var(--textTertiary)]">({examSchedule})</span>
+                  )}
                 </span>
               )}
             </div>
@@ -1722,6 +1752,7 @@ function CodingTab({
   score,
   rows,
   examWindow,
+  examSchedule,
   assessmentId,
   attemptWindow,
   candidateEmail,
@@ -1733,6 +1764,8 @@ function CodingTab({
   score: number | null;
   rows: CodingRow[];
   examWindow?: string | null;
+  /** The scheduled window itself, e.g. "Aug 23, 2026 11:10 → Aug 24, 2026 12:06". */
+  examSchedule?: string | null;
   /** Attempt these proctoring captures belong to. */
   assessmentId?: number;
   /** When that attempt was live, so a re-sit shows its own captures. */
@@ -1846,9 +1879,15 @@ function CodingTab({
             <div className="flex flex-wrap items-center justify-between gap-4">
               <AreasToImprove areas={codingAreasToImprove(bands)} suffix="Programming" />
               {examWindow && (
-                <span className="inline-flex items-center gap-1.5 text-xs text-[var(--textSecondary)]">
+                <span
+                  className="inline-flex items-center gap-1.5 text-xs text-[var(--textSecondary)]"
+                  title={examSchedule ?? undefined}
+                >
                   <Clock size={13} className="text-[var(--textTertiary)]" />
                   Exam window: <strong className="text-[var(--text)]">{examWindow}</strong>
+                  {examSchedule && (
+                    <span className="text-[var(--textTertiary)]">({examSchedule})</span>
+                  )}
                 </span>
               )}
             </div>

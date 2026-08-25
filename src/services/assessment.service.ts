@@ -108,6 +108,19 @@ export const assessmentService = {
     });
   },
 
+  /**
+   * Moves a pending paper's exam window.
+   *
+   * `notify` defaults to true server-side: the candidate was told the old
+   * window, so a silent move leaves them turning up to an exam that has gone.
+   */
+  reschedule(
+    id: number,
+    data: { startTime: string; deadline: string; notify?: boolean },
+  ) {
+    return api.patch<ApiResponse<unknown>>(ENDPOINTS.ASSESSMENTS.SCHEDULE(id), data);
+  },
+
   fetchQuestions(id: number) {
     return api.get<{ assessmentType: string; questions: string; jobPrefix: string }>(
       ENDPOINTS.ASSESSMENTS.FETCH_QUESTIONS(id)
