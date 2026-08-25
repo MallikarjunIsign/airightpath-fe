@@ -15,7 +15,7 @@ import { Modal } from '@/components/ui/Modal';
 import { examProctoringService } from '@/services/exam-proctoring.service';
 import { extractApiError } from '@/services/api.service';
 import { downloadBlob } from '@/utils/question-paper.utils';
-import { isWithinAttempt } from '@/utils/result.utils';
+import { pickForAttempt } from '@/utils/result.utils';
 import type { AttemptWindow } from '@/utils/result.utils';
 import type { ProctoringCapture } from '@/types/proctoring.types';
 
@@ -94,17 +94,10 @@ function describeFailure(err: unknown): string {
  * The captures belonging to the attempt on screen, out of everything on file for
  * the candidate.
  *
- * Three rules, tried in order, because no single one holds in every case:
- *
- *  1. The assessment id a capture was filed against. Authoritative — it names
- *     the paper the candidate had open when the shutter fired.
- *  2. Failing that, when the capture was taken. This is what rescues an earlier
- *     attempt whose captures were filed against a paper this screen resolved
- *     differently: matching only on id showed the re-sit's photos and reported
- *     the first attempt as never captured, when its images were on file all
- *     along.
- *  3. Failing both — a single attempt, so no window to judge against — show
- *     everything. There is nothing to separate it from.
+ * The same split the code runs use — the assessment each capture was filed
+ * against, narrowed by when it was taken — so a re-sit's photo and its test
+ * results can never disagree about which sitting they came from. See
+ * `pickForAttempt`.
  *
  * Returns nothing when captures exist but belong to other attempts, which the
  * card states rather than papering over with someone else's photo.
@@ -114,17 +107,10 @@ function selectForAttempt(
   assessmentId: number | undefined,
   window: AttemptWindow,
 ): ProctoringCapture[] {
-  if (assessmentId !== undefined) {
-    const filed = all.filter((capture) => capture.assessmentId === assessmentId);
-    if (filed.length > 0) return filed;
-  }
-
-  const bounded = window.from !== null || window.to !== null;
-  if (bounded) {
-    return all.filter((capture) => isWithinAttempt(capture.capturedAt ?? capture.uploadedAt, window));
-  }
-
-  return all;
+  return pickForAttempt(all, assessmentId, window, {
+    assessmentIdOf: (capture) => capture.assessmentId,
+    timeOf: (capture) => capture.capturedAt ?? capture.uploadedAt,
+  });
 }
 
 export function ProctoringCaptures({
