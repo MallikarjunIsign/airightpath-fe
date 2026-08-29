@@ -21,6 +21,8 @@ import {
 import type { CodingRow } from '@/utils/result.utils';
 import type { AptitudeAnswer, SubmissionMeta } from '@/types/result.types';
 import type { RawQuestion } from '@/types/assessment.types';
+import { BRAND_LINE, BRANDING } from '@/config/branding';
+import { PDF_WATERMARK, watermarkTileSvgUri } from '@/utils/watermark.utils';
 
 export interface AnswerSheetAptitude {
   score: number | null;
@@ -245,7 +247,23 @@ export function answerSheetToHtml(data: AnswerSheetData): string {
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8" /><title>${escapeHtml(title)}</title>
 <style>
-  body { font-family: Calibri, Arial, sans-serif; color: #111; margin: 32px; line-height: 1.5; }
+  /* Watermark: a repeating tile behind the content, so it covers every page of
+     a long sheet rather than only the first. print-color-adjust is what keeps
+     it when the document is printed — browsers drop background images by
+     default, and a watermark that vanishes on print is no watermark at all. */
+  html {
+    background-image: url("${watermarkTileSvgUri()}");
+    background-repeat: repeat;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body { font-family: Calibri, Arial, sans-serif; color: #111; margin: 32px; line-height: 1.5;
+         background: transparent; }
+  .brand-mark { border-bottom: 2px solid #0f7b3f; padding-bottom: 6px; margin: 0 0 18px;
+                font-size: 9pt; color: #0f7b3f; letter-spacing: .06em; text-transform: uppercase;
+                font-weight: 700; }
+  .brand-foot { margin: 28px 0 0; padding-top: 8px; border-top: 1px solid #ddd;
+                font-size: 8.5pt; color: #777; text-align: center; }
   h1 { font-size: 20pt; margin: 0 0 4px; }
   h2 { font-size: 14pt; margin: 26px 0 10px; padding-bottom: 6px; border-bottom: 2px solid #ddd; }
   h3 { font-size: 11.5pt; margin: 0 0 6px; font-weight: 600; }
@@ -273,6 +291,7 @@ export function answerSheetToHtml(data: AnswerSheetData): string {
   table.cases pre { background: none; padding: 0; font-size: 9pt; margin: 0; }
 </style></head>
 <body>
+  <p class="brand-mark">${escapeHtml(BRANDING.name)} &middot; ${escapeHtml(BRANDING.site)}</p>
   <h1>Answer sheet</h1>
   <p class="sub"><strong>${escapeHtml(data.candidateEmail)}</strong> &middot; ${escapeHtml(data.jobPrefix)}</p>
   <p class="sub">Overall ${escapeHtml(scoreLabel(data.overallScore))} &middot; ${escapeHtml(data.overallStatus)}${
@@ -280,6 +299,7 @@ export function answerSheetToHtml(data: AnswerSheetData): string {
   }</p>
   ${data.aptitude ? aptitudeHtml(data.aptitude) : ''}
   ${data.coding ? codingHtml(data.coding) : ''}
+  <p class="brand-foot">${escapeHtml(BRAND_LINE)}</p>
 </body></html>`;
 }
 
@@ -355,7 +375,7 @@ export function answerSheetToJson(data: AnswerSheetData): string {
  */
 export async function buildAnswerSheetPdf(data: AnswerSheetData) {
   // Loaded on demand — the PDF library is dead weight on every other screen.
-  const { jsPDF } = await import('jspdf');
+  const { jsPDF, GState } = await import('jspdf');
 
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -504,8 +524,64 @@ export async function buildAnswerSheetPdf(data: AnswerSheetData) {
     });
   }
 
+  stampBrand(doc, GState);
   return doc;
 }
+
+/**
+ * Marks every page, after the content is laid out rather than as each page
+ * opens.
+ *
+ * Pages are added lazily by `ensureRoom`, so at any point during writing the
+ * document does not yet know how many pages it will have. Stamping at the end
+ * means the count in "Page 2 of 7" is the real one, and no page can be added
+ * after the last stamp and escape unmarked.
+ *
+ * The watermark is drawn inside a saved graphics state: the opacity set for it
+ * would otherwise apply to everything drawn afterwards, turning the footer —
+ * and on a reused page, the body text — translucent too.
+ */
+function stampBrand(doc: JsPdfDoc, GState: JsPdfGState): void {
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const centreX = pageWidth / 2;
+  const centreY = pageHeight / 2;
+  const pageCount = doc.getNumberOfPages();
+  const [r, g, b] = PDF_WATERMARK.rgb;
+
+  for (let page = 1; page <= pageCount; page += 1) {
+    doc.setPage(page);
+
+    doc.saveGraphicsState();
+    doc.setGState(new GState({ opacity: PDF_WATERMARK.opacity }));
+    doc.setTextColor(r, g, b);
+
+    for (const line of PDF_WATERMARK.lines) {
+      doc.setFont('helvetica', line.style);
+      doc.setFontSize(line.size);
+      doc.text(line.text, centreX, centreY + line.dy, {
+        align: 'center',
+        angle: PDF_WATERMARK.angle,
+      });
+    }
+
+    doc.restoreGraphicsState();
+
+    // Readable attribution at full strength — the watermark says whose document
+    // this is at a glance, this says it in a form that survives a photocopy.
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(130);
+    doc.text(BRAND_LINE, centreX, pageHeight - 24, { align: 'center' });
+    doc.text(`Page ${page} of ${pageCount}`, pageWidth - 48, pageHeight - 24, {
+      align: 'right',
+    });
+    doc.setTextColor(17);
+  }
+}
+
+type JsPdfDoc = InstanceType<typeof import('jspdf').jsPDF>;
+type JsPdfGState = typeof import('jspdf').GState;
 
 /** Filename stem shared by every format, e.g. `FE-DEV-006-jane-answers`. */
 export function answerSheetFileName(data: AnswerSheetData): string {

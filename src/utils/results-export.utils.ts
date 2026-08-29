@@ -1,6 +1,8 @@
 import type { Result, SubmissionMeta } from '@/types/result.types';
 import type { CodeSubmissionResponse } from '@/types/compiler.types';
 import { splitResultsJson } from '@/utils/result.utils';
+import { BRANDING } from '@/config/branding';
+import { watermarkTilePng } from '@/utils/watermark.utils';
 
 /**
  * Builds the Assessment Results workbook.
@@ -326,6 +328,7 @@ export async function buildResultsWorkbook(input: ResultsExportInput): Promise<B
   addAptitudeAnswersSheet(workbook, input);
   addCodingByDifficultySheet(workbook, input);
   addSubmissionsSheet(workbook, input);
+  brandWorkbook(workbook);
 
   const buffer = await workbook.xlsx.writeBuffer();
   return new Blob([buffer], {
@@ -335,6 +338,37 @@ export async function buildResultsWorkbook(input: ResultsExportInput): Promise<B
 
 type Workbook = import('exceljs').Workbook;
 type Worksheet = import('exceljs').Worksheet;
+
+/**
+ * Watermarks every sheet, in the two places a spreadsheet can carry one.
+ *
+ * xlsx has no watermark feature, so this uses the two things it does have, and
+ * needs both because neither covers the other's case:
+ *
+ *   - A tiled sheet background, which is what the reader sees on screen. Excel
+ *     never prints a sheet background — by design, not a bug — so on its own it
+ *     would vanish the moment the workbook mattered most.
+ *   - The print header and footer, which appear on every printed page and in
+ *     Print Preview, and are the only marks that survive to paper.
+ *
+ * A missing canvas costs the background and nothing else; the print marks are
+ * plain strings and always apply.
+ */
+function brandWorkbook(workbook: Workbook): void {
+  const tile = watermarkTilePng();
+  const imageId = tile ? workbook.addImage({ base64: tile, extension: 'png' }) : null;
+
+  const header = `&C&"Calibri,Bold"&11&K0F7B3F${BRANDING.name}`;
+  const footer =
+    `&L&"Calibri,Regular"&8&K808080${BRANDING.site}` +
+    `&C&"Calibri,Regular"&8&K808080Page &P of &N` +
+    `&R&"Calibri,Regular"&8&K808080${BRANDING.poweredBy}`;
+
+  workbook.eachSheet((sheet) => {
+    if (imageId !== null) sheet.addBackgroundImage(imageId);
+    sheet.headerFooter = { oddHeader: header, oddFooter: footer };
+  });
+}
 
 /** Bold reversed header, frozen so it stays put on a long candidate list. */
 function styleHeader(sheet: Worksheet, columnCount: number): void {
@@ -412,6 +446,11 @@ function addSummarySheet(workbook: Workbook, input: ResultsExportInput): void {
     ['Failed', counts.failed],
     ['Pending', counts.pending],
     ['Average overall score', percentCell(average), PERCENT_FORMAT],
+    // Provenance in plain cells. The watermark and print footer both live in
+    // sheet chrome, which a copy-paste into another workbook leaves behind;
+    // these rows travel with the data.
+    ['Issued by', `${BRANDING.name} — ${BRANDING.site}`],
+    ['Attribution', BRANDING.poweredBy],
   ];
 
   for (const [field, value, numFmt] of entries) {
