@@ -1,10 +1,9 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
-import { useRbac } from '@/hooks/useRbac';
 import { Layout } from '@/components/layout/Layout';
 import { ExamLayout } from '@/components/layout/ExamLayout';
 import { InterviewLayout } from '@/components/layout/InterviewLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { PublicOnlyRoute } from '@/components/auth/PublicOnlyRoute';
 import { ROUTES } from '@/config/routes';
 
 // Auth pages
@@ -58,29 +57,37 @@ import { ForbiddenPage } from '@/pages/errors/ForbiddenPage';
 import { UnauthorizedPage } from '@/pages/errors/UnauthorizedPage';
 
 function App() {
-  const { isAuthenticated } = useAuth();
-  const { hasAnyRole } = useRbac();
-
-  const getDefaultDashboard = () => {
-    if (hasAnyRole(['ADMIN', 'SUPER_ADMIN'])) return ROUTES.ADMIN.DASHBOARD;
-    return ROUTES.CANDIDATE.DASHBOARD;
-  };
-
   return (
     <Routes>
-      {/* Public routes */}
-      <Route path={ROUTES.PUBLIC.HOME} element={<HomePage />} />
+      {/* Public routes. Home is signed-out only — a logged-in user landing on
+          "/" goes straight to the dashboard for their role. */}
+      <Route
+        path={ROUTES.PUBLIC.HOME}
+        element={
+          <PublicOnlyRoute>
+            <HomePage />
+          </PublicOnlyRoute>
+        }
+      />
       <Route path={ROUTES.PUBLIC.ABOUT} element={<AboutPage />} />
       <Route path={ROUTES.PUBLIC.CONTACT} element={<ContactPage />} />
       <Route path="/mobile-connect" element={<MobileConnect />} />
       {/* Auth routes (redirect if already authenticated) */}
       <Route
         path={ROUTES.PUBLIC.LOGIN}
-        element={isAuthenticated ? <Navigate to={getDefaultDashboard()} /> : <LoginPage />}
+        element={
+          <PublicOnlyRoute>
+            <LoginPage />
+          </PublicOnlyRoute>
+        }
       />
       <Route
         path={ROUTES.PUBLIC.REGISTER}
-        element={isAuthenticated ? <Navigate to={getDefaultDashboard()} /> : <RegisterPage />}
+        element={
+          <PublicOnlyRoute>
+            <RegisterPage />
+          </PublicOnlyRoute>
+        }
       />
       <Route path={ROUTES.PUBLIC.FORGOT_PASSWORD} element={<ForgotPasswordPage />} />
       <Route path={ROUTES.PUBLIC.RESET_PASSWORD} element={<ResetPasswordPage />} />

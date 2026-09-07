@@ -10,7 +10,7 @@ import { MESSAGES } from '@/config/messages';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Logo } from '@/components/ui/Logo';
-import { ROUTES } from '@/config/routes';
+import { ROUTES, resolvePostLoginPath } from '@/config/routes';
 import { loginSchema } from '@/config/validation';
 
 type LoginFormValues = z.infer<typeof loginSchema>;
@@ -41,17 +41,7 @@ export function LoginPage() {
     try {
       const { roles: loadedRoles } = await login({ email: data.email, password: data.password });
       showToast(MESSAGES.auth.loginSuccess, 'success');
-
-      if (from) {
-        navigate(from, { replace: true });
-        return;
-      }
-
-      if (loadedRoles.includes('ADMIN') || loadedRoles.includes('SUPER_ADMIN')) {
-        navigate(ROUTES.ADMIN.DASHBOARD, { replace: true });
-      } else {
-        navigate(ROUTES.CANDIDATE.DASHBOARD, { replace: true });
-      }
+      navigate(resolvePostLoginPath(loadedRoles, from), { replace: true });
     } catch {
       // Error toast auto-handled by interceptor
     }

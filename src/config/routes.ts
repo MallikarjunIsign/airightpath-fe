@@ -64,3 +64,39 @@ export function applyJobPath(jobPrefix: string): string {
 export function applyJobUrl(jobPrefix: string): string {
   return `${window.location.origin}${applyJobPath(jobPrefix)}`;
 }
+
+/**
+ * The route a signed-in user belongs on when no specific destination was asked
+ * for — after login, or when they land on a public/auth-only page. Admins get
+ * the admin dashboard, everyone else the candidate one.
+ */
+export function getDefaultDashboard(roles: readonly string[]): string {
+  const isAdmin = roles.some((r) => r === 'ADMIN' || r === 'SUPER_ADMIN');
+  return isAdmin ? ROUTES.ADMIN.DASHBOARD : ROUTES.CANDIDATE.DASHBOARD;
+}
+
+/** Routes a signed-in user must never be redirected back onto. */
+const AUTH_ONLY_PATHS: readonly string[] = [
+  ROUTES.PUBLIC.HOME,
+  ROUTES.PUBLIC.LOGIN,
+  ROUTES.PUBLIC.REGISTER,
+  ROUTES.PUBLIC.FORGOT_PASSWORD,
+  ROUTES.PUBLIC.RESET_PASSWORD,
+  ROUTES.ERRORS.UNAUTHORIZED,
+  ROUTES.ERRORS.FORBIDDEN,
+];
+
+/**
+ * Where to send a user after they sign in: back to the page that bounced them
+ * to login, or their role's dashboard. `from` is ignored when it points at an
+ * auth page, which would otherwise bounce them straight back to login.
+ */
+export function resolvePostLoginPath(
+  roles: readonly string[],
+  from?: string | null
+): string {
+  if (from && from.startsWith('/') && !AUTH_ONLY_PATHS.includes(from.split('?')[0])) {
+    return from;
+  }
+  return getDefaultDashboard(roles);
+}
