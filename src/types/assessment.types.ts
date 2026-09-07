@@ -1,3 +1,24 @@
+/**
+ * One assignment as `/api/assessments/by-job-prefix` returns it: the grading
+ * facts only, without the question paper or answer key the full `Assessment`
+ * carries. A structural subset of {@link Assessment}, so the helpers that read
+ * pass marks and assignment times accept either.
+ */
+export interface AssessmentSummary {
+  id: number;
+  assessmentType: 'APTITUDE' | 'CODING';
+  candidateEmail: string;
+  jobPrefix: string;
+  /** Absent on rows assigned before the column existed; callers default it. */
+  passPercentage?: number;
+  assignedAt?: string;
+  startTime?: string;
+  deadline?: string;
+  examStartedAt?: string;
+  examAttended: boolean;
+  expired: boolean;
+}
+
 export interface Assessment {
   id: number;
   assessmentType: 'APTITUDE' | 'CODING';

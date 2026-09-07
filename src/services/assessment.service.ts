@@ -2,7 +2,7 @@ import api from './api.service';
 import { ENDPOINTS } from '@/config/api.endpoints';
 import { APP_CONFIG } from '@/config/app.config';
 import type { ApiResponse } from '@/types/api.types';
-import type { Assessment, AssignAssessmentDto, AssessmentResult, RawQuestion, RawCodingQuestion } from '@/types/assessment.types';
+import type { Assessment, AssessmentSummary, AssignAssessmentDto, AssessmentResult, RawQuestion, RawCodingQuestion } from '@/types/assessment.types';
 import type { Result } from '@/types/result.types';
 
 export const assessmentService = {
@@ -65,6 +65,23 @@ export const assessmentService = {
   getAllAssessmentsForCandidate(email: string, opts?: { silent?: boolean }) {
     return api.get<Assessment[]>(ENDPOINTS.ASSESSMENTS.GET_ASSESSMENTS, {
       params: { candidateEmail: email },
+      _skipErrorToast: opts?.silent,
+    });
+  },
+
+  /**
+   * Every assignment on a job, in one request.
+   *
+   * The per-candidate lookup above is the only other route to a paper's pass
+   * mark and exam window, so reviewing a job's results meant one request per
+   * candidate — 500 of them for a 500-candidate intake, all before the table
+   * could grade its first row. This answers for the whole cohort at once, and
+   * returns projections rather than entities so a reviewer is not sent every
+   * question paper on the job to display a pass mark.
+   */
+  getAssessmentsByJobPrefix(jobPrefix: string, opts?: { silent?: boolean }) {
+    return api.get<AssessmentSummary[]>(ENDPOINTS.ASSESSMENTS.GET_ASSESSMENTS_BY_JOB_PREFIX, {
+      params: { jobPrefix },
       _skipErrorToast: opts?.silent,
     });
   },

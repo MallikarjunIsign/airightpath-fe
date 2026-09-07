@@ -63,6 +63,10 @@ export const ENDPOINTS = {
     // Every assessment for a candidate, attended ones included. What review
     // screens need, since an attempt worth reviewing is attended by definition.
     GET_ASSESSMENTS: "/api/getAssessments",
+    // Every assignment on a job in one response, as slim projections (no
+    // question paper, no answer key). GET_ASSESSMENTS filters by candidate
+    // only, so reviewing a job used to cost one request per candidate.
+    GET_ASSESSMENTS_BY_JOB_PREFIX: "/api/assessments/by-job-prefix",
     SUBMIT: (id: number) => `/api/submit/${id}`,
     MARK_ATTENDED: "/api/markExamAttended",
     SAVE_RESULT: "/api/result",

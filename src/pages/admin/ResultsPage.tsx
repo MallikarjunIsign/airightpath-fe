@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Pagination } from '@/components/ui/Pagination';
 import { BackLink } from '@/components/ui/BackLink';
 import { ROUTES } from '@/config/routes';
 import { jobService } from '@/services/job.service';
@@ -59,7 +60,7 @@ import {
   DEFAULT_PASS_PERCENTAGE,
 } from '@/utils/result.utils';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
-import type { RawCodingQuestion } from '@/types/assessment.types';
+import type { AssessmentSummary, RawCodingQuestion } from '@/types/assessment.types';
 import type { Result, AptitudeAnswer, CodingAnswer } from '@/types/result.types';
 import type { CodeSubmissionResponse } from '@/types/compiler.types';
 
@@ -84,6 +85,14 @@ const STATUS_FILTER_OPTIONS: { value: StatusFilter; label: string }[] = [
   { value: 'FAILED', label: 'Failed' },
   { value: 'PARTIAL', label: 'Pending' },
 ];
+
+/**
+ * Rows per page. A job's results arrive in one payload, so this paginates the
+ * rendering rather than the fetch — 25 rows keeps the table readable and stops
+ * a large intake from mounting hundreds of score cells at once.
+ */
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+const DEFAULT_PAGE_SIZE = 25;
 
 /** What one candidate's assessments on the selected job tell us. */
 interface CandidateAssignment {
@@ -194,6 +203,9 @@ export function ResultsPage() {
   /** Submission-date bounds as `YYYY-MM-DD`; '' means that end is open. */
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  /** Pagination. The size is worth remembering across a reload; the page is not. */
+  const [pageSize, setPageSize] = usePersistentState('results:pageSize', DEFAULT_PAGE_SIZE);
+  const [page, setPage] = useState(1);
   /** Discards a slow coding lookup that lands after the job selection moved on. */
   const codingFetchToken = useRef(0);
 
@@ -279,7 +291,7 @@ export function ResultsPage() {
    * real zero and has to pull the average down. Only a candidate with no coding
    * assessment at all is genuinely unscoreable.
    *
-   * Assignments are per candidate, hence one lookup each; the paper is fetched
+   * Assignments arrive for the whole job in one request; the paper is fetched
    * once, because every candidate on a job sits the same one. That assumption
    * is verified per row before the paper is used — see `paperUsable` below — so
    * a job where it does not hold degrades to "no score" rather than a wrong one.
@@ -290,51 +302,67 @@ export function ResultsPage() {
     setCodingAssigned(new Set());
     setAssignments(new Map());
 
-    const emails = Array.from(
-      new Set(
-        [...rows.map((r) => r.candidateEmail), ...submissions.map((s) => s.userEmail ?? '')].filter(
-          Boolean,
-        ),
+    const emails = new Set(
+      [...rows.map((r) => r.candidateEmail), ...submissions.map((s) => s.userEmail ?? '')].filter(
+        Boolean,
       ),
     );
-    if (emails.length === 0) return;
+    if (emails.size === 0) return;
 
-    // Silent: one unreachable candidate should cost that row its coding score,
-    // not stack a red toast per candidate over the table.
-    const assigned = await Promise.all(
-      emails.map(async (email): Promise<CandidateAssignment | null> => {
-        try {
-          const res = await assessmentService.getAllAssessmentsForCandidate(email, { silent: true });
-          const mine = orderedAssessments(
-            toAssessmentList(res.data).filter((a) => a.jobPrefix === selectedPrefix),
-          );
-          // The last of each type, not the first. This table scores the latest
-          // attempt, so reading the paper, the pass mark and the exam window off
-          // the original assignment graded a re-sit against the wrong paper —
-          // and put the table at odds with the detail page for the same person.
-          const codingAssessments = mine.filter((a) => a.assessmentType === 'CODING');
-          const aptitudeAssessments = mine.filter((a) => a.assessmentType === 'APTITUDE');
-          const coding = codingAssessments[codingAssessments.length - 1];
-          const aptitude = aptitudeAssessments[aptitudeAssessments.length - 1];
-          // Returned even with no coding paper: the pass marks are wanted either
-          // way, and dropping the row would grade aptitude against the default.
-          return {
-            email,
-            codingId: coding?.id,
-            hasCoding: !!coding,
-            aptitudePassMark: passMarkOf(aptitude),
-            codingPassMark: passMarkOf(coding),
-            aptitudeStart: aptitude?.startTime,
-            codingStart: coding?.startTime,
-          };
-        } catch {
-          return null;
-        }
-      }),
-    );
+    // One request for the whole cohort. This used to be a lookup per candidate,
+    // because the only endpoint available filtered by candidate email — a job
+    // with 500 candidates opened 500 connections before a single row could be
+    // graded. Silent: a failure here costs the table its pass marks, which the
+    // rows below degrade around, and is not worth a toast over the results.
+    let assignmentRows: AssessmentSummary[];
+    try {
+      const res = await assessmentService.getAssessmentsByJobPrefix(selectedPrefix, {
+        silent: true,
+      });
+      assignmentRows = toAssessmentList<AssessmentSummary>(res.data);
+    } catch {
+      return;
+    }
     if (token !== codingFetchToken.current) return;
 
-    const found = assigned.filter((a): a is CandidateAssignment => a !== null);
+    // Group per candidate, then take the last of each type — not the first.
+    // This table scores the latest attempt, so reading the paper, the pass mark
+    // and the exam window off the original assignment graded a re-sit against
+    // the wrong paper, and put the table at odds with the detail page for the
+    // same person.
+    const byCandidate = new Map<string, AssessmentSummary[]>();
+    for (const assessment of assignmentRows) {
+      const email = assessment.candidateEmail;
+      // The endpoint is scoped to the job already; the guard keeps the grouping
+      // honest if that ever stops being true.
+      if (!email || assessment.jobPrefix !== selectedPrefix) continue;
+      const list = byCandidate.get(email);
+      if (list) list.push(assessment);
+      else byCandidate.set(email, [assessment]);
+    }
+
+    // Keyed off the results, not the assignments: a candidate with a result and
+    // no assignment row still needs an entry, or their paper would be graded to
+    // the default bar with no record of why.
+    const found = Array.from(emails, (email): CandidateAssignment => {
+      const mine = orderedAssessments(byCandidate.get(email) ?? []);
+      const codingAssessments = mine.filter((a) => a.assessmentType === 'CODING');
+      const aptitudeAssessments = mine.filter((a) => a.assessmentType === 'APTITUDE');
+      const coding = codingAssessments[codingAssessments.length - 1];
+      const aptitude = aptitudeAssessments[aptitudeAssessments.length - 1];
+      // Returned even with no coding paper: the pass marks are wanted either
+      // way, and dropping the row would grade aptitude against the default.
+      return {
+        email,
+        codingId: coding?.id,
+        hasCoding: !!coding,
+        aptitudePassMark: passMarkOf(aptitude),
+        codingPassMark: passMarkOf(coding),
+        aptitudeStart: aptitude?.startTime,
+        codingStart: coding?.startTime,
+      };
+    });
+
     setCodingAssigned(new Set(found.filter((a) => a.hasCoding).map((a) => a.email)));
     setAssignments(new Map(found.map((a) => [a.email, a])));
 
@@ -558,6 +586,34 @@ export function ResultsPage() {
   const filtersActive =
     statusFilter !== 'ALL' || searchTerm.trim() !== '' || dateFrom !== '' || dateTo !== '';
 
+  // ── Pagination ───────────────────────────────────────────────────────
+  const totalPages = Math.max(1, Math.ceil(visibleRows.length / pageSize));
+
+  // A new job or a narrower filter changes what page 1 even means, so go back
+  // to the top rather than leaving the user on a page that no longer exists —
+  // otherwise a filter that matches 8 rows looks empty from page 3.
+  useEffect(() => {
+    setPage(1);
+  }, [selectedPrefix, searchTerm, statusFilter, dateFrom, dateTo, pageSize]);
+
+  // Guards the same overrun from the other direction: results reloading in
+  // place can shrink the list without any filter having been touched.
+  useEffect(() => {
+    if (page > totalPages) setPage(1);
+  }, [page, totalPages]);
+
+  /** The slice actually rendered. Stats and the Excel export stay on the full
+   *  filtered set — a page is a view of the data, not a narrowing of it. */
+  const pagedRows = useMemo(
+    () => visibleRows.slice((page - 1) * pageSize, page * pageSize),
+    [visibleRows, page, pageSize]
+  );
+
+  const pageSizeOptions = useMemo(
+    () => PAGE_SIZE_OPTIONS.map((size) => ({ value: String(size), label: String(size) })),
+    []
+  );
+
   /** Both ends set the wrong way round can only ever match nothing — say so. */
   const dateRangeInverted = !!dateFrom && !!dateTo && dateFrom > dateTo;
 
@@ -602,8 +658,8 @@ export function ResultsPage() {
   ];
 
   /**
-   * Exports exactly what the table is showing — the filtered rows, so a figure
-   * in the workbook can always be traced back to a row on screen. The filter is
+   * Exports every filtered row, not just the page on screen — pagination is a
+   * way of reading the table, not a narrowing of the data behind it. The filter is
    * written into the Summary sheet: a partial export that does not say it is
    * partial is the one way this file could mislead someone reading it later.
    * The clock is read here rather than inside the builder to keep that pure.
@@ -798,7 +854,7 @@ export function ResultsPage() {
                       full email address — cannot be read on a phone, and the
                       overall score matters more than any of them, so it leads. */}
                   <div className="lg:hidden space-y-3">
-                    {visibleRows.map((row) => (
+                    {pagedRows.map((row) => (
                       <div
                         key={row.email}
                         className="rounded-2xl border border-[var(--borderMuted,var(--border))] bg-[var(--cardBg)] p-4 space-y-3"
@@ -862,7 +918,7 @@ export function ResultsPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {visibleRows.map((row) => (
+                        {pagedRows.map((row) => (
                           <TableRow key={row.email}>
                             <TableCell className="font-medium align-top break-all">
                               {row.email}
@@ -900,6 +956,16 @@ export function ResultsPage() {
                       </TableBody>
                     </Table>
                   </div>
+
+                  <ResultsPager
+                    page={page}
+                    totalPages={totalPages}
+                    pageSize={pageSize}
+                    totalRows={visibleRows.length}
+                    pageSizeOptions={pageSizeOptions}
+                    onPageChange={setPage}
+                    onPageSizeChange={setPageSize}
+                  />
                 </>
               )}
             </CardContent>
@@ -912,6 +978,66 @@ export function ResultsPage() {
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────
+
+/**
+ * Table footer: the range caption and rows-per-page control on the left, the
+ * pager on the right.
+ *
+ * The caption is rendered here rather than by `Pagination`'s own `totalItems`
+ * prop because that pager hides itself entirely on a single page — the count
+ * has to survive when the arrows do not, so an admin looking at 12 results is
+ * still told there are 12.
+ */
+function ResultsPager({
+  page,
+  totalPages,
+  pageSize,
+  totalRows,
+  pageSizeOptions,
+  onPageChange,
+  onPageSizeChange,
+}: {
+  page: number;
+  totalPages: number;
+  pageSize: number;
+  totalRows: number;
+  pageSizeOptions: { value: string; label: string }[];
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (size: number) => void;
+}) {
+  const first = (page - 1) * pageSize + 1;
+  const last = Math.min(page * pageSize, totalRows);
+
+  return (
+    <div className="mt-4 pt-4 border-t border-[var(--borderMuted,var(--border))] flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+      <div className="flex items-center gap-3 flex-wrap">
+        <p className="text-sm text-[var(--textSecondary)] tabular-nums">
+          Showing {first}-{last} of {totalRows} candidate{totalRows === 1 ? '' : 's'}
+        </p>
+        {/* Only worth offering once there is more than one page's worth. */}
+        {totalRows > PAGE_SIZE_OPTIONS[0] && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-[var(--textSecondary)] whitespace-nowrap">
+              Rows per page
+            </span>
+            <div className="w-20">
+              <Select
+                options={pageSizeOptions}
+                value={String(pageSize)}
+                onChange={(e) => onPageSizeChange(Number(e.target.value))}
+                aria-label="Rows per page"
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Renders nothing at all on a single page — the caption above still
+          reports the count, so the footer never goes silent. */}
+      <Pagination currentPage={page} totalPages={totalPages} onPageChange={onPageChange} />
+    </div>
+  );
+}
 
 function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
   return (

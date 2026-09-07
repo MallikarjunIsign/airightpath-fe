@@ -12,11 +12,15 @@ import type { Assessment } from '@/types/assessment.types';
  * envelope, and calling `.filter` on the wrapper throws — which reads to the
  * caller as "this candidate has no assessments" rather than as a shape it
  * failed to unwrap.
+ *
+ * Generic so the slimmer `AssessmentSummary` rows from the by-job-prefix
+ * endpoint unwrap through the same helper; defaults to `Assessment`, so every
+ * existing caller reads exactly as before.
  */
-export function toAssessmentList(body: unknown): Assessment[] {
-  if (Array.isArray(body)) return body as Assessment[];
+export function toAssessmentList<T = Assessment>(body: unknown): T[] {
+  if (Array.isArray(body)) return body as T[];
   const inner = (body as { data?: unknown })?.data;
-  return Array.isArray(inner) ? (inner as Assessment[]) : [];
+  return Array.isArray(inner) ? (inner as T[]) : [];
 }
 
 /**

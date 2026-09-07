@@ -116,6 +116,7 @@ Both are slow (`gpt-4o`); the client allows 330 s.
 | PATCH | `/api/assessments/{id}/schedule` | `ASSESSMENT_ASSIGN` | 1 |
 | GET | `/api/getCandidateAssessments/{candidateEmail}` | auth | 1 — pending only (expired and attended filtered out) |
 | GET | `/api/getAssessments?candidateEmail=` | auth | 1 — everything, attended included |
+| GET | `/api/assessments/by-job-prefix?jobPrefix=` | `JOB_APPLICATION_READ_ALL` | 1 — whole job, slim projection |
 | GET | `/api/fetchAssessment/{id}` | auth | 1 |
 | GET | `/api/assessments/{id}/content` | auth | 1 |
 | GET | `/api/assessment-content/{id}` | auth | 1 |
@@ -127,6 +128,14 @@ Both are slow (`gpt-4o`); the client allows 330 s.
 | GET | `/api/get-results?email=&jobPrefix=` | auth | 1 |
 | GET | `/api/get-results-by-job-prefix?jobPrefix=` | `JOB_APPLICATION_READ_ALL` | 1 |
 | GET | `/api/get-results-by-id/{id}` | auth | 1 |
+
+`GET /api/assessments/by-job-prefix` returns every assignment on a job as
+`AssessmentSummaryDTO` — id, candidateEmail, assessmentType, jobPrefix,
+passPercentage, assignedAt, startTime, deadline, examStartedAt, examAttended,
+expired — ordered oldest first per candidate. It deliberately omits
+`questionPaper` (TEXT) and `answerKey` (BLOB): the reviewer screens that call it
+want pass marks and exam windows, not papers. Use it instead of one
+`getAssessments?candidateEmail=` per candidate when grading a whole cohort.
 
 `POST /api/result` takes the answer JSON as the **body** and
 `candidateEmail`, `assessmentType`, `score`, `jobPrefix`, `assessmentId`,
