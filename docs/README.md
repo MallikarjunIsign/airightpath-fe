@@ -17,9 +17,18 @@ The product is described in two levels, and the docs follow that split:
 | --- | --- | --- |
 | **[AIRightpath-Technical-Reference.md](AIRightpath-Technical-Reference.md)** | Markdown, single file | The whole system in one document — handover, review, or reading end to end |
 | **[airightpath-technical-reference.html](airightpath-technical-reference.html)** | Designed web page | The same content, published as a navigable artifact for sharing |
+| **[AIRightpath-Data-Flow.md](AIRightpath-Data-Flow.md)** | Markdown + Mermaid | Eight block diagrams, including a login-to-result walkthrough from both the recruiter's and candidate's side |
+| **[AIRightpath-Data-Flow.doc](AIRightpath-Data-Flow.doc)** | Word (~1.5 MB) | The data-flow diagrams alone, as one file to attach and send — cover page, all eight diagrams rendered as images |
+| **[AIRightpath-Technical-Documentation.doc](AIRightpath-Technical-Documentation.doc)** | Word (~1.6 MB) | Everything above in one file to attach and send — cover page, both parts, all eight diagrams rendered as images |
 
 The modular set below is the same material split by topic. Edit whichever suits
 the change, then mirror it into the other two — see *Keeping these docs current*.
+
+> Both `.doc` files are **generated**, not hand-edited. They are built from
+> `AIRightpath-Technical-Reference.md` and `AIRightpath-Data-Flow.md`, with the
+> Mermaid diagrams rendered to images through a headless browser. Edit the
+> markdown and ask for a rebuild; edits made inside Word are lost on the next
+> one.
 
 ## Index
 
@@ -56,6 +65,7 @@ Use this table to decide where an update goes.
 
 | If you changed… | Update |
 | --- | --- |
+| How data moves between components or stores | [AIRightpath-Data-Flow.md](AIRightpath-Data-Flow.md) |
 | A REST endpoint or WS destination | [06-api-reference.md](06-api-reference.md) — and `src/config/api.endpoints.ts` on the client |
 | An entity, column or enum | [07-data-model.md](07-data-model.md) |
 | A permission, role or auth rule | [08-security-rbac.md](08-security-rbac.md) |
