@@ -12,6 +12,10 @@ export const ENDPOINTS = {
   },
   USERS: {
     GET_ALL: "/api/users",
+    // Staff accounts — anyone holding ADMIN or SUPER_ADMIN. GET_ALL above
+    // deliberately excludes them, so these are the two halves of the roster.
+    GET_STAFF: "/api/users/staff",
+    CREATE_STAFF: "/api/users/staff",
     GET_BY_EMAIL: (email: string) => `/api/profile-details/${email}`,
     UPDATE: (email: string) => `/api/update/${email}`,
     ACTIVATE: "/api/updateActive",

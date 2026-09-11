@@ -51,6 +51,8 @@ import { formatTimer } from '@/utils/format.utils';
 import { computeExamMinutes } from '@/utils/exam-duration.utils';
 import { LANGUAGE_SKELETONS, isSkeletonCode } from '@/utils/code.utils';
 import { buildSubmissionMeta } from '@/utils/result.utils';
+// Shared with Test Mode's rehearsal of this screen — see exam-question.utils.ts.
+import { normalizeCodingQuestions } from '@/utils/exam-question.utils';
 import { isTestCaseRevealed, openTestCaseCount } from '@/config/coding-exam.config';
 import {
   errorKind,
@@ -61,6 +63,7 @@ import {
   statusTone,
 } from '@/utils/compiler.utils';
 import type { Assessment, CodingQuestion, RawCodingQuestion } from '@/types/assessment.types';
+
 import type { CodeSubmissionResponse, CodeErrorInfo } from '@/types/compiler.types';
 
 // ── Constants ────────────────────────────────────────────────────────
@@ -78,18 +81,6 @@ const MONACO_LANG_MAP: Record<string, string> = {
 // attempted/not-attempted with that copy while the exam offered this one, so
 // any drift between the two would score a candidate against a template they
 // were never shown. One source now, imported below.
-
-function normalizeCodingQuestions(raw: RawCodingQuestion[]): CodingQuestion[] {
-  return raw.map((q, idx) => ({
-    id: typeof q.id === 'string' ? idx + 1 : (q.id ?? idx + 1),
-    title: q.title || `Problem ${idx + 1}`,
-    description: q.description || q.question || '',
-    sampleInput: q.sampleInput,
-    sampleOutput: q.sampleOutput,
-    testCases: q.testCases,
-    marks: q.marks,
-  }));
-}
 
 type QuestionStatus = 'not_started' | 'in_progress' | 'saved' | 'submitted';
 

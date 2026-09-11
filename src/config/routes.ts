@@ -29,6 +29,16 @@ export const ROUTES = {
     PROMPTS: '/admin/prompts',
     PROFILE: '/admin/profile',
     CHANGE_PASSWORD: '/admin/change-password',
+    /**
+     * Test Mode — a sandbox that replays the candidate experience for each
+     * assessment and interview stage. Everything it does lives in React state
+     * and is gone on refresh; nothing is written to the backend.
+     */
+    TEST_MODE: '/admin/test-mode',
+    TEST_MODE_APTITUDE: '/admin/test-mode/aptitude',
+    TEST_MODE_CODING: '/admin/test-mode/coding',
+    TEST_MODE_INTERVIEW_TECHNICAL: '/admin/test-mode/interview/technical',
+    TEST_MODE_INTERVIEW_BEHAVIORAL: '/admin/test-mode/interview/behavioral',
   },
   CANDIDATE: {
     DASHBOARD: '/candidate/dashboard',

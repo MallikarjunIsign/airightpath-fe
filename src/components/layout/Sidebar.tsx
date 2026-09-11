@@ -15,23 +15,45 @@ import {
   Video,
   Menu,
   PanelLeftClose,
+  FlaskConical,
+  ChevronDown,
   X,
 } from "lucide-react";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { usePendingAssessments } from "@/contexts/PendingAssessmentsContext";
 import { useRbac } from "@/hooks/useRbac";
 import { ROUTES } from "@/config/routes";
+import { TEST_MODE_GROUPS, testModesInGroup } from "@/config/test-mode";
 import { Badge } from "../ui/Badge";
 import { Logo } from "../ui/Logo";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+/**
+ * A leaf under an expandable parent. Grouped by an optional heading so one
+ * submenu can carry two labelled sets — Test Mode splits its four screens into
+ * Assessments and Interview without needing a third level of nesting, which a
+ * 264px rail cannot show legibly.
+ */
+interface NavChild {
+  label: string;
+  path: string;
+  /** Heading rendered above this child when it differs from the previous one. */
+  group?: string;
+}
+
 interface NavItem {
   label: string;
   icon: React.ReactNode;
   path: string;
   badge?: string;
+  /**
+   * Present on parents that expand rather than navigate straight to a leaf.
+   * The parent's own `path` is still a real page — a hub listing the children —
+   * so clicking the label is never a dead end.
+   */
+  children?: NavChild[];
   /**
    * Marks the item that carries the outstanding-assessment count. Kept as a
    * flag on the item rather than a path comparison at render time so the
@@ -104,6 +126,21 @@ const adminNavItems: NavItem[] = [
     label: "Bulk ATS Check",
     icon: <Layers size={18} />,
     path: ROUTES.ADMIN.ATS_BATCH,
+  },
+  {
+    // Rehearses the candidate side of each exam and interview stage. Like Bulk
+    // ATS Check above it, it writes nothing — see config/test-mode.ts.
+    label: "Test Mode",
+    icon: <FlaskConical size={18} />,
+    path: ROUTES.ADMIN.TEST_MODE,
+    children: TEST_MODE_GROUPS.flatMap((group) =>
+      testModesInGroup(group).map((mode, index) => ({
+        label: mode.label,
+        path: mode.path,
+        // Only the first of each group carries the heading.
+        group: index === 0 ? group : undefined,
+      })),
+    ),
   },
   {
     label: "User Management",
@@ -195,12 +232,43 @@ interface SidebarProps {
 export function Sidebar({ environment = "prod" }: SidebarProps) {
   const { collapsed, toggle, mobileOpen, closeMobile, isMobile } = useSidebar();
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
+  /**
+   * Which expandable parents are open. Deliberately not persisted: the branch
+   * containing the current page opens itself below, which is the only state a
+   * returning user actually wants restored.
+   */
+  const [openGroups, setOpenGroups] = useState<string[]>([]);
   const location = useLocation();
   const { hasAnyRole } = useRbac();
   const { pending } = usePendingAssessments();
 
   const isAdmin = hasAnyRole(["ADMIN", "SUPER_ADMIN"]);
   const navItems = isAdmin ? adminNavItems : candidateNavItems;
+
+  /** True while the current page is the parent itself or any of its children. */
+  const containsActiveRoute = useCallback(
+    (item: NavItem) =>
+      location.pathname === item.path ||
+      location.pathname.startsWith(`${item.path}/`) ||
+      (item.children?.some((child) => location.pathname === child.path) ?? false),
+    [location.pathname],
+  );
+
+  // Open the branch the current page lives in. Runs on navigation rather than
+  // once on mount, so deep-linking to a child arrives with its parent already
+  // expanded instead of the page appearing to sit outside the menu.
+  useEffect(() => {
+    const active = navItems.find((item) => item.children && containsActiveRoute(item));
+    if (active) {
+      setOpenGroups((prev) => (prev.includes(active.path) ? prev : [...prev, active.path]));
+    }
+  }, [navItems, containsActiveRoute]);
+
+  const toggleGroup = useCallback((path: string) => {
+    setOpenGroups((prev) =>
+      prev.includes(path) ? prev.filter((p) => p !== path) : [...prev, path],
+    );
+  }, []);
 
   // Keyboard shortcut: [ to toggle sidebar
   const handleKeyDown = useCallback(
@@ -317,11 +385,16 @@ export function Sidebar({ environment = "prod" }: SidebarProps) {
           {navItems.map((item) => {
             const isActive = location.pathname === item.path;
             const pendingCount = item.showsPendingAssessments ? pending.length : 0;
+            // Children are only reachable while the rail shows labels. Collapsed,
+            // the parent still navigates to its hub, which lists the same links.
+            const hasChildren = !!item.children?.length && isExpanded;
+            const isOpen = openGroups.includes(item.path);
             return (
               <li
                 key={item.path}
                 className={`relative ${!isExpanded ? "flex justify-center w-full" : ""}`}
               >
+                <div className={hasChildren ? "flex items-center gap-0.5" : ""}>
                 <Link
                   to={item.path}
                   onClick={closeMobile}
@@ -389,6 +462,64 @@ export function Sidebar({ environment = "prod" }: SidebarProps) {
                     </span>
                   )}
                 </Link>
+
+                {/* Separate from the Link so the label still navigates to the
+                    hub — expanding a menu and opening its landing page are two
+                    different intents and both are worth keeping. */}
+                {hasChildren && (
+                  <button
+                    onClick={() => toggleGroup(item.path)}
+                    aria-expanded={isOpen}
+                    aria-label={`${isOpen ? "Collapse" : "Expand"} ${item.label}`}
+                    className="
+                      flex-shrink-0 p-1.5 rounded-lg
+                      text-[var(--sidebarText)] hover:text-[var(--sidebarTextHover,var(--text))]
+                      hover:bg-[var(--sidebarItemHover,var(--bgOverlay,var(--surface1)))]
+                      transition-colors
+                    "
+                  >
+                    <ChevronDown
+                      size={14}
+                      className={`transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+                    />
+                  </button>
+                )}
+                </div>
+
+                {hasChildren && isOpen && (
+                  <ul className="mt-0.5 mb-1 ml-5 pl-3 border-l border-[var(--sidebarBorder,var(--border))] space-y-0.5">
+                    {item.children!.map((child) => {
+                      const childActive = location.pathname === child.path;
+                      return (
+                        <li key={child.path}>
+                          {/* Group heading, not a link: it names the pair below
+                              it rather than going anywhere itself. */}
+                          {child.group && (
+                            <p className="px-2 pt-2 pb-1 text-[0.6875rem] font-semibold uppercase tracking-wider text-[var(--sidebarText)] opacity-60">
+                              {child.group}
+                            </p>
+                          )}
+                          <Link
+                            to={child.path}
+                            onClick={closeMobile}
+                            className={`
+                              block rounded-xl px-2.5 py-2 text-[0.8125rem] tracking-[-0.01em] truncate
+                              transition-all duration-200
+                              ${
+                                childActive
+                                  ? "sidebar-nav-active text-[var(--sidebarTextActive)] font-semibold"
+                                  : "text-[var(--sidebarText)] hover:text-[var(--sidebarTextHover,var(--text))] font-medium"
+                              }
+                            `}
+                            title={child.label}
+                          >
+                            {child.label}
+                          </Link>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
 
                 {/* Tooltip in collapsed mode */}
                 <NavTooltip

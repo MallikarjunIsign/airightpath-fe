@@ -45,6 +45,13 @@ interface ExamIdentityCheckProps {
   videoRef: React.RefObject<HTMLVideoElement>;
   assessmentId: number;
   candidateEmail: string;
+  /**
+   * False in Test Mode: the photo and room scan are still taken and shown back,
+   * so an admin sees exactly what the candidate sees, but nothing is sent to the
+   * server. A rehearsal must not leave proctoring evidence against a real
+   * assessment id. Defaults to true, so the candidate path is unchanged.
+   */
+  persist?: boolean;
   faceStatus: FaceStatus;
   /**
    * False when face detection is switched off for the environment. The photo is
@@ -67,6 +74,7 @@ export function ExamIdentityCheck({
   videoRef,
   assessmentId,
   candidateEmail,
+  persist = true,
   faceStatus,
   faceCheckEnabled,
   cameraReady,
@@ -123,6 +131,12 @@ export function ExamIdentityCheck({
   // ── Identity photo ─────────────────────────────────────────────────
   const uploadPhoto = useCallback(
     async (blob: Blob) => {
+      // Test Mode stops here: the shot is already on screen, and the only thing
+      // the upload would add is a row nobody asked for.
+      if (!persist) {
+        setStatus('saved');
+        return;
+      }
       setStatus('uploading');
       try {
         await examProctoringService.uploadIdentityPhoto({ assessmentId, candidateEmail, blob });
@@ -135,7 +149,7 @@ export function ExamIdentityCheck({
         setStatus('upload-failed');
       }
     },
-    [assessmentId, candidateEmail, showToast]
+    [assessmentId, candidateEmail, persist, showToast]
   );
 
   const takePhoto = useCallback(async () => {
@@ -197,6 +211,11 @@ export function ExamIdentityCheck({
       return;
     }
 
+    if (!persist) {
+      setScanStatus('done');
+      return;
+    }
+
     setScanStatus('uploading');
     try {
       await examProctoringService.uploadRoomScan({ assessmentId, candidateEmail, frames });
@@ -206,7 +225,7 @@ export function ExamIdentityCheck({
       setScanStatus('failed');
       showToast(MESSAGES.examSetup.roomScanFailed, 'warning');
     }
-  }, [assessmentId, candidateEmail, showToast]);
+  }, [assessmentId, candidateEmail, persist, showToast]);
 
   const startRoomScan = useCallback(() => {
     scanFramesRef.current = [];

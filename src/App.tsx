@@ -29,6 +29,13 @@ import { InterviewSchedulerPage } from '@/pages/admin/InterviewSchedulerPage';
 import { InterviewResultsPage } from '@/pages/admin/InterviewResultsPage';
 import { JobPromptPage } from '@/pages/admin/JobPromptPage';
 
+// Test Mode — admin sandbox that rehearses the candidate journey (see
+// config/test-mode.ts). Nothing these pages do reaches the backend as a write.
+import { TestModeHubPage } from '@/pages/admin/testmode/TestModeHubPage';
+import { TestModeAptitudePage } from '@/pages/admin/testmode/TestModeAptitudePage';
+import { TestModeCodingPage } from '@/pages/admin/testmode/TestModeCodingPage';
+import { TestModeInterviewPage } from '@/pages/admin/testmode/TestModeInterviewPage';
+
 // Candidate pages
 import { CandidateDashboardPage } from '@/pages/candidate/CandidateDashboardPage';
 import { ProfilePage } from '@/pages/candidate/ProfilePage';
@@ -117,6 +124,20 @@ function App() {
         <Route path="interviews/schedule" element={<InterviewSchedulerPage />} />
         <Route path="interviews/results" element={<InterviewResultsPage />} />
         <Route path="prompts" element={<JobPromptPage />} />
+        <Route path="test-mode" element={<TestModeHubPage />} />
+        <Route path="test-mode/aptitude" element={<TestModeAptitudePage />} />
+        <Route path="test-mode/coding" element={<TestModeCodingPage />} />
+        {/* Phase is a prop, not a URL param: only these two phases are
+            rehearsable, and a typo in the path should 404 rather than render an
+            interview with no script. */}
+        <Route
+          path="test-mode/interview/technical"
+          element={<TestModeInterviewPage phase="TECHNICAL" />}
+        />
+        <Route
+          path="test-mode/interview/behavioral"
+          element={<TestModeInterviewPage phase="BEHAVIORAL" />}
+        />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="change-password" element={<ChangePasswordPage />} />
 

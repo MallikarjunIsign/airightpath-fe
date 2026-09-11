@@ -33,36 +33,10 @@ import { ROUTES } from '@/config/routes';
 import { formatTimer } from '@/utils/format.utils';
 import { computeExamMinutes } from '@/utils/exam-duration.utils';
 import { buildSubmissionMeta } from '@/utils/result.utils';
+// Shared with Test Mode's rehearsal of this screen, so the two cannot render the
+// same paper differently. See utils/exam-question.utils.ts.
+import { normalizeAptitudeQuestions as normalizeQuestions } from '@/utils/exam-question.utils';
 import type { Assessment, Question, RawQuestion } from '@/types/assessment.types';
-
-/** Normalise raw BE question (object options, "question" field) → clean UI shape */
-function normalizeQuestions(raw: RawQuestion[]): Question[] {
-  return raw.map((q, idx) => {
-    // Options: BE sends {"A":"text","B":"text"} or legacy ["text","text"]
-    let options: { key: string; text: string }[];
-    if (Array.isArray(q.options)) {
-      options = q.options.map((text, i) => ({
-        key: String.fromCharCode(65 + i),
-        text: String(text),
-      }));
-    } else if (q.options && typeof q.options === 'object') {
-      options = Object.entries(q.options).map(([key, text]) => ({
-        key,
-        text: String(text),
-      }));
-    } else {
-      options = [];
-    }
-
-    return {
-      id: q.id ?? idx + 1,
-      questionText: q.questionText || q.question || '',
-      options,
-      correctAnswer: q.correctAnswer,
-      marks: q.marks,
-    };
-  });
-}
 
 export function AptitudeAssessmentPage() {
   const location = useLocation();

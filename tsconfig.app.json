@@ -13,6 +13,9 @@
     "moduleDetection": "force",
     "noEmit": true,
     "jsx": "react-jsx",
+    /* Test Mode ships its sample question papers as .json, so they stay in the
+       exact shape a user would re-upload. */
+    "resolveJsonModule": true,
 
     /* Path aliases */
     "baseUrl": ".",
