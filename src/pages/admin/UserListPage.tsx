@@ -56,20 +56,13 @@ export function UserListPage() {
   // never both be showing (or both be hidden) at some in-between width.
   const isWide = useMediaQuery(XL_QUERY);
 
-  /**
-   * Admins read this screen; super admins act on it.
-   *
-   * Both writes are SUPER_ADMIN-only server-side, so the controls are hidden
-   * rather than shown-and-refused. An admin arriving here to look someone up
-   * should not have to discover the boundary by clicking a button and reading a
-   * 403 — the screen simply offers what their role can actually do.
-   */
-  const { can } = useRbac();
-  const canManageRoles = can(PERMISSIONS.ROLE_MANAGE);
+  const { can, hasAnyRole } = useRbac();
+  const canCreateStaff = hasAnyRole(['ADMIN', 'SUPER_ADMIN']);
   const canChangeStatus = can(PERMISSIONS.USER_ACTIVATE) && can(PERMISSIONS.USER_DEACTIVATE);
 
   const [users, setUsers] = useState<UsersDto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [searchTerm, setSearchTerm] = usePersistentState('users:searchTerm', '');
   const [togglingEmail, setTogglingEmail] = useState<string | null>(null);
   const [confirmUser, setConfirmUser] = useState<UsersDto | null>(null);
@@ -95,10 +88,12 @@ export function UserListPage() {
    */
   async function fetchUsers() {
     setLoading(true);
+    setLoadFailed(false);
     try {
       const res = await userService.getStaff();
       setUsers(res.data ?? []);
     } catch {
+      setLoadFailed(true);
       // Error toast auto-handled by interceptor
     } finally {
       setLoading(false);
@@ -149,20 +144,12 @@ export function UserListPage() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <Loader2 size={36} className="animate-spin text-[var(--primary)]" />
-      </div>
-    );
-  }
-
   const list = (
     <Card>
       <CardHeader>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <CardTitle>
-            Staff Accounts ({filteredUsers.length})
+            Staff Accounts{!loading && !loadFailed && ` (${filteredUsers.length})`}
           </CardTitle>
           <SearchInput
             onSearch={handleSearch}
@@ -173,15 +160,26 @@ export function UserListPage() {
         </div>
       </CardHeader>
       <CardContent>
-        {filteredUsers.length === 0 ? (
+        {loading ? (
+          <div className="flex items-center justify-center py-16" role="status" aria-label="Loading staff accounts">
+            <Loader2 size={36} className="animate-spin text-[var(--primary)]" />
+          </div>
+        ) : loadFailed ? (
+          <EmptyState
+            icon={<Users size={48} />}
+            title="Unable to load staff accounts"
+            description="Please try again to load the staff list."
+            action={{ label: 'Retry', onClick: fetchUsers }}
+          />
+        ) : filteredUsers.length === 0 ? (
           <EmptyState
             icon={<Users size={48} />}
             title={searchTerm ? 'No matching staff accounts' : 'No staff accounts'}
             description={
               searchTerm
                 ? 'No admin or super admin matches your search. Try a different keyword.'
-                : canManageRoles
-                  ? 'No admin or super admin accounts exist yet. Use "New admin" to create one.'
+                : canCreateStaff
+                  ? 'No admin or super admin accounts exist yet. Use "Add User" to create one.'
                   : 'No admin or super admin accounts exist yet.'
             }
           />
@@ -294,18 +292,17 @@ export function UserListPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-[var(--text)]">User Management</h1>
           <p className="text-[var(--textSecondary)] mt-1">
             Admins and super admins — select a row to see full details. Candidates are managed on
             the Candidates screen.
-            {!canManageRoles && ' Creating accounts and changing roles needs a super admin.'}
           </p>
         </div>
-        {canManageRoles && (
-          <Button variant="primary" leftIcon={<UserPlus size={16} />} onClick={() => setCreating(true)}>
-            New admin
+        {canCreateStaff && (
+          <Button variant="primary" className="w-full sm:w-auto flex-shrink-0" leftIcon={<UserPlus size={18} />} onClick={() => setCreating(true)}>
+            Add User
           </Button>
         )}
       </div>

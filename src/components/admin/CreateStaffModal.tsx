@@ -105,7 +105,7 @@ export function CreateStaffModal({
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={close} title="New staff account" size="md">
+    <Modal isOpen={isOpen} onClose={close} title="Add User" size="md">
       <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <Input label="First name" required error={errors.firstName?.message} {...register('firstName')} />
@@ -165,8 +165,7 @@ export function CreateStaffModal({
         <div className="flex items-start gap-2 text-xs text-[var(--textTertiary)]">
           <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
           <p>
-            The account is active immediately. Only a super admin can create staff accounts or
-            change anyone&rsquo;s role.
+            The account is active immediately. Share the login details with the new user.
           </p>
         </div>
 
