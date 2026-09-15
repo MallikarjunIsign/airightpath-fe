@@ -9,6 +9,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Modal } from '@/components/ui/Modal';
+import { Pagination } from '@/components/ui/Pagination';
 import { UserRoleBadges } from '@/components/admin/UserRoleBadges';
 import { UserDetailsPanel } from '@/components/admin/UserDetailsPanel';
 import { CreateStaffModal } from '@/components/admin/CreateStaffModal';
@@ -53,19 +54,27 @@ function ToggleStatusButton({
 }
 
 /**
- * Which staff accounts the list is showing.
+ * Which accounts the list is showing.
  *
  * `ALL` is the absence of a filter rather than a value to match, so it is not a
- * role name. Deliberately not persisted, unlike the search box: this screen
- * exists to answer "who administers this system", and arriving to a filtered
- * list left over from a previous visit reads as accounts having disappeared.
+ * role name. Deliberately not persisted, unlike the search box: arriving to a
+ * filter left over from a previous visit reads as accounts having disappeared.
  */
-type RoleFilter = 'ALL' | 'SUPER_ADMIN' | 'ADMIN';
+type RoleFilter = 'ALL' | 'SUPER_ADMIN' | 'ADMIN' | 'USER';
+
+/**
+ * Rows per page. Small when this screen listed only staff; candidates put it in
+ * the hundreds, which is the same problem the assessment results table had.
+ */
+const PAGE_SIZE = 25;
 
 const ROLE_FILTER_OPTIONS: { value: RoleFilter; label: string }[] = [
   { value: 'ALL', label: 'All roles' },
   { value: 'SUPER_ADMIN', label: 'Super Admin' },
   { value: 'ADMIN', label: 'Admin' },
+  // USER is the stored enum; "Candidate" is what it means to anyone reading
+  // this screen, and matches how the badges label it.
+  { value: 'USER', label: 'Candidate' },
 ];
 
 export function UserListPage() {
@@ -81,8 +90,11 @@ export function UserListPage() {
   const [users, setUsers] = useState<UsersDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
+  /** Set when one half of the roster loaded and the other did not. */
+  const [partialLoad, setPartialLoad] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = usePersistentState('users:searchTerm', '');
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('ALL');
+  const [page, setPage] = useState(1);
   const [togglingEmail, setTogglingEmail] = useState<string | null>(null);
   const [confirmUser, setConfirmUser] = useState<UsersDto | null>(null);
   /**
@@ -98,25 +110,43 @@ export function UserListPage() {
   }, []);
 
   /**
-   * Staff only — admins and super admins.
+   * Everyone, staff and candidates.
    *
-   * Candidates are managed on the Candidates screen, which carries their
-   * applications, assessments and results. Listing them here as well meant two
-   * screens showing the same people with different actions; this one is now
-   * about who administers the system.
+   * Two requests because the API splits the roster in two: `/users/staff`
+   * returns the ADMIN and SUPER_ADMIN accounts and `/users` returns everyone
+   * else. They are exact complements — the backend builds them from the same
+   * staff-role list, one including and one excluding — so merging cannot double
+   * up or drop anyone.
+   *
+   * Settled rather than awaited together: whichever half arrives is worth
+   * showing. Losing the candidate list should not also hide the six admins.
    */
   async function fetchUsers() {
     setLoading(true);
     setLoadFailed(false);
-    try {
-      const res = await userService.getStaff();
-      setUsers(res.data ?? []);
-    } catch {
+    setPartialLoad(null);
+
+    const [staff, candidates] = await Promise.allSettled([
+      userService.getStaff(),
+      userService.getAll(),
+    ]);
+
+    const merged: UsersDto[] = [];
+    if (staff.status === 'fulfilled') merged.push(...(staff.value.data ?? []));
+    if (candidates.status === 'fulfilled') merged.push(...(candidates.value.data ?? []));
+
+    if (staff.status === 'rejected' && candidates.status === 'rejected') {
       setLoadFailed(true);
-      // Error toast auto-handled by interceptor
-    } finally {
-      setLoading(false);
+    } else if (staff.status === 'rejected') {
+      setPartialLoad('Admin accounts could not be loaded, so only candidates are listed.');
+    } else if (candidates.status === 'rejected') {
+      setPartialLoad('Candidates could not be loaded, so only admin accounts are listed.');
     }
+
+    // Email is the primary key, so it is the identity to sort and de-dupe on.
+    merged.sort((a, b) => a.email.localeCompare(b.email));
+    setUsers(merged);
+    setLoading(false);
   }
 
   const handleSearch = useCallback((value: string) => {
@@ -138,7 +168,24 @@ export function UserListPage() {
     ALL: users.length,
     SUPER_ADMIN: users.filter((user) => hasRoleNamed(user.roles, 'SUPER_ADMIN')).length,
     ADMIN: users.filter((user) => hasRoleNamed(user.roles, 'ADMIN')).length,
+    USER: users.filter((user) => hasRoleNamed(user.roles, 'USER')).length,
   } satisfies Record<RoleFilter, number>;
+
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / PAGE_SIZE));
+
+  // Narrowing the filter changes what page 1 means, so go back to the top
+  // rather than leaving someone on a page the new result set does not have.
+  useEffect(() => {
+    setPage(1);
+  }, [roleFilter, searchTerm]);
+
+  // Same overrun from the other side: the list can shrink under an open page
+  // when an account is created or the roster reloads.
+  useEffect(() => {
+    if (page > totalPages) setPage(1);
+  }, [page, totalPages]);
+
+  const pagedUsers = filteredUsers.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const filtersActive = roleFilter !== 'ALL' || searchTerm.trim() !== '';
 
@@ -186,15 +233,22 @@ export function UserListPage() {
         <div className="flex flex-col gap-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <CardTitle>
-              Staff Accounts{!loading && !loadFailed && ` (${filteredUsers.length})`}
+              User Accounts{!loading && !loadFailed && ` (${filteredUsers.length})`}
             </CardTitle>
             <SearchInput
               onSearch={handleSearch}
               initialValue={searchTerm}
-              placeholder="Search staff by name or email..."
+              placeholder="Search by name or email..."
               className="w-full sm:w-80"
             />
           </div>
+
+          {/* One half of the roster missing is worth saying out loud: the list
+              looks complete otherwise, and a missing admin reads as a deleted
+              account rather than a failed request. */}
+          {partialLoad && !loading && (
+            <p className="text-sm text-[var(--warning)]">{partialLoad}</p>
+          )}
 
           {/* Role filter. Hidden while the list is unusable, so an empty screen
               does not also offer controls that cannot change anything. */}
@@ -244,16 +298,16 @@ export function UserListPage() {
         ) : filteredUsers.length === 0 ? (
           <EmptyState
             icon={<Users size={48} />}
-            title={filtersActive ? 'No matching staff accounts' : 'No staff accounts'}
+            title={filtersActive ? 'No matching accounts' : 'No accounts'}
             description={
               /* Keyed on filtersActive, not just the search box: filtering to a
                  role nobody holds would otherwise claim no accounts exist at
                  all, and send someone off to create a duplicate. */
               filtersActive
-                ? `None of the ${users.length} staff account${users.length === 1 ? '' : 's'} match the current filters.`
+                ? `None of the ${users.length} account${users.length === 1 ? '' : 's'} match the current filters.`
                 : canCreateStaff
-                  ? 'No admin or super admin accounts exist yet. Use "Add User" to create one.'
-                  : 'No admin or super admin accounts exist yet.'
+                  ? 'No accounts exist yet. Use "Add User" to create an admin.'
+                  : 'No accounts exist yet.'
             }
             action={filtersActive ? { label: 'Clear filters', onClick: clearFilters } : undefined}
           />
@@ -263,7 +317,7 @@ export function UserListPage() {
                 that five columns scrolled sideways on a phone, hiding the
                 status and the only action on the screen. */}
             <div className="md:hidden space-y-3">
-              {filteredUsers.map((user) => (
+              {pagedUsers.map((user) => (
                 <div
                   key={user.email}
                   className="rounded-2xl border border-[var(--borderMuted,var(--border))] bg-[var(--cardBg)] p-4 space-y-3"
@@ -318,7 +372,7 @@ export function UserListPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredUsers.map((user) => (
+                  {pagedUsers.map((user) => (
                     <TableRow
                       key={user.email}
                       onClick={() => setSelectedEmail(user.email)}
@@ -358,6 +412,17 @@ export function UserListPage() {
                 </TableBody>
               </Table>
             </div>
+
+            {/* Footer count stays even on a single page — Pagination renders
+                nothing when there is only one, and "1-25 of 240" is the line
+                that tells you the list is longer than the screen. */}
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-t border-[var(--borderMuted,var(--border))] pt-4">
+              <p className="text-sm text-[var(--textSecondary)] tabular-nums">
+                Showing {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, filteredUsers.length)} of{' '}
+                {filteredUsers.length} account{filteredUsers.length === 1 ? '' : 's'}
+              </p>
+              <Pagination currentPage={page} totalPages={totalPages} onPageChange={setPage} />
+            </div>
           </>
         )}
       </CardContent>
@@ -370,8 +435,8 @@ export function UserListPage() {
         <div>
           <h1 className="text-3xl font-bold text-[var(--text)]">User Management</h1>
           <p className="text-[var(--textSecondary)] mt-1">
-            Admins and super admins — select a row to see full details. Candidates are managed on
-            the Candidates screen.
+            Admins, super admins and candidates — select a row to see full details. Filter by role
+            above; candidate applications and results live on the Candidates screen.
           </p>
         </div>
         {canCreateStaff && (
