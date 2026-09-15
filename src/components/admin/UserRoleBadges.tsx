@@ -1,4 +1,5 @@
 import { Badge } from '@/components/ui/Badge';
+import { normalizeRoleName } from '@/utils/role.utils';
 import type { RoleName } from '@/config/roles';
 
 type BadgeVariant = 'default' | 'success' | 'warning' | 'error' | 'info' | 'primary' | 'secondary';
@@ -17,15 +18,6 @@ const ROLE_STYLE: Record<RoleName, { label: string; variant: BadgeVariant }> = {
   ADMIN: { label: 'Admin', variant: 'primary' },
   USER: { label: 'Candidate', variant: 'secondary' },
 };
-
-/** Normalises `ROLE_ADMIN` / `role_admin` / `ADMIN` to the stored enum name. */
-function normalizeRole(role: string): string {
-  return role
-    .replace(/^ROLE_/i, '')
-    .trim()
-    .toUpperCase()
-    .replace(/[\s-]+/g, '_');
-}
 
 function isKnownRole(role: string): role is RoleName {
   return role in ROLE_STYLE;
@@ -51,7 +43,7 @@ export function UserRoleBadges({ roles }: Readonly<{ roles?: string[] }>) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {roles.map((role) => {
-        const normalized = normalizeRole(role);
+        const normalized = normalizeRoleName(role);
         // An unknown role is shown as stored rather than hidden: a role the UI
         // has not been taught about is exactly the thing an admin needs to see.
         const style = isKnownRole(normalized)

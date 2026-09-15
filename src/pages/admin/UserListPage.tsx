@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react';
-import { Loader2, Users, UserCheck, UserX, ChevronRight, UserPlus } from 'lucide-react';
+import { Loader2, Users, UserCheck, UserX, ChevronRight, UserPlus, X } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { SearchInput } from '@/components/ui/SearchInput';
+import { Select } from '@/components/ui/Select';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -17,6 +18,7 @@ import { MESSAGES } from '@/config/messages';
 import { usePersistentState } from '@/hooks/usePersistentState';
 import { useMediaQuery, XL_QUERY } from '@/hooks/useMediaQuery';
 import { useRbac } from '@/hooks/useRbac';
+import { hasRoleNamed } from '@/utils/role.utils';
 import { PERMISSIONS } from '@/config/permissions';
 import type { UsersDto } from '@/types/user.types';
 
@@ -50,6 +52,22 @@ function ToggleStatusButton({
   );
 }
 
+/**
+ * Which staff accounts the list is showing.
+ *
+ * `ALL` is the absence of a filter rather than a value to match, so it is not a
+ * role name. Deliberately not persisted, unlike the search box: this screen
+ * exists to answer "who administers this system", and arriving to a filtered
+ * list left over from a previous visit reads as accounts having disappeared.
+ */
+type RoleFilter = 'ALL' | 'SUPER_ADMIN' | 'ADMIN';
+
+const ROLE_FILTER_OPTIONS: { value: RoleFilter; label: string }[] = [
+  { value: 'ALL', label: 'All roles' },
+  { value: 'SUPER_ADMIN', label: 'Super Admin' },
+  { value: 'ADMIN', label: 'Admin' },
+];
+
 export function UserListPage() {
   const { showToast } = useToast();
   // Same breakpoint as the `xl:` classes below, so the pane and the dialog can
@@ -64,6 +82,7 @@ export function UserListPage() {
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
   const [searchTerm, setSearchTerm] = usePersistentState('users:searchTerm', '');
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>('ALL');
   const [togglingEmail, setTogglingEmail] = useState<string | null>(null);
   const [confirmUser, setConfirmUser] = useState<UsersDto | null>(null);
   /**
@@ -105,11 +124,28 @@ export function UserListPage() {
   }, []);
 
   const filteredUsers = users.filter((user) => {
+    // Role first: it is the cheaper test and the one that usually excludes most.
+    if (roleFilter !== 'ALL' && !hasRoleNamed(user.roles, roleFilter)) return false;
+
     if (!searchTerm) return true;
     const term = searchTerm.toLowerCase();
     const fullName = `${user.firstName} ${user.lastName}`.toLowerCase();
     return fullName.includes(term) || user.email.toLowerCase().includes(term);
   });
+
+  /** Counts per role for the dropdown, so it says how many each choice returns. */
+  const roleCounts = {
+    ALL: users.length,
+    SUPER_ADMIN: users.filter((user) => hasRoleNamed(user.roles, 'SUPER_ADMIN')).length,
+    ADMIN: users.filter((user) => hasRoleNamed(user.roles, 'ADMIN')).length,
+  } satisfies Record<RoleFilter, number>;
+
+  const filtersActive = roleFilter !== 'ALL' || searchTerm.trim() !== '';
+
+  const clearFilters = () => {
+    setRoleFilter('ALL');
+    setSearchTerm('');
+  };
 
   const selectedUser = users.find((user) => user.email === selectedEmail) ?? null;
 
@@ -147,16 +183,50 @@ export function UserListPage() {
   const list = (
     <Card>
       <CardHeader>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <CardTitle>
-            Staff Accounts{!loading && !loadFailed && ` (${filteredUsers.length})`}
-          </CardTitle>
-          <SearchInput
-            onSearch={handleSearch}
-            initialValue={searchTerm}
-            placeholder="Search staff by name or email..."
-            className="w-full sm:w-80"
-          />
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <CardTitle>
+              Staff Accounts{!loading && !loadFailed && ` (${filteredUsers.length})`}
+            </CardTitle>
+            <SearchInput
+              onSearch={handleSearch}
+              initialValue={searchTerm}
+              placeholder="Search staff by name or email..."
+              className="w-full sm:w-80"
+            />
+          </div>
+
+          {/* Role filter. Hidden while the list is unusable, so an empty screen
+              does not also offer controls that cannot change anything. */}
+          {!loading && !loadFailed && (
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="w-full sm:w-52">
+                <Select
+                  aria-label="Filter by role"
+                  options={ROLE_FILTER_OPTIONS.map((option) => ({
+                    value: option.value,
+                    // The count is on the option so the cost of a choice is
+                    // visible before making it.
+                    label: `${option.label} (${roleCounts[option.value]})`,
+                  }))}
+                  value={roleFilter}
+                  onChange={(e) => setRoleFilter(e.target.value as RoleFilter)}
+                />
+              </div>
+
+              {filtersActive && (
+                <>
+                  <span className="text-sm text-[var(--textSecondary)]">
+                    Showing <strong className="text-[var(--text)]">{filteredUsers.length}</strong> of{' '}
+                    {users.length}
+                  </span>
+                  <Button variant="ghost" size="sm" leftIcon={<X size={14} />} onClick={clearFilters}>
+                    Clear
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
         </div>
       </CardHeader>
       <CardContent>
@@ -174,14 +244,18 @@ export function UserListPage() {
         ) : filteredUsers.length === 0 ? (
           <EmptyState
             icon={<Users size={48} />}
-            title={searchTerm ? 'No matching staff accounts' : 'No staff accounts'}
+            title={filtersActive ? 'No matching staff accounts' : 'No staff accounts'}
             description={
-              searchTerm
-                ? 'No admin or super admin matches your search. Try a different keyword.'
+              /* Keyed on filtersActive, not just the search box: filtering to a
+                 role nobody holds would otherwise claim no accounts exist at
+                 all, and send someone off to create a duplicate. */
+              filtersActive
+                ? `None of the ${users.length} staff account${users.length === 1 ? '' : 's'} match the current filters.`
                 : canCreateStaff
                   ? 'No admin or super admin accounts exist yet. Use "Add User" to create one.'
                   : 'No admin or super admin accounts exist yet.'
             }
+            action={filtersActive ? { label: 'Clear filters', onClick: clearFilters } : undefined}
           />
         ) : (
           <>
