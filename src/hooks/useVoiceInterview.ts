@@ -48,6 +48,14 @@ export function useVoiceInterview() {
   const [isCodingQuestion, setIsCodingQuestion] = useState(false);
   const [codeContent, setCodeContent] = useState("");
   const [codeLanguage, setCodeLanguage] = useState("java");
+  /**
+   * What the candidate's code printed the last time they ran it.
+   *
+   * Lives here rather than in the page because it has to travel with the answer:
+   * the Compile & Run output used to be page-local state, so the interviewer was
+   * sent the source and never learned whether it worked.
+   */
+  const [codeOutput, setCodeOutput] = useState("");
 
   // Audio hooks
   const audioStreaming = useAudioStreaming(scheduleId, userEmail);
@@ -287,6 +295,9 @@ export function useVoiceInterview() {
                 detectAndCleanCodingTag(nextQuestion);
               setIsCodingQuestion(isCoding);
               setCodeContent("");
+              // Cleared with the editor: output from the previous problem would
+              // otherwise be submitted as evidence for this one.
+              setCodeOutput("");
               setLastQuestionText(nextQuestionClean);
 
               setConversation((prev) => [
@@ -343,6 +354,7 @@ export function useVoiceInterview() {
         setIsCodingQuestion(isCoding);
         if (isCoding) {
           setCodeContent("");
+          setCodeOutput("");
         }
 
         // Item 14: Store first question for repeat
@@ -459,6 +471,7 @@ export function useVoiceInterview() {
       // Capture current code state before resetting
       const submittedCode = codeContent;
       const submittedLanguage = codeLanguage;
+      const submittedOutput = codeOutput;
 
       // Add candidate answer to conversation
       setConversation((prev) => [
@@ -469,6 +482,7 @@ export function useVoiceInterview() {
           timestamp: new Date().toISOString(),
           codeContent: submittedCode || undefined,
           codeLanguage: submittedCode ? submittedLanguage : undefined,
+          codeOutput: submittedCode ? submittedOutput || undefined : undefined,
         },
       ]);
 
@@ -480,6 +494,11 @@ export function useVoiceInterview() {
       if (submittedCode) {
         payload.codeContent = submittedCode;
         payload.codeLanguage = submittedLanguage;
+        // Sent only when they actually ran it. The server reads an absent value
+        // as "never run" and tells the model so explicitly.
+        if (submittedOutput.trim()) {
+          payload.codeOutput = submittedOutput;
+        }
       }
       interviewWsService.send(
         `/app/interview/${scheduleId}/submit-answer`,
@@ -496,13 +515,14 @@ export function useVoiceInterview() {
         setError("Response timed out. Please try answering again.");
       }, APP_CONFIG.INTERVIEW_PROCESSING_TIMEOUT_MS);
     },
-    [audioStreaming, codeContent, codeLanguage],
+    [audioStreaming, codeContent, codeLanguage, codeOutput],
   );
 
   // Skip question — sends a skipped answer bypassing the empty-transcript guard
   const skipQuestion = useCallback(() => {
     setIsCodingQuestion(false);
     setCodeContent("");
+    setCodeOutput("");
 
     setConversation((prev) => [
       ...prev,
@@ -639,6 +659,8 @@ export function useVoiceInterview() {
     isCodingQuestion,
     codeContent,
     codeLanguage,
+    codeOutput,
+    setCodeOutput,
     setCodeContent,
     setCodeLanguage,
 

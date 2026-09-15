@@ -119,6 +119,8 @@ export type ConversationEntry = {
   isCodingQuestion?: boolean;
   codeContent?: string;
   codeLanguage?: string;
+  /** Stdout/stderr from the candidate's last run; absent if they never ran it. */
+  codeOutput?: string;
 };
 
 // ==================== Voice Interview Types ====================

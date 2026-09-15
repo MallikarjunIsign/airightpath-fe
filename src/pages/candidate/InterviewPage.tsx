@@ -387,9 +387,16 @@ export function InterviewPage() {
       });
       const output = res.data.output || res.data.error;
       setCompileOutput(output);
+      // Also held on the interview state, so it is submitted with the answer
+      // rather than staying on this screen.
+      voiceInterview.setCodeOutput(output);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
-      setCompileOutput('Compilation failed: ' + (err.response?.data?.message || err.message));
+      const failure = 'Compilation failed: ' + (err.response?.data?.message || err.message);
+      setCompileOutput(failure);
+      // A failed compile is evidence too — the interviewer should see that the
+      // submitted code does not build.
+      voiceInterview.setCodeOutput(failure);
     } finally {
       setCompiling(false);
     }
