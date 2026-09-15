@@ -15,6 +15,9 @@ export const ENDPOINTS = {
     // Staff accounts — anyone holding ADMIN or SUPER_ADMIN. GET_ALL above
     // deliberately excludes them, so these are the two halves of the roster.
     GET_STAFF: "/api/users/staff",
+    // Combined, paginated, filterable roster — what the admin screen reads.
+    // GET_ALL and GET_STAFF keep their own meanings for other callers.
+    GET_DIRECTORY: "/api/users/directory",
     CREATE_STAFF: "/api/users/staff",
     GET_BY_EMAIL: (email: string) => `/api/profile-details/${email}`,
     UPDATE: (email: string) => `/api/update/${email}`,

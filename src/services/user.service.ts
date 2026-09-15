@@ -1,17 +1,34 @@
 import api from './api.service';
 import { ENDPOINTS } from '@/config/api.endpoints';
-import type { ApiResponse } from '@/types/api.types';
+import type { ApiResponse, PaginatedResponse } from '@/types/api.types';
 import type { UsersDto, UserProfile, CreateStaffRequest } from '@/types/user.types';
 
 export const userService = {
-  /** Candidate accounts. Excludes everyone holding a staff role. */
-  getAll() {
-    return api.get<UsersDto[]>(ENDPOINTS.USERS.GET_ALL);
+  /**
+   * Candidate accounts — everyone holding no staff role. Paginated.
+   *
+   * `page` is zero-based; `size` defaults to 20 server-side and is capped at
+   * 100. Both endpoints became paginated when the underlying query was rewritten
+   * — the unbounded version took MySQL out of sort memory.
+   */
+  getAll(params?: { page?: number; size?: number }) {
+    return api.get<PaginatedResponse<UsersDto>>(ENDPOINTS.USERS.GET_ALL, { params });
   },
 
   /** Staff accounts — admins and super admins, with their roles attached. */
-  getStaff() {
-    return api.get<UsersDto[]>(ENDPOINTS.USERS.GET_STAFF);
+  getStaff(params?: { page?: number; size?: number }) {
+    return api.get<PaginatedResponse<UsersDto>>(ENDPOINTS.USERS.GET_STAFF, { params });
+  },
+
+  /**
+   * One page of the whole roster, filtered server-side.
+   *
+   * The admin screen reads this rather than merging the two lists above: two
+   * independent pagers cannot be stitched into one stable list — a row lands on
+   * two pages or on none.
+   */
+  getDirectory(params: { page?: number; size?: number; role?: string; search?: string }) {
+    return api.get<PaginatedResponse<UsersDto>>(ENDPOINTS.USERS.GET_DIRECTORY, { params });
   },
 
   /**

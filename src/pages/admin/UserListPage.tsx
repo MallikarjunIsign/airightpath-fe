@@ -19,7 +19,6 @@ import { MESSAGES } from '@/config/messages';
 import { usePersistentState } from '@/hooks/usePersistentState';
 import { useMediaQuery, XL_QUERY } from '@/hooks/useMediaQuery';
 import { useRbac } from '@/hooks/useRbac';
-import { hasRoleNamed } from '@/utils/role.utils';
 import { PERMISSIONS } from '@/config/permissions';
 import type { UsersDto } from '@/types/user.types';
 
@@ -88,10 +87,11 @@ export function UserListPage() {
   const canChangeStatus = can(PERMISSIONS.USER_ACTIVATE) && can(PERMISSIONS.USER_DEACTIVATE);
 
   const [users, setUsers] = useState<UsersDto[]>([]);
+  /** Totals come from the server now, not from counting a local array. */
+  const [totalElements, setTotalElements] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [loadFailed, setLoadFailed] = useState(false);
-  /** Set when one half of the roster loaded and the other did not. */
-  const [partialLoad, setPartialLoad] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = usePersistentState('users:searchTerm', '');
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('ALL');
   const [page, setPage] = useState(1);
@@ -105,87 +105,60 @@ export function UserListPage() {
   const [selectedEmail, setSelectedEmail] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
-
   /**
-   * Everyone, staff and candidates.
+   * One page of the roster, filtered and sorted by the server.
    *
-   * Two requests because the API splits the roster in two: `/users/staff`
-   * returns the ADMIN and SUPER_ADMIN accounts and `/users` returns everyone
-   * else. They are exact complements — the backend builds them from the same
-   * staff-role list, one including and one excluding — so merging cannot double
-   * up or drop anyone.
-   *
-   * Settled rather than awaited together: whichever half arrives is worth
-   * showing. Losing the candidate list should not also hide the six admins.
+   * Role, search and paging all travel as query parameters. They used to be
+   * applied in the browser over the whole table, which stopped working for two
+   * reasons: the underlying query took MySQL out of sort memory when unbounded,
+   * and filtering a single page client-side would silently only search that page.
    */
-  async function fetchUsers() {
+  const fetchUsers = useCallback(async () => {
     setLoading(true);
     setLoadFailed(false);
-    setPartialLoad(null);
-
-    const [staff, candidates] = await Promise.allSettled([
-      userService.getStaff(),
-      userService.getAll(),
-    ]);
-
-    const merged: UsersDto[] = [];
-    if (staff.status === 'fulfilled') merged.push(...(staff.value.data ?? []));
-    if (candidates.status === 'fulfilled') merged.push(...(candidates.value.data ?? []));
-
-    if (staff.status === 'rejected' && candidates.status === 'rejected') {
+    try {
+      const res = await userService.getDirectory({
+        page: page - 1, // the pager is 1-based, the API is 0-based
+        size: PAGE_SIZE,
+        role: roleFilter === 'ALL' ? undefined : roleFilter,
+        search: searchTerm.trim() || undefined,
+      });
+      setUsers(res.data?.content ?? []);
+      setTotalElements(res.data?.totalElements ?? 0);
+      setTotalPages(Math.max(1, res.data?.totalPages ?? 1));
+    } catch {
       setLoadFailed(true);
-    } else if (staff.status === 'rejected') {
-      setPartialLoad('Admin accounts could not be loaded, so only candidates are listed.');
-    } else if (candidates.status === 'rejected') {
-      setPartialLoad('Candidates could not be loaded, so only admin accounts are listed.');
+      setUsers([]);
+      // Error toast auto-handled by interceptor
+    } finally {
+      setLoading(false);
     }
+  }, [page, roleFilter, searchTerm]);
 
-    // Email is the primary key, so it is the identity to sort and de-dupe on.
-    merged.sort((a, b) => a.email.localeCompare(b.email));
-    setUsers(merged);
-    setLoading(false);
-  }
+  // Re-runs whenever the query changes — page, role or search term.
+  useEffect(() => {
+    void fetchUsers();
+  }, [fetchUsers]);
 
   const handleSearch = useCallback((value: string) => {
     setSearchTerm(value);
   }, []);
 
-  const filteredUsers = users.filter((user) => {
-    // Role first: it is the cheaper test and the one that usually excludes most.
-    if (roleFilter !== 'ALL' && !hasRoleNamed(user.roles, roleFilter)) return false;
-
-    if (!searchTerm) return true;
-    const term = searchTerm.toLowerCase();
-    const fullName = `${user.firstName} ${user.lastName}`.toLowerCase();
-    return fullName.includes(term) || user.email.toLowerCase().includes(term);
-  });
-
-  /** Counts per role for the dropdown, so it says how many each choice returns. */
-  const roleCounts = {
-    ALL: users.length,
-    SUPER_ADMIN: users.filter((user) => hasRoleNamed(user.roles, 'SUPER_ADMIN')).length,
-    ADMIN: users.filter((user) => hasRoleNamed(user.roles, 'ADMIN')).length,
-    USER: users.filter((user) => hasRoleNamed(user.roles, 'USER')).length,
-  } satisfies Record<RoleFilter, number>;
-
-  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / PAGE_SIZE));
+  // `users` is already the page the server selected — no client-side filtering
+  // or slicing. Doing either here would only ever narrow the visible 25 rows
+  // while claiming to search the whole roster.
 
   // Narrowing the filter changes what page 1 means, so go back to the top
-  // rather than leaving someone on a page the new result set does not have.
+  // rather than asking the server for a page the new result set does not have.
   useEffect(() => {
     setPage(1);
   }, [roleFilter, searchTerm]);
 
-  // Same overrun from the other side: the list can shrink under an open page
-  // when an account is created or the roster reloads.
+  // The same overrun from the other side: creating an account or deactivating
+  // one can shrink the result set under an open page.
   useEffect(() => {
     if (page > totalPages) setPage(1);
   }, [page, totalPages]);
-
-  const pagedUsers = filteredUsers.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const filtersActive = roleFilter !== 'ALL' || searchTerm.trim() !== '';
 
@@ -198,7 +171,7 @@ export function UserListPage() {
 
   // A filter that excludes the open row would otherwise leave its details up
   // beside a list that no longer contains it.
-  const selectedIsVisible = filteredUsers.some((user) => user.email === selectedEmail);
+  const selectedIsVisible = users.some((user) => user.email === selectedEmail);
   const panelUser = selectedIsVisible ? selectedUser : null;
 
   async function confirmToggleStatus() {
@@ -233,7 +206,7 @@ export function UserListPage() {
         <div className="flex flex-col gap-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <CardTitle>
-              User Accounts{!loading && !loadFailed && ` (${filteredUsers.length})`}
+              User Accounts{!loading && !loadFailed && ` (${totalElements})`}
             </CardTitle>
             <SearchInput
               onSearch={handleSearch}
@@ -243,13 +216,6 @@ export function UserListPage() {
             />
           </div>
 
-          {/* One half of the roster missing is worth saying out loud: the list
-              looks complete otherwise, and a missing admin reads as a deleted
-              account rather than a failed request. */}
-          {partialLoad && !loading && (
-            <p className="text-sm text-[var(--warning)]">{partialLoad}</p>
-          )}
-
           {/* Role filter. Hidden while the list is unusable, so an empty screen
               does not also offer controls that cannot change anything. */}
           {!loading && !loadFailed && (
@@ -257,12 +223,7 @@ export function UserListPage() {
               <div className="w-full sm:w-52">
                 <Select
                   aria-label="Filter by role"
-                  options={ROLE_FILTER_OPTIONS.map((option) => ({
-                    value: option.value,
-                    // The count is on the option so the cost of a choice is
-                    // visible before making it.
-                    label: `${option.label} (${roleCounts[option.value]})`,
-                  }))}
+                  options={ROLE_FILTER_OPTIONS}
                   value={roleFilter}
                   onChange={(e) => setRoleFilter(e.target.value as RoleFilter)}
                 />
@@ -271,8 +232,7 @@ export function UserListPage() {
               {filtersActive && (
                 <>
                   <span className="text-sm text-[var(--textSecondary)]">
-                    Showing <strong className="text-[var(--text)]">{filteredUsers.length}</strong> of{' '}
-                    {users.length}
+                    <strong className="text-[var(--text)]">{totalElements}</strong> matching
                   </span>
                   <Button variant="ghost" size="sm" leftIcon={<X size={14} />} onClick={clearFilters}>
                     Clear
@@ -291,11 +251,11 @@ export function UserListPage() {
         ) : loadFailed ? (
           <EmptyState
             icon={<Users size={48} />}
-            title="Unable to load staff accounts"
-            description="Please try again to load the staff list."
+            title="Unable to load accounts"
+            description="Please try again to load the user list."
             action={{ label: 'Retry', onClick: fetchUsers }}
           />
-        ) : filteredUsers.length === 0 ? (
+        ) : users.length === 0 ? (
           <EmptyState
             icon={<Users size={48} />}
             title={filtersActive ? 'No matching accounts' : 'No accounts'}
@@ -304,7 +264,7 @@ export function UserListPage() {
                  role nobody holds would otherwise claim no accounts exist at
                  all, and send someone off to create a duplicate. */
               filtersActive
-                ? `None of the ${users.length} account${users.length === 1 ? '' : 's'} match the current filters.`
+                ? 'No account matches the current filters.'
                 : canCreateStaff
                   ? 'No accounts exist yet. Use "Add User" to create an admin.'
                   : 'No accounts exist yet.'
@@ -317,7 +277,7 @@ export function UserListPage() {
                 that five columns scrolled sideways on a phone, hiding the
                 status and the only action on the screen. */}
             <div className="md:hidden space-y-3">
-              {pagedUsers.map((user) => (
+              {users.map((user) => (
                 <div
                   key={user.email}
                   className="rounded-2xl border border-[var(--borderMuted,var(--border))] bg-[var(--cardBg)] p-4 space-y-3"
@@ -372,7 +332,7 @@ export function UserListPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {pagedUsers.map((user) => (
+                  {users.map((user) => (
                     <TableRow
                       key={user.email}
                       onClick={() => setSelectedEmail(user.email)}
@@ -418,8 +378,8 @@ export function UserListPage() {
                 that tells you the list is longer than the screen. */}
             <div className="mt-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-t border-[var(--borderMuted,var(--border))] pt-4">
               <p className="text-sm text-[var(--textSecondary)] tabular-nums">
-                Showing {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, filteredUsers.length)} of{' '}
-                {filteredUsers.length} account{filteredUsers.length === 1 ? '' : 's'}
+                Showing {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, totalElements)} of{' '}
+                {totalElements} account{totalElements === 1 ? '' : 's'}
               </p>
               <Pagination currentPage={page} totalPages={totalPages} onPageChange={setPage} />
             </div>
