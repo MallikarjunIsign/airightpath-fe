@@ -14,6 +14,7 @@ import {
   Download,
   ExternalLink,
   BarChart3,
+  Video,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -26,6 +27,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { BackLink } from '@/components/ui/BackLink';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
+import { interviewService } from '@/services/interview.service';
 import { resumeService } from '@/services/resume.service';
 import axios from 'axios';
 import { usePersistentState, writePersistentValue } from '@/hooks/usePersistentState';
@@ -144,7 +146,9 @@ type BulkAction =
   | 'rejection'
   | 'reconfirmation'
   | 'success'
-  | 'failure';
+  | 'failure'
+  /** Schedules the AI interview and moves the candidate out of the exam stage. */
+  | 'interview';
 
 const BULK_ACTION_CONFIG: Record<
   BulkAction,
@@ -155,6 +159,10 @@ const BULK_ACTION_CONFIG: Record<
   reconfirmation: { label: 'Send Reconfirmation', hasDateTime: false, icon: <RefreshCw size={16} /> },
   success: { label: 'Send Success', hasDateTime: false, icon: <CheckCircle size={16} /> },
   failure: { label: 'Send Failure', hasDateTime: false, icon: <AlertTriangle size={16} /> },
+  // The only action here that creates something rather than sending a message:
+  // it books the interview and advances the candidate's stage. The date/time is
+  // the deadline by which they must sit it, so it is required, not optional.
+  interview: { label: 'Send to Interview', hasDateTime: true, icon: <Video size={16} /> },
 };
 
 /**
@@ -178,7 +186,10 @@ const STAGE_ACTIONS: Record<string, BulkAction[]> = {
   // Exams reach candidates via Assign Assessment, not from here.
   RECONFIRMED: ['rejection'],
   EXAM_SENT: ['rejection'],
-  EXAM_COMPLETED: ['rejection'],
+  // The forward step after an exam. Before this, moving someone into the
+  // interview stage meant leaving Candidates for the Interview Scheduler and
+  // finding them again there.
+  EXAM_COMPLETED: ['interview', 'rejection'],
   INTERVIEW_SCHEDULED: ['rejection'],
   INTERVIEW_COMPLETED: ['success', 'rejection'],
   SELECTED: ['rejection'],
@@ -599,6 +610,17 @@ export function CandidateDetailsPage() {
         case 'failure':
           await jobApplicationService.sendFailureMail(payload);
           break;
+        case 'interview':
+          // Not a mail action: this books the interview itself. The server
+          // creates a schedule per candidate, emails the invitation, and moves
+          // anyone still in the exam stage to Interview Scheduled.
+          await interviewService.assignInterviewBulk({
+            jobPrefix: selectedPrefix,
+            emails,
+            deadlineTime: modalDateTime,
+            sendEmail: true,
+          });
+          break;
       }
       showToast(MESSAGES.admin.candidates.actionSent(BULK_ACTION_CONFIG[modalAction].label), 'success');
       setModalAction(null);
@@ -909,7 +931,9 @@ export function CandidateDetailsPage() {
         <BulkActionModal
           title={BULK_ACTION_CONFIG[modalAction].label}
           hasDateTime={BULK_ACTION_CONFIG[modalAction].hasDateTime}
-          dateTimeRequired={modalAction === 'ack'}
+          // An interview with no deadline never expires and never chases the
+          // candidate, so the date is as mandatory here as on the ack mail.
+          dateTimeRequired={modalAction === 'ack' || modalAction === 'interview'}
           recipientCount={selectedEmails.size}
           sending={sending}
           dateTime={modalDateTime}
