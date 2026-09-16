@@ -51,11 +51,27 @@ export interface InterviewEvaluation {
 //   sendEmail: boolean;
 // }
 
+/**
+ * Which interview a schedule is for.
+ *
+ * Distinct from `InterviewPhase`: a round is a separately scheduled event with
+ * its own deadline, prompt and result, while a phase is a stretch within one
+ * conversation.
+ */
+export type InterviewRound = 'L2_TECHNICAL' | 'L3_BEHAVIORAL';
+
+export const INTERVIEW_ROUND_LABELS: Record<InterviewRound, string> = {
+  L2_TECHNICAL: 'L2 — Technical',
+  L3_BEHAVIORAL: 'L3 — Behavioural',
+};
+
 export interface BulkInterviewAssignRequest {
   jobPrefix: string;
   emails: string[];
   deadlineTime: string; // ISO datetime string
   sendEmail?: boolean;
+  /** Omitted books the technical round, matching the server's default. */
+  round?: InterviewRound;
   questionsFromDate?: string; // ISO datetime string or Unix timestamp
   questionsToDate?: string; // ISO datetime string or Unix timestamp
 }

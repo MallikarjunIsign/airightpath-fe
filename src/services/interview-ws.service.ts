@@ -2,31 +2,35 @@ import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
 import { getAccessToken } from "./api.service";
 
+/**
+ * Where SockJS should dial for the interview socket.
+ *
+ * The STOMP endpoint `/ws` is registered on the main application server, so this
+ * is always the same origin as the REST API — never a different port. That is
+ * why the fallback derives from `VITE_API_BASE_URL` rather than guessing a port
+ * number: the previous version hardcoded 8082, which is the stage port, so a dev
+ * machine dialled a port with nothing behind it and every interview opened on
+ * "Connection lost. Reconnecting..." with no first question.
+ */
 const getWsBaseUrl = () => {
-  let envUrl = import.meta.env.VITE_WS_BASE_URL;
-  if (envUrl) {
-    envUrl = envUrl.trim();
-    // SockJS requires http/https protocols, not ws/wss
-    return envUrl.replace(/^ws:/, "http:").replace(/^wss:/, "https:");
-  }
-  
-  const protocol = window.location.protocol;
-  const hostname = window.location.hostname;
-  const port = window.location.port;
+  // SockJS speaks http/https; ws/wss is the raw-WebSocket spelling and it
+  // rejects those outright.
+  const toHttp = (value: string) =>
+    value.trim().replace(/^ws:/, "http:").replace(/^wss:/, "https:").replace(/\/+$/, "");
 
-  // If on localhost or a local IP (e.g. 192.168.x.x), we likely need port 8082 for the backend
-  if (
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname)
-  ) {
-    // If we're currently on the default Vite port, switch to the backend port
-    if (port === "5173") {
-      return `${protocol}//${hostname}:8082`;
-    }
+  const explicit = import.meta.env.VITE_WS_BASE_URL;
+  if (explicit) {
+    return toHttp(explicit);
   }
 
-  return `${protocol}//${window.location.host}`;
+  // Same server as the API, by construction.
+  const apiBase = import.meta.env.VITE_API_BASE_URL;
+  if (apiBase) {
+    return toHttp(apiBase);
+  }
+
+  // Served from the backend itself (production build behind one origin).
+  return `${window.location.protocol}//${window.location.host}`;
 };
 
 const WS_BASE_URL = getWsBaseUrl();
@@ -40,10 +44,17 @@ class InterviewWsService {
     string,
     { unsubscribe: () => void; callback: SubscriptionCallback }
   > = new Map();
-  private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
+  /** Milliseconds stompjs waits before each retry. 0 would disable retrying. */
   private reconnectDelay = 2000;
   private errorCallback: ((error: string) => void) | null = null;
+  /**
+   * How many times the socket has dropped since it was last up.
+   *
+   * stompjs owns the retry loop itself (see {@link reconnectDelay}); this only
+   * counts the drops so the candidate's banner can say something true. It used
+   * to be reset on connect and never incremented anywhere, so the banner always
+   * read "attempt 0" however long the socket had been down.
+   */
   public currentReconnectAttempts = 0;
   private currentParams: string = "";
 
@@ -107,12 +118,18 @@ class InterviewWsService {
       heartbeatOutgoing: 4000,
       onConnect: () => {
         console.log("STOMP connected successfully");
-        this.reconnectAttempts = 0;
         this.currentReconnectAttempts = 0;
         if (onConnect) onConnect();
       },
       onDisconnect: () => {
         console.log("STOMP disconnected");
+        if (onDisconnect) onDisconnect();
+      },
+      onWebSocketClose: () => {
+        // stompjs retries on its own; this is the only hook that fires per drop,
+        // so it is where the count has to come from.
+        this.currentReconnectAttempts += 1;
+        console.warn("WebSocket closed; retry", this.currentReconnectAttempts);
         if (onDisconnect) onDisconnect();
       },
       onStompError: (frame) => {

@@ -13,6 +13,13 @@ import { jobApplicationService } from '@/services/job-application.service';
 import { interviewService } from '@/services/interview.service';
 import { MESSAGES } from '@/config/messages';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
+import { INTERVIEW_ROUND_LABELS } from '@/types/interview.types';
+import type { InterviewRound } from '@/types/interview.types';
+
+const ROUND_OPTIONS = (Object.keys(INTERVIEW_ROUND_LABELS) as InterviewRound[]).map((value) => ({
+  value,
+  label: INTERVIEW_ROUND_LABELS[value],
+}));
 
 export function InterviewSchedulerPage() {
   const { showToast } = useToast();
@@ -26,6 +33,11 @@ export function InterviewSchedulerPage() {
   const [minDateTime] = useState(nowDateTimeLocal);
   const deadlineInPast = !!deadlineTime && isPast(deadlineTime);
   const [sendEmail, setSendEmail] = useState(true);
+  /**
+   * Which interview to book. L2 first because it is the round that follows the
+   * exam; L3 is scheduled after it, for candidates who passed.
+   */
+  const [round, setRound] = useState<InterviewRound>('L2_TECHNICAL');
   const [questionsFromDate, setQuestionsFromDate] = useState('');
   const [questionsToDate, setQuestionsToDate] = useState('');
 
@@ -118,6 +130,7 @@ export function InterviewSchedulerPage() {
         jobPrefix: selectedPrefix,
         deadlineTime,
         sendEmail,
+        round,
         questionsFromDate: questionsFromDate || undefined,
         questionsToDate: questionsToDate || undefined,
       });
@@ -176,6 +189,20 @@ export function InterviewSchedulerPage() {
               value={selectedPrefix}
               onChange={(e) => setSelectedPrefix(e.target.value)}
             />
+
+            {/* Round — what is being booked, so it sits above the candidate list
+                rather than next to the submit button. */}
+            {selectedPrefix && (
+              <div className="max-w-md">
+                <Select
+                  label="Interview round"
+                  options={ROUND_OPTIONS}
+                  value={round}
+                  onChange={(e) => setRound(e.target.value as InterviewRound)}
+                  helperText="Each round is booked separately and graded on its own prompt."
+                />
+              </div>
+            )}
 
             {/* Candidate Selection */}
             {selectedPrefix && (

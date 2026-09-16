@@ -147,8 +147,10 @@ type BulkAction =
   | 'reconfirmation'
   | 'success'
   | 'failure'
-  /** Schedules the AI interview and moves the candidate out of the exam stage. */
-  | 'interview';
+  /** Books the L2 technical round and moves the candidate out of the exam stage. */
+  | 'interview-l2'
+  /** Books the L3 behavioural round, normally after L2 has been passed. */
+  | 'interview-l3';
 
 const BULK_ACTION_CONFIG: Record<
   BulkAction,
@@ -162,7 +164,11 @@ const BULK_ACTION_CONFIG: Record<
   // The only action here that creates something rather than sending a message:
   // it books the interview and advances the candidate's stage. The date/time is
   // the deadline by which they must sit it, so it is required, not optional.
-  interview: { label: 'Send to Interview', hasDateTime: true, icon: <Video size={16} /> },
+  // One action per round. The round is carried by the button rather than a
+  // dropdown inside the modal, so the label states exactly what gets booked and
+  // the confirmation cannot disagree with it.
+  'interview-l2': { label: 'Send to L2 Technical', hasDateTime: true, icon: <Video size={16} /> },
+  'interview-l3': { label: 'Send to L3 Behavioural', hasDateTime: true, icon: <Video size={16} /> },
 };
 
 /**
@@ -189,9 +195,11 @@ const STAGE_ACTIONS: Record<string, BulkAction[]> = {
   // The forward step after an exam. Before this, moving someone into the
   // interview stage meant leaving Candidates for the Interview Scheduler and
   // finding them again there.
-  EXAM_COMPLETED: ['interview', 'rejection'],
-  INTERVIEW_SCHEDULED: ['rejection'],
-  INTERVIEW_COMPLETED: ['success', 'rejection'],
+  EXAM_COMPLETED: ['interview-l2', 'rejection'],
+  // L3 is offered from the interview stages: a candidate reaches the behavioural
+  // round after sitting the technical one, not straight out of the exam.
+  INTERVIEW_SCHEDULED: ['interview-l3', 'rejection'],
+  INTERVIEW_COMPLETED: ['interview-l3', 'success', 'rejection'],
   SELECTED: ['rejection'],
 };
 
@@ -610,7 +618,8 @@ export function CandidateDetailsPage() {
         case 'failure':
           await jobApplicationService.sendFailureMail(payload);
           break;
-        case 'interview':
+        case 'interview-l2':
+        case 'interview-l3':
           // Not a mail action: this books the interview itself. The server
           // creates a schedule per candidate, emails the invitation, and moves
           // anyone still in the exam stage to Interview Scheduled.
@@ -619,6 +628,7 @@ export function CandidateDetailsPage() {
             emails,
             deadlineTime: modalDateTime,
             sendEmail: true,
+            round: modalAction === 'interview-l2' ? 'L2_TECHNICAL' : 'L3_BEHAVIORAL',
           });
           break;
       }
@@ -933,7 +943,7 @@ export function CandidateDetailsPage() {
           hasDateTime={BULK_ACTION_CONFIG[modalAction].hasDateTime}
           // An interview with no deadline never expires and never chases the
           // candidate, so the date is as mandatory here as on the ack mail.
-          dateTimeRequired={modalAction === 'ack' || modalAction === 'interview'}
+          dateTimeRequired={modalAction === 'ack' || modalAction.startsWith('interview-')}
           recipientCount={selectedEmails.size}
           sending={sending}
           dateTime={modalDateTime}

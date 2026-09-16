@@ -71,11 +71,33 @@ const PROMPT_TABS: PromptTab[] = [
     placeholders: [],
   },
   {
+    key: 'interview-l2-start',
+    label: 'L2 Technical',
+    promptType: 'INTERVIEW_L2_TECHNICAL',
+    promptStage: 'START',
+    description:
+      'System prompt for the L2 technical interview. Sent at the start of the round. Left empty, the round falls back to the shared Interview prompt below.',
+    placeholders: [...JOB_PLACEHOLDERS, '{{email}}', '{{interviewerName}}', '{{categories}}'],
+  },
+  {
+    key: 'interview-l3-start',
+    label: 'L3 Behavioural',
+    promptType: 'INTERVIEW_L3_BEHAVIORAL',
+    promptStage: 'START',
+    description:
+      'System prompt for the L3 behavioural round — the one usually called the HR interview. Left empty, it falls back to the shared Interview prompt below.',
+    placeholders: [...JOB_PLACEHOLDERS, '{{email}}', '{{interviewerName}}', '{{categories}}'],
+  },
+  {
+    // Kept for jobs configured before rounds existed: both rounds fall back to
+    // this when they have no prompt of their own, so removing the tab would
+    // hide the prompt those jobs are actually interviewing with.
     key: 'interview-start',
-    label: 'Interview',
+    label: 'Interview (shared)',
     promptType: 'INTERVIEW',
     promptStage: 'START',
-    description: 'System prompt that guides the AI interviewer. This is sent at the start of every interview.',
+    description:
+      'Fallback system prompt, used by any round with no prompt of its own. Jobs set up before rounds existed use only this.',
     placeholders: [...JOB_PLACEHOLDERS, '{{email}}', '{{interviewerName}}', '{{categories}}'],
   },
 ];
