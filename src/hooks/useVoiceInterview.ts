@@ -23,7 +23,19 @@ export function useVoiceInterview() {
   // State
   const [state, setState] = useState<VoiceInterviewState>("pre-start");
   const [scheduleId, setScheduleId] = useState<number | null>(null);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
+  /**
+   * The same id, readable from a callback that was built before it arrived.
+   *
+   * Every STOMP destination in this hook embeds the schedule id, and the id
+   * only exists after `startInterview` has answered — so a callback memoised on
+   * the first render captures `null` and publishes to
+   * `/app/interview/null/submit-answer`, which matches no `@MessageMapping`.
+   * The message is dropped without a reply, the UI waits in `processing`, and
+   * the candidate is told "Response timed out" however many times they try.
+   * Reading through a ref keeps the destination correct no matter when the
+   * callback was created.
+   */
+  const scheduleIdRef = useRef<number | null>(null);
   const [interviewerName, setInterviewerName] = useState("Sarah");
   const [conversation, setConversation] = useState<ConversationEntry[]>([]);
   const [questionsAsked, setQuestionsAsked] = useState(0);
@@ -58,7 +70,8 @@ export function useVoiceInterview() {
   const [codeOutput, setCodeOutput] = useState("");
 
   // Audio hooks
-  const audioStreaming = useAudioStreaming(scheduleId, userEmail);
+  // Takes the id only; the email was being passed and silently discarded.
+  const audioStreaming = useAudioStreaming(scheduleId);
   const audioPlayback = useAudioPlayback();
 
   // Stable refs for audio playback functions (avoid recreating callbacks on every render)
@@ -83,6 +96,26 @@ export function useVoiceInterview() {
       const isCoding = match ? match[1].toUpperCase() === "CODING" : false;
       const cleanText = text.replace(tagRegex, "").trim();
       return { cleanText, isCoding };
+    },
+    [],
+  );
+
+  /**
+   * Publish to one of this interview's destinations.
+   *
+   * Deliberately takes only the action, so no caller can assemble a destination
+   * with a stale or missing id, and refuses to send at all before the id is
+   * known — a dropped message with a warning beats one silently addressed to
+   * `null`.
+   */
+  const sendToInterview = useCallback(
+    (action: string, body: Record<string, unknown>) => {
+      const id = scheduleIdRef.current;
+      if (id === null) {
+        console.warn(`Ignoring "${action}" — the interview has not started yet.`);
+        return;
+      }
+      interviewWsService.send(`/app/interview/${id}/${action}`, body);
     },
     [],
   );
@@ -344,7 +377,7 @@ export function useVoiceInterview() {
 
         const { data: response } = await aiService.startVoiceInterview(request);
         setScheduleId(response.scheduleId);
-        setUserEmail(request.email);
+        scheduleIdRef.current = response.scheduleId;
         setInterviewerName(response.interviewerName);
 
         // Detect and strip question type tags from first question
@@ -431,13 +464,11 @@ export function useVoiceInterview() {
 
     // Interrupt any playing audio
     audioPlayback.stopPlayback();
-    interviewWsService.send(`/app/interview/${scheduleId}/interrupt`, {
-      reason: "candidate_speaking",
-    });
+    sendToInterview("interrupt", { reason: "candidate_speaking" });
 
     await audioStreaming.startRecording();
     setState("answering");
-  }, [audioStreaming, audioPlayback]);
+  }, [audioStreaming, audioPlayback, sendToInterview]);
 
   // Submit answer — stops recording, waits for final transcription, then sends
   const submitAnswer = useCallback(
@@ -500,10 +531,7 @@ export function useVoiceInterview() {
           payload.codeOutput = submittedOutput;
         }
       }
-      interviewWsService.send(
-        `/app/interview/${scheduleId}/submit-answer`,
-        payload,
-      );
+      sendToInterview("submit-answer", payload);
 
       setState("processing");
 
@@ -515,7 +543,7 @@ export function useVoiceInterview() {
         setError("Response timed out. Please try answering again.");
       }, APP_CONFIG.INTERVIEW_PROCESSING_TIMEOUT_MS);
     },
-    [audioStreaming, codeContent, codeLanguage, codeOutput],
+    [audioStreaming, codeContent, codeLanguage, codeOutput, sendToInterview],
   );
 
   // Skip question — sends a skipped answer bypassing the empty-transcript guard
@@ -534,7 +562,7 @@ export function useVoiceInterview() {
     ]);
 
     // Send only the answer (empty) with skip flag
-    interviewWsService.send(`/app/interview/${scheduleId}/submit-answer`, {
+    sendToInterview("submit-answer", {
       transcript: "",
       wordTimestamps: [],
       skipped: true,
@@ -549,18 +577,14 @@ export function useVoiceInterview() {
       setState("active");
       setError("Response timed out. Please try answering again.");
     }, APP_CONFIG.INTERVIEW_PROCESSING_TIMEOUT_MS);
-  }, []);
+  }, [sendToInterview]);
 
   // Send proctoring event
   const sendProctoringEvent = useCallback(
     (type: string, details: string) => {
-      if (!scheduleId) return;
-      interviewWsService.send(`/app/interview/${scheduleId}/proctoring-event`, {
-        type,
-        details,
-      });
+      sendToInterview("proctoring-event", { type, details });
     },
-    [scheduleId],
+    [sendToInterview],
   );
 
   // End interview

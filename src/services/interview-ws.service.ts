@@ -58,7 +58,8 @@ class InterviewWsService {
   public currentReconnectAttempts = 0;
   private currentParams: string = "";
 
-  setErrorCallback(cb: (error: string) => void) {
+  /** Pass null on teardown, so a dead component stops receiving socket errors. */
+  setErrorCallback(cb: ((error: string) => void) | null) {
     this.errorCallback = cb;
   }
 

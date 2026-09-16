@@ -95,12 +95,18 @@ export function InterviewPage() {
   const [cameraPermission, setCameraPermission] = useState<'granted' | 'denied' | 'prompt' | 'checking'>('checking');
 
   // Instruction countdown & audio narration
-  const [instructionCountdown, setInstructionCountdown] = useState(APP_CONFIG.INTERVIEW_INSTRUCTION_COUNTDOWN_SECONDS);
+  // Annotated because APP_CONFIG is `as const`: inferred, these are the literal
+  // types 30 and 600, and a countdown that cannot hold 29 is not a countdown.
+  const [instructionCountdown, setInstructionCountdown] = useState<number>(
+    APP_CONFIG.INTERVIEW_INSTRUCTION_COUNTDOWN_SECONDS,
+  );
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const { isSpeaking, speak: speakInstruction, stop: stopInstruction } = useSpeechSynthesis();
 
   // Answer timer
-  const [answerSecondsLeft, setAnswerSecondsLeft] = useState(APP_CONFIG.INTERVIEW_ANSWER_TIMEOUT_SECONDS);
+  const [answerSecondsLeft, setAnswerSecondsLeft] = useState<number>(
+    APP_CONFIG.INTERVIEW_ANSWER_TIMEOUT_SECONDS,
+  );
   const answerTimerRef = useRef<number | null>(null);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -702,7 +708,7 @@ export function InterviewPage() {
         instructionCountdown={instructionCountdown}
         micPermission={micPermission}
         cameraPermission={cameraPermission}
-        error={voiceInterview.error}
+        error={voiceInterview.error ?? undefined}
         starting={voiceInterview.state === 'starting'}
         canStartInterview={canStartInterview}
         onStart={handleStartInterview}
