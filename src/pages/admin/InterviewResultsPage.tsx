@@ -30,7 +30,51 @@ import { interviewService, type VoiceConversationEntryDTO } from '@/services/int
 import { aiService } from '@/services/ai.service';
 import { usePersistentState } from '@/hooks/usePersistentState';
 import type { JobPostDTO } from '@/types/job.types';
-import type { InterviewSchedule, VoiceEvaluationResult, ProctoringEvent, InterviewStats, CompletionReason } from '@/types/interview.types';
+import type { InterviewSchedule, VoiceEvaluationResult, ProctoringEvent, InterviewStats, CompletionReason, InterviewRound } from '@/types/interview.types';
+import { INTERVIEW_ROUND_LABELS } from '@/types/interview.types';
+
+/**
+ * Widths for the fixed-layout table, in two sets.
+ *
+ * The Round column only appears in the all-rounds view, so the other columns
+ * have to give up room for it — and `table-fixed` will not work that out on its
+ * own. Kept as values rather than Tailwind `w-[..]` classes because Tailwind
+ * only emits classes it can see in the source, never ones built at runtime.
+ */
+const COLUMN_WIDTHS = {
+  withRound: {
+    candidate: '16%', round: '12%', status: '9%', result: '8%', score: '7%',
+    duration: '7%', warnings: '6%', completion: '11%', recommendation: '11%', actions: '13%',
+  },
+  withoutRound: {
+    // `round` is never read here — the column is not rendered — but both sets
+    // need the same keys for the lookup below to typecheck.
+    candidate: '19%', round: '0', status: '10%', result: '9%', score: '8%',
+    duration: '8%', warnings: '8%', completion: '12%', recommendation: '12%', actions: '14%',
+  },
+} as const;
+
+/** 'ALL' is the default view; the rest mirror the server's InterviewRound. */
+type RoundFilter = 'ALL' | InterviewRound;
+
+const ROUND_FILTER_OPTIONS: { value: RoundFilter; label: string }[] = [
+  { value: 'ALL', label: 'All rounds' },
+  { value: 'L2_TECHNICAL', label: INTERVIEW_ROUND_LABELS.L2_TECHNICAL },
+  { value: 'L3_BEHAVIORAL', label: INTERVIEW_ROUND_LABELS.L3_BEHAVIORAL },
+];
+
+/**
+ * What to call an interview's round.
+ *
+ * Prefers the label the server rendered, falls back to mapping the enum, and
+ * only then to the technical round — which is what a row with no round at all
+ * means, since that is the round the server defaults historic schedules to.
+ */
+function roundLabelOf(interview: InterviewSchedule): string {
+  if (interview.roundLabel) return interview.roundLabel;
+  if (interview.round) return INTERVIEW_ROUND_LABELS[interview.round];
+  return INTERVIEW_ROUND_LABELS.L2_TECHNICAL;
+}
 
 function getStatusVariant(status: string): 'warning' | 'info' | 'success' {
   switch (status) {
@@ -97,6 +141,17 @@ function ScoreCell({ interview }: Readonly<{ interview: InterviewSchedule }>) {
   const score = interview.evaluation?.overallScore;
   if (score == null) return <span className="text-sm text-[var(--textTertiary)]">--</span>;
   return <span className="font-semibold text-[var(--text)]">{score.toFixed(1)}/10</span>;
+}
+
+function RoundCell({ interview }: Readonly<{ interview: InterviewSchedule }>) {
+  // Behavioural reads as the later, softer round; technical as the default one.
+  // Neither is a pass/fail signal, so both stay clear of success/error colours.
+  const round = interview.round ?? 'L2_TECHNICAL';
+  return (
+    <Badge variant={round === 'L3_BEHAVIORAL' ? 'secondary' : 'info'} size="sm">
+      {roundLabelOf(interview)}
+    </Badge>
+  );
 }
 
 function WarningsCell({ interview }: Readonly<{ interview: InterviewSchedule }>) {
@@ -174,6 +229,10 @@ function formatDuration(startedAt?: string, endedAt?: string): string {
 export function InterviewResultsPage() {
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
   const [selectedPrefix, setSelectedPrefix] = usePersistentState('interviewResults:selectedPrefix', '');
+  // Deliberately not persisted, unlike the job. A filter that survives a reload
+  // hides rows the reviewer never chose to hide on this visit; the job is the
+  // thing worth remembering.
+  const [roundFilter, setRoundFilter] = useState<RoundFilter>('ALL');
   const [interviews, setInterviews] = useState<InterviewSchedule[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [loadingResults, setLoadingResults] = useState(false);
@@ -200,7 +259,7 @@ export function InterviewResultsPage() {
       setInterviews([]);
       setStats(null);
     }
-  }, [selectedPrefix]);
+  }, [selectedPrefix, roundFilter]);
 
   async function fetchJobs() {
     setLoadingJobs(true);
@@ -214,11 +273,17 @@ export function InterviewResultsPage() {
     }
   }
 
+  const roundOrUndefined = roundFilter === 'ALL' ? undefined : roundFilter;
+  // With one round selected the column would repeat the same value on every
+  // row, so it is dropped and named once in the card header instead.
+  const showRound = roundFilter === 'ALL';
+  const columnWidths = showRound ? COLUMN_WIDTHS.withRound : COLUMN_WIDTHS.withoutRound;
+
   async function fetchResults() {
     if (!selectedPrefix) return;
     setLoadingResults(true);
     try {
-      const res = await interviewService.getResults(selectedPrefix);
+      const res = await interviewService.getResults(selectedPrefix, roundOrUndefined);
       setInterviews(res.data ?? []);
     } catch {
       // Error toast auto-handled by interceptor
@@ -230,7 +295,8 @@ export function InterviewResultsPage() {
   async function fetchStats() {
     if (!selectedPrefix) return;
     try {
-      const res = await interviewService.getStats(selectedPrefix);
+      // Same filter as the results call, so the cards describe the rows below.
+      const res = await interviewService.getStats(selectedPrefix, roundOrUndefined);
       setStats(res.data);
     } catch {
       // Stats are optional
@@ -279,9 +345,13 @@ export function InterviewResultsPage() {
   const handleExportCSV = useCallback(() => {
     if (interviews.length === 0) return;
 
-    const headers = ['Email', 'Status', 'Result', 'Completion Reason', 'Score', 'Warnings', 'Duration', 'Assigned', 'Deadline'];
+    // Round is a column even when the view is filtered to one: an exported file
+    // outlives the screen's filter state, and a reader opening it later cannot
+    // otherwise tell which interview the numbers came from.
+    const headers = ['Email', 'Round', 'Status', 'Result', 'Completion Reason', 'Score', 'Warnings', 'Duration', 'Assigned', 'Deadline'];
     const rows = interviews.map((i) => [
       i.email,
+      roundLabelOf(i),
       i.attemptStatus,
       i.interviewResult,
       getCompletionReasonLabel(i.completionReason),
@@ -297,10 +367,11 @@ export function InterviewResultsPage() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `interview-results-${selectedPrefix}-${new Date().toISOString().slice(0, 10)}.csv`;
+    const roundSlug = roundFilter === 'ALL' ? '' : `-${roundFilter.toLowerCase()}`;
+    link.download = `interview-results-${selectedPrefix}${roundSlug}-${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
-  }, [interviews, selectedPrefix]);
+  }, [interviews, selectedPrefix, roundFilter]);
 
   const jobOptions = [
     { value: '', label: 'Select a job' },
@@ -327,12 +398,19 @@ export function InterviewResultsPage() {
       {/* Job Selector */}
       <Card>
         <CardContent>
-          <div className="max-w-md">
+          <div className="grid gap-4 sm:grid-cols-2 max-w-2xl">
             <Select
               label="Select Job"
               options={jobOptions}
               value={selectedPrefix}
               onChange={(e) => setSelectedPrefix(e.target.value)}
+            />
+            <Select
+              label="Round"
+              options={ROUND_FILTER_OPTIONS}
+              value={roundFilter}
+              onChange={(e) => setRoundFilter(e.target.value as RoundFilter)}
+              disabled={!selectedPrefix}
             />
           </div>
         </CardContent>
@@ -401,9 +479,17 @@ export function InterviewResultsPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <Video size={20} className="text-[var(--primary)]" />
                 <CardTitle>Results ({interviews.length})</CardTitle>
+                {/* Named here rather than in a column: with a round selected
+                    every row carries the same one, so it belongs to the whole
+                    table, not to each line of it. */}
+                {roundFilter !== 'ALL' && (
+                  <Badge variant={roundFilter === 'L3_BEHAVIORAL' ? 'secondary' : 'info'} size="sm">
+                    {INTERVIEW_ROUND_LABELS[roundFilter]}
+                  </Badge>
+                )}
               </div>
               {interviews.length > 0 && (
                 <Button variant="outline" size="sm" leftIcon={<Download size={14} />} onClick={handleExportCSV}>
@@ -421,7 +507,11 @@ export function InterviewResultsPage() {
               <EmptyState
                 icon={<Video size={48} />}
                 title="No interview results"
-                description="No interviews have been conducted for this job yet."
+                description={
+                  roundFilter === 'ALL'
+                    ? 'No interviews have been conducted for this job yet.'
+                    : `No ${INTERVIEW_ROUND_LABELS[roundFilter]} interviews for this job yet. Choose "All rounds" to see the others.`
+                }
               />
             ) : (
               <>
@@ -445,6 +535,7 @@ export function InterviewResultsPage() {
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2">
+                        {showRound && <RoundCell interview={interview} />}
                         <Badge variant={getStatusVariant(interview.attemptStatus)} size="sm">
                           {interview.attemptStatus.replace(/_/g, ' ')}
                         </Badge>
@@ -488,15 +579,18 @@ export function InterviewResultsPage() {
                   <Table className="table-fixed">
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="w-[19%]">Candidate</TableHead>
-                        <TableHead className="w-[10%]">Status</TableHead>
-                        <TableHead className="w-[9%]">Result</TableHead>
-                        <TableHead className="w-[8%]">Score</TableHead>
-                        <TableHead className="w-[8%]">Duration</TableHead>
-                        <TableHead className="w-[8%]">Warnings</TableHead>
-                        <TableHead className="w-[12%]">Completion</TableHead>
-                        <TableHead className="w-[12%]">Recommendation</TableHead>
-                        <TableHead className="w-[14%]">Actions</TableHead>
+                        <TableHead style={{ width: columnWidths.candidate }}>Candidate</TableHead>
+                        {showRound && (
+                          <TableHead style={{ width: columnWidths.round }}>Round</TableHead>
+                        )}
+                        <TableHead style={{ width: columnWidths.status }}>Status</TableHead>
+                        <TableHead style={{ width: columnWidths.result }}>Result</TableHead>
+                        <TableHead style={{ width: columnWidths.score }}>Score</TableHead>
+                        <TableHead style={{ width: columnWidths.duration }}>Duration</TableHead>
+                        <TableHead style={{ width: columnWidths.warnings }}>Warnings</TableHead>
+                        <TableHead style={{ width: columnWidths.completion }}>Completion</TableHead>
+                        <TableHead style={{ width: columnWidths.recommendation }}>Recommendation</TableHead>
+                        <TableHead style={{ width: columnWidths.actions }}>Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -505,6 +599,11 @@ export function InterviewResultsPage() {
                           <TableCell className="font-medium align-top break-all">
                             {interview.email}
                           </TableCell>
+                          {showRound && (
+                            <TableCell className="align-top">
+                              <RoundCell interview={interview} />
+                            </TableCell>
+                          )}
                           <TableCell className="align-top">
                             <Badge variant={getStatusVariant(interview.attemptStatus)} size="sm">
                               {interview.attemptStatus.replace(/_/g, ' ')}
@@ -560,6 +659,16 @@ export function InterviewResultsPage() {
           </div>
         ) : (
           <div className="space-y-4">
+            {/* Which interview this was. The modal title carries the candidate,
+                and a score means something different in a behavioural round
+                than a technical one, so the round has to travel with it. */}
+            {(detailData ?? selectedInterview) && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-[var(--textSecondary)]">Round</span>
+                <RoundCell interview={(detailData ?? selectedInterview)!} />
+              </div>
+            )}
+
             {/* Tabs */}
             <div className="flex border-b border-[var(--border)]">
               {[

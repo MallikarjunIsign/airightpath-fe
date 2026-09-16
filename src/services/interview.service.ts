@@ -5,8 +5,23 @@ import type {
   InterviewSchedule,
   BulkInterviewAssignRequest,
   InterviewStats,
+  InterviewRound,
   ProctoringEvent,
 } from "@/types/interview.types";
+
+/**
+ * Query for the results list and the stats that summarise it.
+ *
+ * Absent keys rather than empty ones: the server reads an unrecognised `round`
+ * as a 400, and `round=` is unrecognised — so an "all rounds" view has to omit
+ * the parameter, not send it blank.
+ */
+function buildResultsParams(jobPrefix?: string, round?: InterviewRound) {
+  const params: Record<string, string> = {};
+  if (jobPrefix) params.jobPrefix = jobPrefix;
+  if (round) params.round = round;
+  return Object.keys(params).length > 0 ? params : undefined;
+}
 
 export interface VoiceConversationEntryDTO {
   id: number;
@@ -45,9 +60,10 @@ export const interviewService = {
     });
   },
 
-  getResults(jobPrefix?: string) {
+  /** `round` omitted returns every round. */
+  getResults(jobPrefix?: string, round?: InterviewRound) {
     return api.get<InterviewSchedule[]>(ENDPOINTS.INTERVIEWS.GET_RESULTS, {
-      params: jobPrefix ? { jobPrefix } : undefined,
+      params: buildResultsParams(jobPrefix, round),
     });
   },
 
@@ -58,9 +74,14 @@ export const interviewService = {
   },
 
   // Item 16: Admin stats
-  getStats(jobPrefix?: string) {
+  /**
+   * Takes the same filters as {@link getResults} on purpose: the server derives
+   * these figures from that very list, so passing a different filter here would
+   * put the summary cards out of step with the table they sit above.
+   */
+  getStats(jobPrefix?: string, round?: InterviewRound) {
     return api.get<InterviewStats>(ENDPOINTS.INTERVIEW_ADMIN.STATS, {
-      params: jobPrefix ? { jobPrefix } : undefined,
+      params: buildResultsParams(jobPrefix, round),
     });
   },
 

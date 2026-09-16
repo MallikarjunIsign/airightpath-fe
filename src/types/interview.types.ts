@@ -98,6 +98,14 @@ export interface InterviewSchedule {
   endedAt?: string;
   evaluationJson?: string;
   completionReason?: CompletionReason;
+  /**
+   * Which interview this was. Always sent by the server, including for
+   * schedules booked before rounds existed — those report the default round
+   * rather than null, so the optional marker here is only about older clients.
+   */
+  round?: InterviewRound;
+  /** Server-rendered label for `round`; prefer it over mapping the enum. */
+  roundLabel?: string;
 }
 
 export interface StartInterviewRequest {
