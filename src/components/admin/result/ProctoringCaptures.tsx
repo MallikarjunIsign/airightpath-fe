@@ -51,8 +51,24 @@ interface ProctoringCapturesProps {
    * request that failed.
    */
   lookupError?: string | null;
-  /** "Aptitude" or "Coding" — used in the copy only. */
+  /**
+   * One interview round's captures, by schedule id.
+   *
+   * Interview captures need none of the attempt-window reasoning below: a
+   * schedule id names exactly one sitting, so the endpoint's answer *is* the
+   * set to show. Mutually exclusive with the assessment inputs in practice —
+   * assessment ids and schedule ids come from independent sequences.
+   */
+  interviewScheduleId?: number;
+  /** "Aptitude", "Coding", or a round's name — used in the copy only. */
   moduleLabel: string;
+  /**
+   * What the sitting is called, for the copy: "exam" or "interview".
+   *
+   * The wording here was written for exams, and an interview reviewer reading
+   * "before the L2 — Technical exam" would reasonably wonder which exam.
+   */
+  contextNoun?: string;
   /**
    * When the attempt being reviewed was live, so a re-sit shows its own photo.
    *
@@ -118,7 +134,9 @@ export function ProctoringCaptures({
   candidateEmail,
   jobPrefix,
   lookupError,
+  interviewScheduleId,
   moduleLabel,
+  contextNoun = 'exam',
   attemptWindow,
 }: Readonly<ProctoringCapturesProps>) {
   const [loading, setLoading] = useState(false);
@@ -136,7 +154,8 @@ export function ProctoringCaptures({
   // would restart the load on every render.
   const windowFrom = attemptWindow?.from ?? null;
   const windowTo = attemptWindow?.to ?? null;
-  const canLookUp = (!!candidateEmail && !!jobPrefix) || assessmentId !== undefined;
+  const canLookUp =
+    interviewScheduleId !== undefined || (!!candidateEmail && !!jobPrefix) || assessmentId !== undefined;
 
   useEffect(() => {
     if (!canLookUp) return;
@@ -157,10 +176,14 @@ export function ProctoringCaptures({
         // against a paper this screen resolved differently is still found.
         // Falls back to the single-assessment read when the caller could not
         // supply both.
-        const res =
-          candidateEmail && jobPrefix
-            ? await examProctoringService.getCapturesForCandidate(candidateEmail, jobPrefix)
-            : await examProctoringService.getCapturesForAssessment(assessmentId!);
+        let res;
+        if (interviewScheduleId !== undefined) {
+          res = await examProctoringService.getCapturesForInterview(interviewScheduleId);
+        } else if (candidateEmail && jobPrefix) {
+          res = await examProctoringService.getCapturesForCandidate(candidateEmail, jobPrefix);
+        } else {
+          res = await examProctoringService.getCapturesForAssessment(assessmentId!);
+        }
 
         // Tolerate both the ApiResponse envelope and a bare array, since older
         // endpoints in this API return the list unwrapped.
@@ -170,7 +193,12 @@ export function ProctoringCaptures({
           : ((body as { data?: ProctoringCapture[] })?.data ?? []);
         if (cancelled) return;
 
-        const captures = selectForAttempt(all, assessmentId, { from: windowFrom, to: windowTo });
+        // A schedule id is already unambiguous, so there is nothing to select
+        // between and nothing filed "elsewhere".
+        const captures =
+          interviewScheduleId !== undefined
+            ? all
+            : selectForAttempt(all, assessmentId, { from: windowFrom, to: windowTo });
         if (!cancelled) setElsewhere(all.length - captures.length);
 
         // The bytes are fetched per capture — and only for the ones being shown,
@@ -200,7 +228,7 @@ export function ProctoringCaptures({
     return () => {
       cancelled = true;
     };
-  }, [canLookUp, assessmentId, candidateEmail, jobPrefix, windowFrom, windowTo, attempt]);
+  }, [canLookUp, assessmentId, interviewScheduleId, candidateEmail, jobPrefix, windowFrom, windowTo, attempt]);
 
   useEffect(() => {
     return () => {
@@ -258,14 +286,14 @@ export function ProctoringCaptures({
         {/* No assessment record — we cannot even ask which attempt to show. */}
         {!hasAssessment && !lookupError && (
           <EmptyRow
-            text={`This result isn't linked to a ${moduleLabel.toLowerCase()} assessment record, so no pre-exam capture can be looked up.`}
+            text={`This result isn't linked to a ${moduleLabel.toLowerCase()} record, so no pre-${contextNoun} capture can be looked up.`}
           />
         )}
 
         {hasAssessment && loading && (
           <p className="flex items-center gap-2 text-sm text-[var(--textSecondary)] py-4">
             <Loader2 size={16} className="animate-spin" />
-            Loading what was captured before the {moduleLabel.toLowerCase()} exam…
+            Loading what was captured before the {moduleLabel.toLowerCase()} {contextNoun}…
           </p>
         )}
 
@@ -288,13 +316,13 @@ export function ProctoringCaptures({
 
         {hasAssessment && !loading && !error && items.length === 0 && elsewhere === 0 && (
           <EmptyRow
-            text={`Nothing was captured for this ${moduleLabel.toLowerCase()} attempt. Expected for exams sat before the pre-exam check was switched on, or while it was turned off.`}
+            text={`Nothing was captured for this ${moduleLabel.toLowerCase()} attempt. Expected for sittings before the pre-${contextNoun} check was switched on, or while it was turned off.`}
           />
         )}
 
         {hasAssessment && !loading && !error && otherAttemptOnly && (
           <EmptyRow
-            text={`Nothing was captured during this ${moduleLabel.toLowerCase()} attempt — the ${elsewhere === 1 ? 'capture' : `${elsewhere} captures`} on file for this candidate ${elsewhere === 1 ? 'belongs' : 'belong'} to another attempt at this exam.`}
+            text={`Nothing was captured during this ${moduleLabel.toLowerCase()} attempt — the ${elsewhere === 1 ? 'capture' : `${elsewhere} captures`} on file for this candidate ${elsewhere === 1 ? 'belongs' : 'belong'} to another attempt at this ${contextNoun}.`}
           />
         )}
 

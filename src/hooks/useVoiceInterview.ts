@@ -64,6 +64,14 @@ export function useVoiceInterview() {
     null,
   );
   const [lastQuestionText, setLastQuestionText] = useState<string | null>(null);
+  /**
+   * The spoken question, chunk by chunk, for the replay control.
+   *
+   * A ref rather than state: it is written on every audio frame and read only
+   * when the candidate asks to hear the question again, so re-rendering the
+   * interview on each chunk would cost a great deal and change nothing.
+   */
+  const questionAudioRef = useRef<Map<number, string>>(new Map());
 
   // Coding question state
   const [isCodingQuestion, setIsCodingQuestion] = useState(false);
@@ -202,12 +210,21 @@ export function useVoiceInterview() {
         },
       );
 
-      // TTS audio chunks - Item 14: Store for repeat
+      // TTS audio chunks, kept so the question can be replayed.
+      //
+      // Every chunk, not one of them. A question is spoken as several sentence
+      // batches, and only chunk 0 or the last chunk used to be stored — so
+      // "say it again" replayed a fragment of the question rather than the
+      // question. Keyed by index because replaying them out of order would be
+      // worse than not replaying at all.
       interviewWsService.subscribe(
         `/topic/interview/${id}/tts-audio`,
         (msg: TTSAudioMessage) => {
-          if (msg.isLast || msg.chunkIndex === 0) {
-            setLastQuestionAudio(msg.audio);
+          if (msg.chunkIndex === 0) {
+            questionAudioRef.current.clear();
+          }
+          if (msg.audio) {
+            questionAudioRef.current.set(msg.chunkIndex, msg.audio);
           }
           enqueueAudioRef.current(msg.audio, msg.text, msg.isLast);
         },
@@ -299,59 +316,38 @@ export function useVoiceInterview() {
               return;
             }
 
-            // 2. Check if this is the final summary (no "FEEDBACK:" prefix)
-            if (!responseText.startsWith("FEEDBACK:")) {
-              // Final summary
-              setConversation((prev) => [
-                ...prev,
-                {
-                  role: "interviewer",
-                  content: responseText,
-                  timestamp: new Date().toISOString(),
-                },
-              ]);
-              setState("completed");
-              return;
-            }
+            // 2. The interviewer's turn.
+            //
+            // Whether the interview is over is decided by msg.isComplete
+            // below, never by the shape of this text. It used to be inferred
+            // from the absence of a "FEEDBACK:" prefix, which was true of the
+            // old fixed-question protocol and became true of every reply once
+            // questions were generated — so the interview "completed" the
+            // moment the candidate answered the first question.
+            const { cleanText, isCoding } = detectAndCleanCodingTag(responseText);
 
-            // 3. Normal feedback + next question
-            const feedbackMatch = responseText.match(
-              /FEEDBACK:\s*(.*?)\s*NEXT QUESTION:\s*(.*)/s,
-            );
-            if (feedbackMatch) {
-              const feedback = feedbackMatch[1].trim();
-              const nextQuestion = feedbackMatch[2].trim();
-
-              // Add feedback as a system message
-              setConversation((prev) => [
-                ...prev,
-                {
-                  role: "system",
-                  content: feedback,
-                  timestamp: new Date().toISOString(),
-                },
-              ]);
-
-              // Add the next question as interviewer message
-              const { cleanText: nextQuestionClean, isCoding } =
-                detectAndCleanCodingTag(nextQuestion);
-              setIsCodingQuestion(isCoding);
+            setIsCodingQuestion(isCoding);
+            if (isCoding) {
               setCodeContent("");
               // Cleared with the editor: output from the previous problem would
               // otherwise be submitted as evidence for this one.
               setCodeOutput("");
-              setLastQuestionText(nextQuestionClean);
-
-              setConversation((prev) => [
-                ...prev,
-                {
-                  role: "interviewer",
-                  content: nextQuestionClean,
-                  timestamp: new Date().toISOString(),
-                  isCodingQuestion: isCoding,
-                },
-              ]);
             }
+            setLastQuestionText(cleanText);
+            // The previous question's audio must not outlive it: a turn that is
+            // never spoken (a code-explanation question skips TTS) would
+            // otherwise leave "say it again" replaying the question before it.
+            questionAudioRef.current.clear();
+
+            setConversation((prev) => [
+              ...prev,
+              {
+                role: "interviewer",
+                content: cleanText,
+                timestamp: new Date().toISOString(),
+                isCodingQuestion: isCoding,
+              },
+            ]);
           }
 
           setQuestionsAsked(msg.questionsAsked);
@@ -616,13 +612,35 @@ export function useVoiceInterview() {
   }, [scheduleId, audioStreaming, audioPlayback]);
 
   // Item 14: Repeat last question
+  /**
+   * Say the current question again, on demand.
+   *
+   * Prefers the interviewer's own recorded voice, replayed in chunk order so
+   * the candidate hears the whole question. Falls back to the browser's speech
+   * synthesis reading the question text, which covers the case where TTS was
+   * unavailable and the question only ever existed as text — better a
+   * synthetic voice than a control that does nothing.
+   */
   const repeatQuestion = useCallback(() => {
+    audioPlayback.stopPlayback();
+
+    const chunks = [...questionAudioRef.current.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([, audio]) => audio);
+
+    if (chunks.length > 0) {
+      chunks.forEach((audio, index) =>
+        enqueueAudioRef.current(audio, index === 0 ? lastQuestionText || "" : "", index === chunks.length - 1),
+      );
+      return;
+    }
+
     if (lastQuestionAudio) {
       enqueueAudioRef.current(lastQuestionAudio, lastQuestionText || "", true);
     } else if (lastQuestionText) {
       playBrowserTTSRef.current(lastQuestionText);
     }
-  }, [lastQuestionAudio, lastQuestionText]);
+  }, [audioPlayback, lastQuestionAudio, lastQuestionText]);
 
   // Fetch evaluation with polling (async generation may not be ready immediately)
   const fetchEvaluation = useCallback(async () => {

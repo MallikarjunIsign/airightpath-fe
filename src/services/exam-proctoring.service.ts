@@ -71,6 +71,20 @@ export const examProctoringService = {
     );
   },
 
+  /**
+   * Everything captured before one interview round, for review beside its result.
+   *
+   * A separate endpoint from the assessment one because assessment ids and
+   * interview-schedule ids are independent sequences — see the capture
+   * endpoints in api.endpoints.ts.
+   */
+  getCapturesForInterview(scheduleId: number) {
+    return api.get<ApiResponse<ProctoringCapture[]>>(
+      ENDPOINTS.EXAM_PROCTORING.INTERVIEW_CAPTURES(scheduleId),
+      silentRead
+    );
+  },
+
   /** Every capture across a candidate's attempts for one job. */
   getCapturesForCandidate(candidateEmail: string, jobPrefix: string) {
     return api.get<ApiResponse<ProctoringCapture[]>>(

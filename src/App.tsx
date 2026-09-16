@@ -27,6 +27,7 @@ import { ResultsPage } from '@/pages/admin/ResultsPage';
 import { CandidateResultDetailPage } from '@/pages/admin/CandidateResultDetailPage';
 import { InterviewSchedulerPage } from '@/pages/admin/InterviewSchedulerPage';
 import { InterviewResultsPage } from '@/pages/admin/InterviewResultsPage';
+import { InterviewCandidateResultPage } from '@/pages/admin/InterviewCandidateResultPage';
 import { JobPromptPage } from '@/pages/admin/JobPromptPage';
 
 // Test Mode — admin sandbox that rehearses the candidate journey (see
@@ -123,6 +124,11 @@ function App() {
         <Route path="assessments/results/:jobPrefix/:email" element={<CandidateResultDetailPage />} />
         <Route path="interviews/schedule" element={<InterviewSchedulerPage />} />
         <Route path="interviews/results" element={<InterviewResultsPage />} />
+        {/* Declared after the list so the bare path still matches it. */}
+        <Route
+          path="interviews/results/:jobPrefix/:email"
+          element={<InterviewCandidateResultPage />}
+        />
         <Route path="prompts" element={<JobPromptPage />} />
         <Route path="test-mode" element={<TestModeHubPage />} />
         <Route path="test-mode/aptitude" element={<TestModeAptitudePage />} />

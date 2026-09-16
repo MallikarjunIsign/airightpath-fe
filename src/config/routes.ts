@@ -21,6 +21,12 @@ export const ROUTES = {
     ASSESSMENTS_ASSIGN: '/admin/assessments/assign',
     ASSESSMENTS_UPLOAD: '/admin/assessments/upload',
     ASSESSMENTS_RESULTS: '/admin/assessments/results',
+    // One candidate's interview, every round, as a page rather than a modal —
+    // it holds full transcripts and per-area scores, which a dialog cannot show
+    // and which reviewers need to link to and come back to.
+    INTERVIEW_RESULT_DETAIL: '/admin/interviews/results/:jobPrefix/:email',
+    interviewResultDetail: (jobPrefix: string, email: string) =>
+      `/admin/interviews/results/${encodeURIComponent(jobPrefix)}/${encodeURIComponent(email)}`,
     CANDIDATE_RESULT_DETAIL: '/admin/assessments/results/:jobPrefix/:email',
     candidateResultDetail: (jobPrefix: string, email: string) =>
       `/admin/assessments/results/${encodeURIComponent(jobPrefix)}/${encodeURIComponent(email)}`,

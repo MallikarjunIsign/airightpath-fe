@@ -4,55 +4,58 @@ import {
   Video,
   ExternalLink,
   Eye,
-  Mic2,
-  BarChart3,
   Download,
   Users,
   TrendingUp,
   Clock,
   Award,
-  MessageSquare,
-  Shield,
-  Play,
-  AlertTriangle,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Select } from '@/components/ui/Select';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { Modal } from '@/components/ui/Modal';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { EvaluationBreakdown } from '@/components/interview/EvaluationBreakdown';
-import { CodeBlock } from '@/components/interview/CodeBlock';
 import { jobService } from '@/services/job.service';
-import { interviewService, type VoiceConversationEntryDTO } from '@/services/interview.service';
-import { aiService } from '@/services/ai.service';
+import { interviewService } from '@/services/interview.service';
 import { usePersistentState } from '@/hooks/usePersistentState';
+import { useNavigate } from 'react-router-dom';
+import { ROUTES } from '@/config/routes';
 import type { JobPostDTO } from '@/types/job.types';
-import type { InterviewSchedule, VoiceEvaluationResult, ProctoringEvent, InterviewStats, CompletionReason, InterviewRound } from '@/types/interview.types';
+import type { InterviewSchedule, InterviewStats, CompletionReason, InterviewRound } from '@/types/interview.types';
 import { INTERVIEW_ROUND_LABELS } from '@/types/interview.types';
 
 /**
  * Widths for the fixed-layout table, in two sets.
  *
- * The Round column only appears in the all-rounds view, so the other columns
- * have to give up room for it — and `table-fixed` will not work that out on its
- * own. Kept as values rather than Tailwind `w-[..]` classes because Tailwind
- * only emits classes it can see in the source, never ones built at runtime.
+ * Pixels, not percentages. Each header carries 32px of padding and is a single
+ * uppercase word with no break opportunity, so a percentage column that ends up
+ * narrower than its own heading cannot wrap — "DURATION", "WARNINGS" and
+ * "RECOMMENDATION" simply overflowed into the next column and the header row
+ * read as one run-on word. Absolute widths are sized to the longest heading and
+ * to the badges underneath it, and `TABLE_MIN_WIDTH` lets the table scroll
+ * inside its card rather than compress below them.
+ *
+ * Kept as values rather than Tailwind `w-[..]` classes because Tailwind only
+ * emits classes it can see in the source, never ones built at runtime.
  */
 const COLUMN_WIDTHS = {
   withRound: {
-    candidate: '16%', round: '12%', status: '9%', result: '8%', score: '7%',
-    duration: '7%', warnings: '6%', completion: '11%', recommendation: '11%', actions: '13%',
+    candidate: '200px', round: '130px', status: '115px', result: '100px', score: '85px',
+    duration: '100px', warnings: '105px', completion: '125px', recommendation: '155px',
+    actions: '150px',
   },
   withoutRound: {
     // `round` is never read here — the column is not rendered — but both sets
     // need the same keys for the lookup below to typecheck.
-    candidate: '19%', round: '0', status: '10%', result: '9%', score: '8%',
-    duration: '8%', warnings: '8%', completion: '12%', recommendation: '12%', actions: '14%',
+    candidate: '230px', round: '0', status: '125px', result: '110px', score: '95px',
+    duration: '105px', warnings: '110px', completion: '135px', recommendation: '165px',
+    actions: '160px',
   },
 } as const;
+
+/** Narrowest the table may get before the card scrolls it sideways. */
+const TABLE_MIN_WIDTH = '1265px';
 
 /** 'ALL' is the default view; the rest mirror the server's InterviewRound. */
 type RoundFilter = 'ALL' | InterviewRound;
@@ -191,17 +194,20 @@ function InterviewActions({
 }: Readonly<{ interview: InterviewSchedule; onViewDetail: (i: InterviewSchedule) => void }>) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {interview.attemptStatus === 'COMPLETED' && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="px-2"
-          leftIcon={<Eye size={14} />}
-          onClick={() => onViewDetail(interview)}
-        >
-          Detail
-        </Button>
-      )}
+      {/* Offered whatever the status. This was gated on COMPLETED, so a row
+          that was in progress or never attended had an empty Actions cell and
+          no way in — even though the transcript of what had been asked so far
+          was sitting there to be read. The detail view already copes with a
+          missing evaluation. */}
+      <Button
+        variant="ghost"
+        size="sm"
+        className="px-2"
+        leftIcon={<Eye size={14} />}
+        onClick={() => onViewDetail(interview)}
+      >
+        View
+      </Button>
       {interview.recordReferences && (
         <Button
           variant="ghost"
@@ -227,6 +233,7 @@ function formatDuration(startedAt?: string, endedAt?: string): string {
 }
 
 export function InterviewResultsPage() {
+  const navigate = useNavigate();
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
   const [selectedPrefix, setSelectedPrefix] = usePersistentState('interviewResults:selectedPrefix', '');
   // Deliberately not persisted, unlike the job. A filter that survives a reload
@@ -237,15 +244,6 @@ export function InterviewResultsPage() {
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [loadingResults, setLoadingResults] = useState(false);
   const [stats, setStats] = useState<InterviewStats | null>(null);
-
-  // Detail modal state
-  const [selectedInterview, setSelectedInterview] = useState<InterviewSchedule | null>(null);
-  const [loadingDetail, setLoadingDetail] = useState(false);
-  const [detailData, setDetailData] = useState<InterviewSchedule | null>(null);
-  const [voiceEvaluation, setVoiceEvaluation] = useState<VoiceEvaluationResult | null>(null);
-  const [conversationEntries, setConversationEntries] = useState<VoiceConversationEntryDTO[]>([]);
-  const [proctoringEvents, setProctoringEvents] = useState<ProctoringEvent[]>([]);
-  const [activeTab, setActiveTab] = useState<'evaluation' | 'conversation' | 'proctoring' | 'recording'>('evaluation');
 
   useEffect(() => {
     fetchJobs();
@@ -303,42 +301,23 @@ export function InterviewResultsPage() {
     }
   }
 
-  async function handleViewDetail(interview: InterviewSchedule) {
-    setSelectedInterview(interview);
-    setDetailData(null);
-    setVoiceEvaluation(null);
-    setConversationEntries([]);
-    setProctoringEvents([]);
-    setActiveTab('evaluation');
-    setLoadingDetail(true);
-
-    try {
-      const res = await interviewService.getResultDetail(interview.id);
-      setDetailData(res.data);
-    } catch {
-      setDetailData(interview);
-    }
-
-    // Fetch voice evaluation, conversation, proctoring events in parallel
-    const [evalRes, convRes, procRes] = await Promise.allSettled([
-      aiService.getVoiceEvaluation(interview.id),
-      interviewService.getConversation(interview.id),
-      interviewService.getProctoringEvents(interview.id),
-    ]);
-
-    if (evalRes.status === 'fulfilled') setVoiceEvaluation(evalRes.value.data);
-    if (convRes.status === 'fulfilled') setConversationEntries(convRes.value.data ?? []);
-    if (procRes.status === 'fulfilled') setProctoringEvents(procRes.value.data ?? []);
-
-    setLoadingDetail(false);
-  }
-
-  function closeDetailModal() {
-    setSelectedInterview(null);
-    setDetailData(null);
-    setVoiceEvaluation(null);
-    setConversationEntries([]);
-    setProctoringEvents([]);
+  /**
+   * Open one candidate's rounds as a page.
+   *
+   * A dialog was the wrong container: a round carries a full transcript, scores
+   * across seven areas and its proctoring events, and a reviewer needs to link
+   * to that and come back to it.
+   */
+  /**
+   * Open a candidate's interview result.
+   *
+   * Everything here leads to the same page. The row's View button used to open
+   * a dialog instead, so the same result had two presentations — and the dialog
+   * could show neither a full transcript nor the per-area scores without
+   * scrolling a box inside a box.
+   */
+  function openCandidateResult(email: string) {
+    navigate(ROUTES.ADMIN.interviewResultDetail(selectedPrefix, email));
   }
 
   // CSV Export
@@ -526,9 +505,13 @@ export function InterviewResultsPage() {
                       className="rounded-2xl border border-[var(--borderMuted,var(--border))] bg-[var(--cardBg)] p-4 space-y-3"
                     >
                       <div className="flex items-start justify-between gap-3">
-                        <p className="font-medium text-[var(--text)] break-all min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => openCandidateResult(interview.email)}
+                          className="min-w-0 break-all text-left font-medium text-[var(--primary)] underline-offset-2 hover:underline"
+                        >
                           {interview.email}
-                        </p>
+                        </button>
                         <div className="flex-shrink-0">
                           <ScoreCell interview={interview} />
                         </div>
@@ -568,7 +551,7 @@ export function InterviewResultsPage() {
                         </div>
                       </dl>
 
-                      <InterviewActions interview={interview} onViewDetail={handleViewDetail} />
+                      <InterviewActions interview={interview} onViewDetail={(row) => openCandidateResult(row.email)} />
                     </div>
                   ))}
                 </div>
@@ -576,7 +559,10 @@ export function InterviewResultsPage() {
                 {/* Desktop: fixed layout so the email column wraps instead of
                     stretching the table past the card. */}
                 <div className="hidden xl:block">
-                  <Table className="table-fixed">
+                  {/* min-width so the columns keep their sizes and the card
+                      scrolls, instead of squeezing headers until they collide.
+                      Table already provides the overflow-x container. */}
+                  <Table className="table-fixed" style={{ minWidth: TABLE_MIN_WIDTH }}>
                     <TableHeader>
                       <TableRow>
                         <TableHead style={{ width: columnWidths.candidate }}>Candidate</TableHead>
@@ -597,7 +583,14 @@ export function InterviewResultsPage() {
                       {interviews.map((interview) => (
                         <TableRow key={interview.id}>
                           <TableCell className="font-medium align-top break-all">
-                            {interview.email}
+                            <button
+                              type="button"
+                              onClick={() => openCandidateResult(interview.email)}
+                              className="text-left text-[var(--primary)] underline-offset-2 hover:underline"
+                              title="See this candidate's rounds"
+                            >
+                              {interview.email}
+                            </button>
                           </TableCell>
                           {showRound && (
                             <TableCell className="align-top">
@@ -632,7 +625,7 @@ export function InterviewResultsPage() {
                           <TableCell className="align-top">
                             <InterviewActions
                               interview={interview}
-                              onViewDetail={handleViewDetail}
+                              onViewDetail={(row) => openCandidateResult(row.email)}
                             />
                           </TableCell>
                         </TableRow>
@@ -646,355 +639,6 @@ export function InterviewResultsPage() {
         </Card>
       )}
 
-      {/* Tabbed Detail Modal */}
-      <Modal
-        isOpen={!!selectedInterview}
-        onClose={closeDetailModal}
-        title={`Interview Detail — ${selectedInterview?.email ?? ''}`}
-        size="lg"
-      >
-        {loadingDetail ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 size={24} className="animate-spin text-[var(--primary)]" />
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {/* Which interview this was. The modal title carries the candidate,
-                and a score means something different in a behavioural round
-                than a technical one, so the round has to travel with it. */}
-            {(detailData ?? selectedInterview) && (
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-[var(--textSecondary)]">Round</span>
-                <RoundCell interview={(detailData ?? selectedInterview)!} />
-              </div>
-            )}
-
-            {/* Tabs */}
-            <div className="flex border-b border-[var(--border)]">
-              {[
-                { key: 'evaluation', label: 'Evaluation', icon: <BarChart3 size={14} /> },
-                { key: 'conversation', label: 'Conversation', icon: <MessageSquare size={14} /> },
-                { key: 'proctoring', label: 'Proctoring', icon: <Shield size={14} /> },
-                { key: 'recording', label: 'Recording', icon: <Play size={14} /> },
-              ].map((tab) => (
-                <button
-                  key={tab.key}
-                  onClick={() => setActiveTab(tab.key as typeof activeTab)}
-                  className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                    activeTab === tab.key
-                      ? 'border-[var(--primary)] text-[var(--primary)]'
-                      : 'border-transparent text-[var(--textSecondary)] hover:text-[var(--text)]'
-                  }`}
-                >
-                  {tab.icon}
-                  {tab.label}
-                  {tab.key === 'proctoring' && proctoringEvents.length > 0 && (
-                    <span className="ml-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-full px-1.5">
-                      {proctoringEvents.length}
-                    </span>
-                  )}
-                </button>
-              ))}
-            </div>
-
-            {/* Early termination banner */}
-            {detailData?.completionReason === 'EARLY_TERMINATION_POOR_PERFORMANCE' && (
-              <div className="flex items-center gap-2 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
-                <AlertTriangle size={16} className="text-red-600 dark:text-red-400 flex-shrink-0" />
-                <p className="text-sm text-red-800 dark:text-red-200">
-                  This interview was terminated early due to consistently poor candidate performance (frequent skips, short answers, or low confidence).
-                </p>
-              </div>
-            )}
-
-            {/* Tab 1: Evaluation */}
-            {activeTab === 'evaluation' && (
-              <div className="space-y-6">
-                {voiceEvaluation ? (
-                  <>
-                    {/* Overall Score */}
-                    <div className="flex items-center justify-between p-4 rounded-lg bg-[var(--surface1)]">
-                      <div>
-                        <p className="text-sm text-[var(--textSecondary)]">Overall Score</p>
-                        <p className="text-3xl font-bold text-[var(--text)]">
-                          {(voiceEvaluation.overallScore ?? 0).toFixed(1)}
-                          <span className="text-base text-[var(--textTertiary)]">/10</span>
-                        </p>
-                      </div>
-                      {voiceEvaluation.recommendation && (
-                        <Badge
-                          variant={
-                            voiceEvaluation.recommendation === 'STRONG_HIRE' || voiceEvaluation.recommendation === 'HIRE'
-                              ? 'success'
-                              : voiceEvaluation.recommendation === 'NO_HIRE'
-                                ? 'warning'
-                                : 'error'
-                          }
-                          size="lg"
-                        >
-                          {voiceEvaluation.recommendation.replace(/_/g, ' ')}
-                        </Badge>
-                      )}
-                    </div>
-
-                    {/* Summary */}
-                    {voiceEvaluation.summary && (
-                      <div>
-                        <h4 className="text-sm font-semibold text-[var(--text)] mb-2 flex items-center gap-2">
-                          <BarChart3 size={14} />
-                          Summary
-                        </h4>
-                        <p className="text-sm text-[var(--textSecondary)] leading-relaxed">{voiceEvaluation.summary}</p>
-                      </div>
-                    )}
-
-                    {/* Category Scores */}
-                    <div>
-                      <h4 className="text-sm font-semibold text-[var(--text)] mb-3">Category Scores</h4>
-                      <div className="space-y-2">
-                        {voiceEvaluation.categoryScores.map((cat, i) => (
-                          <div key={i}>
-                            <div className="flex items-center justify-between mb-1">
-                              <span className="text-xs text-[var(--textSecondary)]">{cat.category}</span>
-                              <span className="text-xs font-semibold text-[var(--text)]">{cat.score}/10</span>
-                            </div>
-                            <div className="w-full h-1.5 bg-[var(--surface1)] rounded-full overflow-hidden">
-                              <div
-                                className={`h-full rounded-full ${
-                                  cat.score >= 7 ? 'bg-emerald-500' : cat.score >= 5 ? 'bg-amber-500' : 'bg-red-500'
-                                }`}
-                                style={{ width: `${(cat.score / 10) * 100}%` }}
-                              />
-                            </div>
-                            {cat.feedback && (
-                              <p className="text-xs text-[var(--textTertiary)] mt-1">{cat.feedback}</p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Speech Analysis */}
-                    {voiceEvaluation.speechAnalysis && (
-                      <div>
-                        <h4 className="text-sm font-semibold text-[var(--text)] mb-3 flex items-center gap-2">
-                          <Mic2 size={14} />
-                          Speech Analysis
-                        </h4>
-                        <div className="grid grid-cols-3 gap-3">
-                          <div className="text-center p-2 rounded-lg bg-[var(--surface1)]">
-                            <p className="text-lg font-bold text-[var(--text)]">
-                              {Math.round(voiceEvaluation.speechAnalysis.averageWordsPerMinute)}
-                            </p>
-                            <p className="text-xs text-[var(--textTertiary)]">WPM</p>
-                          </div>
-                          <div className="text-center p-2 rounded-lg bg-[var(--surface1)]">
-                            <p className="text-lg font-bold text-[var(--text)]">
-                              {voiceEvaluation.speechAnalysis.totalFillerWords}
-                            </p>
-                            <p className="text-xs text-[var(--textTertiary)]">Fillers</p>
-                          </div>
-                          <div className="text-center p-2 rounded-lg bg-[var(--surface1)]">
-                            <p className="text-lg font-bold text-[var(--text)]">
-                              {Math.round(voiceEvaluation.speechAnalysis.confidenceScore)}%
-                            </p>
-                            <p className="text-xs text-[var(--textTertiary)]">Confidence</p>
-                          </div>
-                        </div>
-                        {voiceEvaluation.speechAnalysis.paceAssessment && (
-                          <p className="text-xs text-[var(--textSecondary)] mt-2">
-                            <strong>Pace:</strong> {voiceEvaluation.speechAnalysis.paceAssessment}
-                          </p>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Strengths & Areas for Improvement */}
-                    <div className="grid grid-cols-2 gap-4">
-                      {voiceEvaluation.strengths?.length > 0 && (
-                        <div>
-                          <h4 className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 mb-2">Strengths</h4>
-                          <ul className="space-y-1">
-                            {voiceEvaluation.strengths.map((s, i) => (
-                              <li key={i} className="text-xs text-[var(--textSecondary)] flex items-start gap-1">
-                                <span className="text-emerald-500">+</span> {s}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                      {voiceEvaluation.areasForImprovement?.length > 0 && (
-                        <div>
-                          <h4 className="text-xs font-semibold text-amber-600 dark:text-amber-400 mb-2">Areas for Improvement</h4>
-                          <ul className="space-y-1">
-                            {voiceEvaluation.areasForImprovement.map((a, i) => (
-                              <li key={i} className="text-xs text-[var(--textSecondary)] flex items-start gap-1">
-                                <span className="text-amber-500">-</span> {a}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                    </div>
-                  </>
-                ) : detailData?.evaluation ? (
-                  <EvaluationBreakdown evaluation={detailData.evaluation} />
-                ) : (
-                  <p className="text-sm text-[var(--textSecondary)]">
-                    No evaluation data available for this interview.
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* Tab 2: Conversation */}
-            {activeTab === 'conversation' && (
-              <div className="space-y-3 max-h-[60vh] overflow-y-auto">
-                {conversationEntries.length === 0 ? (
-                  <p className="text-sm text-[var(--textSecondary)] text-center py-8">
-                    No conversation data available.
-                  </p>
-                ) : (
-                  conversationEntries
-                    .filter((e) => e.role !== 'SYSTEM')
-                    .map((entry, i) => (
-                      <div
-                        key={i}
-                        className={`flex items-start gap-3 ${
-                          entry.role === 'CANDIDATE' ? 'flex-row-reverse' : ''
-                        }`}
-                      >
-                        <div
-                          className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
-                            entry.role === 'INTERVIEWER'
-                              ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                              : 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
-                          }`}
-                        >
-                          {entry.role === 'INTERVIEWER' ? 'AI' : 'C'}
-                        </div>
-                        <div
-                          className={`max-w-[75%] p-3 rounded-lg ${
-                            entry.role === 'INTERVIEWER'
-                              ? 'bg-[var(--surface1)] text-[var(--text)]'
-                              : 'bg-[var(--primary)] text-white'
-                          }`}
-                        >
-                          <p className="text-sm whitespace-pre-wrap">{entry.content}</p>
-                          {entry.role === 'CANDIDATE' && entry.codeContent && (
-                            <CodeBlock code={entry.codeContent} language={entry.codeLanguage} />
-                          )}
-                          {/* What it printed when they ran it. The model was
-                              given this alongside the code, so leaving it out
-                              here shows the reviewer less than the grader saw. */}
-                          {entry.role === 'CANDIDATE' && entry.codeOutput?.trim() && (
-                            <div className="mt-2 rounded-lg bg-black/20 p-2">
-                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-white/70">
-                                Run output
-                              </p>
-                              <pre className="max-h-40 overflow-auto whitespace-pre-wrap text-xs text-white/90">
-                                {entry.codeOutput}
-                              </pre>
-                            </div>
-                          )}
-                          <div className="flex items-center gap-2 mt-1.5">
-                            <span className={`text-xs ${entry.role === 'INTERVIEWER' ? 'text-[var(--textTertiary)]' : 'text-white/60'}`}>
-                              {new Date(entry.timestamp).toLocaleTimeString()}
-                            </span>
-                            {entry.role === 'CANDIDATE' && entry.wordsPerMinute != null && (
-                              <span className="text-xs text-white/60">
-                                {Math.round(entry.wordsPerMinute)} WPM
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    ))
-                )}
-              </div>
-            )}
-
-            {/* Tab 3: Proctoring */}
-            {activeTab === 'proctoring' && (
-              <div className="space-y-3 max-h-[60vh] overflow-y-auto">
-                {proctoringEvents.length === 0 ? (
-                  <div className="text-center py-8">
-                    <Shield size={32} className="mx-auto text-emerald-500 mb-2" />
-                    <p className="text-sm text-[var(--textSecondary)]">No proctoring events recorded.</p>
-                    <p className="text-xs text-[var(--textTertiary)]">This candidate had a clean session.</p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
-                      <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                        {proctoringEvents.length} proctoring event{proctoringEvents.length > 1 ? 's' : ''} recorded
-                      </p>
-                    </div>
-                    <div className="relative pl-6">
-                      {/* Timeline line */}
-                      <div className="absolute left-2.5 top-0 bottom-0 w-0.5 bg-[var(--border)]" />
-                      {proctoringEvents.map((event, i) => (
-                        <div key={i} className="relative mb-4">
-                          {/* Timeline dot */}
-                          <div className="absolute -left-3.5 top-1.5 w-3 h-3 rounded-full bg-amber-500 border-2 border-[var(--cardBg)]" />
-                          <div className="p-3 rounded-lg bg-[var(--surface1)]">
-                            <div className="flex items-center justify-between mb-1">
-                              <Badge
-                                variant={event.eventType === 'tab_switch' ? 'warning' : event.eventType === 'devtools' ? 'error' : 'info'}
-                                size="sm"
-                              >
-                                {event.eventType.replace(/_/g, ' ')}
-                              </Badge>
-                              <span className="text-xs text-[var(--textTertiary)]">
-                                {new Date(event.timestamp).toLocaleTimeString()}
-                              </span>
-                            </div>
-                            {event.details && (
-                              <p className="text-xs text-[var(--textSecondary)]">{event.details}</p>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
-            {/* Tab 4: Recording */}
-            {activeTab === 'recording' && (
-              <div className="space-y-4">
-                {detailData?.recordReferences ? (
-                  <div className="space-y-4">
-                    <div className="aspect-video bg-black rounded-lg overflow-hidden">
-                      <video
-                        src={detailData.recordReferences}
-                        controls
-                        className="w-full h-full"
-                      >
-                        Your browser does not support the video tag.
-                      </video>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      leftIcon={<ExternalLink size={14} />}
-                      onClick={() => window.open(detailData.recordReferences, '_blank')}
-                    >
-                      Open in New Tab
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="text-center py-8">
-                    <Video size={32} className="mx-auto text-[var(--textTertiary)] mb-2" />
-                    <p className="text-sm text-[var(--textSecondary)]">No recording available for this interview.</p>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </Modal>
     </div>
   );
 }
