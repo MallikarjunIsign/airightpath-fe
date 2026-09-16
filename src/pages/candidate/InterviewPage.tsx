@@ -53,6 +53,15 @@ export function InterviewPage() {
   const [compiling, setCompiling] = useState(false);
 
   // Mobile companion state
+  /**
+   * Whether the identity photo and room sweep are both done.
+   *
+   * Gates the start button. Required for every interview rather than read from
+   * PROCTORING_CONFIG: the photo and the sweep are the only record of who sat
+   * the interview and what was around them, so they are part of the flow, not a
+   * switch a deployment can turn off.
+   */
+  const [capturesReady, setCapturesReady] = useState(false);
   const [mobileToken, setMobileToken] = useState<string | null>(null);
   const [mobileConnected, setMobileConnected] = useState(false);
   const [mobileVerified, setMobileVerified] = useState(false);
@@ -697,6 +706,10 @@ export function InterviewPage() {
         starting={voiceInterview.state === 'starting'}
         canStartInterview={canStartInterview}
         onStart={handleStartInterview}
+        scheduleId={interview.id}
+        candidateEmail={user?.email ?? ''}
+        capturesReady={capturesReady}
+        onCapturesReadyChange={setCapturesReady}
       />
     );
   }

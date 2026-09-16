@@ -102,4 +102,57 @@ export const examProctoringService = {
 
     return api.post<ApiResponse<unknown>>(ENDPOINTS.EXAM_PROCTORING.ROOM_SCAN, form, uploadConfig);
   },
+
+  /**
+   * The identity photo taken before an interview.
+   *
+   * Same evidence as the exam upload above, filed against the interview
+   * schedule. A distinct method rather than an optional field, so a caller
+   * cannot accidentally send a schedule id as an assessment id — the two are
+   * independent sequences and the mix-up would be invisible.
+   */
+  uploadInterviewIdentityPhoto({
+    scheduleId,
+    candidateEmail,
+    blob,
+  }: {
+    scheduleId: number;
+    candidateEmail: string;
+    blob: Blob;
+  }) {
+    const form = new FormData();
+    form.append('scheduleId', String(scheduleId));
+    form.append('candidateEmail', candidateEmail);
+    form.append('capturedAt', new Date().toISOString());
+    form.append('photo', blob, snapshotFileName('identity'));
+
+    return api.post<ApiResponse<unknown>>(
+      ENDPOINTS.EXAM_PROCTORING.INTERVIEW_IDENTITY_PHOTO,
+      form,
+      uploadConfig,
+    );
+  },
+
+  /** The room sweep taken before an interview; replaces any previous sweep. */
+  uploadInterviewRoomScan({
+    scheduleId,
+    candidateEmail,
+    frames,
+  }: {
+    scheduleId: number;
+    candidateEmail: string;
+    frames: Blob[];
+  }) {
+    const form = new FormData();
+    form.append('scheduleId', String(scheduleId));
+    form.append('candidateEmail', candidateEmail);
+    form.append('capturedAt', new Date().toISOString());
+    frames.forEach((frame, i) => form.append('frames', frame, snapshotFileName('room', i)));
+
+    return api.post<ApiResponse<unknown>>(
+      ENDPOINTS.EXAM_PROCTORING.INTERVIEW_ROOM_SCAN,
+      form,
+      uploadConfig,
+    );
+  },
 };

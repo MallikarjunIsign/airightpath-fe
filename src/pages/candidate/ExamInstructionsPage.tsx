@@ -495,7 +495,7 @@ export function ExamInstructionsPage() {
           <div className="mt-6 pt-6 border-t border-[var(--border)]">
             <ExamIdentityCheck
               videoRef={videoRef}
-              assessmentId={assessment.id}
+              target={{ kind: 'assessment', assessmentId: assessment.id }}
               candidateEmail={user?.email ?? assessment.candidateEmail}
               faceStatus={faceStatus}
               faceCheckEnabled={faceCheckAvailable}

@@ -41,9 +41,21 @@ export type IdentityPhotoStatus =
 
 type RoomScanStatus = 'idle' | 'scanning' | 'uploading' | 'done' | 'failed';
 
+/**
+ * What the captures belong to.
+ *
+ * A union rather than one `id` field: assessment ids and interview-schedule ids
+ * are independent sequences, so a single number would let a caller file an
+ * interview's evidence under an assessment with nothing to catch it. The tag
+ * makes that impossible to express.
+ */
+export type ProctoringCaptureTarget =
+  | { kind: 'assessment'; assessmentId: number }
+  | { kind: 'interview'; scheduleId: number };
+
 interface ExamIdentityCheckProps {
   videoRef: React.RefObject<HTMLVideoElement>;
-  assessmentId: number;
+  target: ProctoringCaptureTarget;
   candidateEmail: string;
   /**
    * False in Test Mode: the photo and room scan are still taken and shown back,
@@ -52,6 +64,16 @@ interface ExamIdentityCheckProps {
    * assessment id. Defaults to true, so the candidate path is unchanged.
    */
   persist?: boolean;
+  /**
+   * Forces both captures on regardless of `PROCTORING_CONFIG`.
+   *
+   * The exam reads those env flags, so a deployment can switch the photo or the
+   * room sweep off. Interviews must not be switchable that way: the identity
+   * photo and the room sweep are the only evidence of who sat the interview and
+   * what was around them, so the step is part of the flow rather than a
+   * configurable extra. Defaults to false, leaving the exam path on config.
+   */
+  alwaysRequired?: boolean;
   faceStatus: FaceStatus;
   /**
    * False when face detection is switched off for the environment. The photo is
@@ -72,9 +94,10 @@ const COUNTDOWN_SECONDS = 3;
 
 export function ExamIdentityCheck({
   videoRef,
-  assessmentId,
+  target,
   candidateEmail,
   persist = true,
+  alwaysRequired = false,
   faceStatus,
   faceCheckEnabled,
   cameraReady,
@@ -82,8 +105,17 @@ export function ExamIdentityCheck({
   onRoomScanChange,
 }: Readonly<ExamIdentityCheckProps>) {
   const { showToast } = useToast();
-  const photoConfig = PROCTORING_CONFIG.identityPhoto;
-  const scanConfig = PROCTORING_CONFIG.roomScan;
+  // `alwaysRequired` overrides only the two "required" switches. Frame counts,
+  // durations and image sizes still come from configuration — those are tuning,
+  // not a decision about whether evidence is collected at all.
+  const photoConfig = {
+    ...PROCTORING_CONFIG.identityPhoto,
+    required: PROCTORING_CONFIG.identityPhoto.required || alwaysRequired,
+  };
+  const scanConfig = {
+    ...PROCTORING_CONFIG.roomScan,
+    required: PROCTORING_CONFIG.roomScan.required || alwaysRequired,
+  };
 
   const [status, setStatus] = useState<IdentityPhotoStatus>('idle');
   const [countdown, setCountdown] = useState(0);
@@ -139,7 +171,17 @@ export function ExamIdentityCheck({
       }
       setStatus('uploading');
       try {
-        await examProctoringService.uploadIdentityPhoto({ assessmentId, candidateEmail, blob });
+        await (target.kind === 'assessment'
+          ? examProctoringService.uploadIdentityPhoto({
+              assessmentId: target.assessmentId,
+              candidateEmail,
+              blob,
+            })
+          : examProctoringService.uploadInterviewIdentityPhoto({
+              scheduleId: target.scheduleId,
+              candidateEmail,
+              blob,
+            }));
         setStatus('saved');
         showToast(MESSAGES.examSetup.photoCaptured, 'success');
       } catch {
@@ -149,7 +191,7 @@ export function ExamIdentityCheck({
         setStatus('upload-failed');
       }
     },
-    [assessmentId, candidateEmail, persist, showToast]
+    [target, candidateEmail, persist, showToast]
   );
 
   const takePhoto = useCallback(async () => {
@@ -218,14 +260,24 @@ export function ExamIdentityCheck({
 
     setScanStatus('uploading');
     try {
-      await examProctoringService.uploadRoomScan({ assessmentId, candidateEmail, frames });
+      await (target.kind === 'assessment'
+        ? examProctoringService.uploadRoomScan({
+            assessmentId: target.assessmentId,
+            candidateEmail,
+            frames,
+          })
+        : examProctoringService.uploadInterviewRoomScan({
+            scheduleId: target.scheduleId,
+            candidateEmail,
+            frames,
+          }));
       setScanStatus('done');
       showToast(MESSAGES.examSetup.roomScanDone, 'success');
     } catch {
       setScanStatus('failed');
       showToast(MESSAGES.examSetup.roomScanFailed, 'warning');
     }
-  }, [assessmentId, candidateEmail, persist, showToast]);
+  }, [target, candidateEmail, persist, showToast]);
 
   const startRoomScan = useCallback(() => {
     scanFramesRef.current = [];

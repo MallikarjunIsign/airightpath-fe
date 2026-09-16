@@ -92,6 +92,14 @@ export const ENDPOINTS = {
     ROOM_SCAN: "/api/exam-proctoring/room-scan",
     ASSESSMENT_CAPTURES: (assessmentId: number) =>
       `/api/exam-proctoring/assessments/${assessmentId}/captures`,
+    // Interview twins. Separate paths rather than an extra parameter on the two
+    // above: assessment ids and interview-schedule ids are independent
+    // sequences, so one endpoint taking "an id" could file interview evidence
+    // under an assessment and nobody would see the mistake.
+    INTERVIEW_IDENTITY_PHOTO: "/api/exam-proctoring/interview/identity-photo",
+    INTERVIEW_ROOM_SCAN: "/api/exam-proctoring/interview/room-scan",
+    INTERVIEW_CAPTURES: (scheduleId: number) =>
+      `/api/exam-proctoring/interviews/${scheduleId}/captures`,
     CANDIDATE_CAPTURES: "/api/exam-proctoring/captures",
     CAPTURE_IMAGE: (captureId: number) =>
       `/api/exam-proctoring/captures/${captureId}/image`,

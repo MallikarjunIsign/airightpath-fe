@@ -2,7 +2,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, CheckCircle2, AlertTriangle, Users, UserRound, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { NoiseLevelMeter } from '@/components/exam/NoiseLevelMeter';
-import { ExamIdentityCheck, type FaceStatus } from '@/components/exam/ExamIdentityCheck';
+import {
+  ExamIdentityCheck,
+  type FaceStatus,
+  type ProctoringCaptureTarget,
+} from '@/components/exam/ExamIdentityCheck';
 import { useFaceDetection } from '@/hooks/useFaceDetection';
 import { useMicNoiseLevel } from '@/hooks/useMicNoiseLevel';
 import { PROCTORING_CONFIG } from '@/config/proctoring.config';
@@ -25,12 +29,27 @@ const MODEL_LOAD_TIMEOUT_MS = 15000;
  */
 export function DeviceCheckPreview({
   onReadyChange,
+  target = { kind: 'assessment', assessmentId: 0 },
+  persist = false,
+  candidateEmail = 'test-mode@preview.local',
 }: Readonly<{
   /**
    * True once a photo has been taken and the room scan requirement is met.
    * Optional: the interview rehearsal shows this step without gating on it.
    */
   onReadyChange?: (ready: boolean) => void;
+  /**
+   * What the captures belong to. Only meaningful when `persist` is true — Test
+   * Mode leaves the default, which is never sent anywhere.
+   */
+  target?: ProctoringCaptureTarget;
+  /**
+   * False in Test Mode, where captures are taken and shown back but never
+   * uploaded. True for a real pre-interview check, which has to leave evidence.
+   */
+  persist?: boolean;
+  /** Whose captures these are. Required in practice whenever `persist` is true. */
+  candidateEmail?: string;
 }>) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -206,8 +225,9 @@ export function DeviceCheckPreview({
         </CardContent>
       </Card>
 
-      {/* Identity capture, real shutter, no upload. The assessment id is a
-          placeholder that is never sent anywhere — see `persist`. */}
+      {/* Identity capture with a real shutter. Whether it is stored is the
+          caller's choice: Test Mode leaves `persist` false and nothing is
+          uploaded, while a real pre-interview check passes its schedule. */}
       {!cameraError && (
         <Card>
           <CardHeader>
@@ -216,9 +236,13 @@ export function DeviceCheckPreview({
           <CardContent>
             <ExamIdentityCheck
               videoRef={videoRef}
-              assessmentId={0}
-              candidateEmail="test-mode@preview.local"
-              persist={false}
+              target={target}
+              candidateEmail={candidateEmail}
+              persist={persist}
+              // Both captures shown whatever the environment switches say —
+              // a rehearsal of a step that is configured off shows nothing, and
+              // an interview requires them outright.
+              alwaysRequired
               faceStatus={faceStatus}
               faceCheckEnabled={faceCheckEnabled && isLoaded}
               cameraReady={!!stream}
