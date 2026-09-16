@@ -239,10 +239,13 @@ export function DeviceCheckPreview({
               target={target}
               candidateEmail={candidateEmail}
               persist={persist}
-              // Both captures shown whatever the environment switches say —
-              // a rehearsal of a step that is configured off shows nothing, and
-              // an interview requires them outright.
-              alwaysRequired
+              // Forced on for a rehearsal only: a Test Mode preview of a step
+              // that is configured off would show nothing, which defeats the
+              // point of previewing it. A real check — the pre-interview one,
+              // which is the `persist` case — honours the same
+              // VITE_PROCTORING_* switches the assessment reads, so the two
+              // flows cannot drift apart.
+              alwaysRequired={!persist}
               faceStatus={faceStatus}
               faceCheckEnabled={faceCheckEnabled && isLoaded}
               cameraReady={!!stream}

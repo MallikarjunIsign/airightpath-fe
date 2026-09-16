@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import {
   Clock, Mic, User, Bot, Loader2, Video, AlertTriangle, Maximize, Shield,
   Wifi, WifiOff, Square, LogOut, CheckCircle2, Circle, Volume2,
-  EyeOff, Users, Timer, Monitor, Play, Smartphone,
+  EyeOff, Users, Timer, Monitor, MonitorUp, Play, Smartphone,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/Toast';
@@ -111,6 +111,7 @@ export function InterviewPage() {
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const screenPreviewRef = useRef<HTMLVideoElement>(null);
 
   // Inactivity timers
   const inactivityWarningRef = useRef<number | null>(null);
@@ -135,7 +136,7 @@ export function InterviewPage() {
 
   // Screen recording
   const [screenPermission, setScreenPermission] = useState<'granted' | 'denied' | 'prompt'>('prompt');
-  const { start: startScreenRecording, stop: stopScreenRecording, stopAndGetBlob: stopScreenAndGetBlob, isRecording: isScreenRecording } = useScreenRecorder({
+  const { start: startScreenRecording, stop: stopScreenRecording, stopAndGetBlob: stopScreenAndGetBlob, isRecording: isScreenRecording, screenStream } = useScreenRecorder({
     timeslice: APP_CONFIG.VIDEO_CHUNK_SECONDS * 1000,
     onScreenStop: () => {
       setScreenPermission('denied');
@@ -429,6 +430,14 @@ export function InterviewPage() {
     }
   }, [recorderStream]);
 
+  // Screen-share preview. Cleared as well as set: a stopped share otherwise
+  // leaves its last frame on screen, which reads as though it were still live.
+  useEffect(() => {
+    const element = screenPreviewRef.current;
+    if (!element) return;
+    element.srcObject = screenStream;
+  }, [screenStream]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -692,8 +701,19 @@ export function InterviewPage() {
   const isCountdownActive = instructionCountdown > 0;
   const canStartInterview = !isCountdownActive && micPermission !== 'denied';
 
-  // Pre-start screen with QR code
-  if (voiceInterview.state === 'pre-start' || voiceInterview.state === 'starting') {
+  // Pre-start screen with QR code.
+  //
+  // 'error' belongs here too. It used to fall through to the main interview
+  // screen, which then rendered an empty transcript, "Q: 0" and a permanent
+  // "Connection lost. Reconnecting..." banner — so a start that failed on the
+  // server (a job with no interview questions uploaded, say) looked to the
+  // candidate like their internet had dropped. Back on this screen the server's
+  // own message is shown and Start can be pressed again.
+  if (
+    voiceInterview.state === 'pre-start' ||
+    voiceInterview.state === 'starting' ||
+    voiceInterview.state === 'error'
+  ) {
     return (
       <InterviewPreStartScreen
         jobPrefix={interview.jobPrefix}
@@ -724,11 +744,17 @@ export function InterviewPage() {
   // Main interview screen
   return (
     <div className="h-screen overflow-hidden bg-[var(--background)] flex flex-col">
-      {/* Disconnect banner */}
-      {!voiceInterview.isWsConnected && voiceInterview.state !== 'completed' && !postCompletionStep && (
+      {/* Disconnect banner.
+          Gated on hasEverConnected: before the socket has connected once there
+          is nothing to have lost, and saying otherwise sent candidates chasing
+          their wifi over a server-side failure. */}
+      {voiceInterview.hasEverConnected && !voiceInterview.isWsConnected
+        && voiceInterview.state !== 'completed' && !postCompletionStep && (
         <div className="bg-red-600 text-white text-center py-2 px-4 text-sm font-medium flex items-center justify-center gap-2 z-50">
           <WifiOff size={16} />
-          <span>Connection lost. Reconnecting... (attempt {interviewWsService.currentReconnectAttempts})</span>
+          {/* From state, not the service field: that was read during render and
+              so never updated as attempts climbed. */}
+          <span>Connection lost. Reconnecting... (attempt {voiceInterview.reconnectAttempts})</span>
           <Loader2 size={14} className="animate-spin" />
         </div>
       )}
@@ -948,6 +974,44 @@ export function InterviewPage() {
 
         {/* Right Sidebar */}
         <div className="w-72 border-l border-[var(--border)] bg-[var(--cardBg)] p-4 flex flex-col gap-4 overflow-y-auto">
+          {/* Shared screen. First in the sidebar because it is the one feed the
+              candidate is responsible for keeping correct — if they share the
+              wrong window, nothing else here tells them. */}
+          <div className="p-3 rounded-xl bg-[var(--surface1)] border border-[var(--border)]">
+            <h3 className="text-[10px] font-bold text-[var(--textSecondary)] uppercase tracking-wider mb-2 flex items-center justify-between">
+              Shared Screen
+              {isScreenRecording && (
+                <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+              )}
+            </h3>
+            <div
+              className={`aspect-video bg-black rounded-lg overflow-hidden relative shadow-inner ${
+                screenStream ? '' : 'border-2 border-dashed border-[var(--border)]'
+              }`}
+            >
+              <video
+                ref={screenPreviewRef}
+                autoPlay
+                muted
+                playsInline
+                className={`w-full h-full object-contain ${screenStream ? '' : 'hidden'}`}
+              />
+              {!screenStream && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-2 text-center">
+                  <MonitorUp size={18} className="text-[var(--textTertiary)]" />
+                  <span className="text-[10px] text-[var(--textTertiary)]">
+                    Screen is not being shared
+                  </span>
+                </div>
+              )}
+            </div>
+            <p className="mt-2 text-[10px] text-[var(--textTertiary)]">
+              {screenStream
+                ? 'This is what is being recorded and sent with your interview.'
+                : 'Your screen recording stopped. Reload only if asked to — it cannot be restarted mid-interview.'}
+            </p>
+          </div>
+
           {/* Camera preview */}
           <div>
             <div className="aspect-video bg-black rounded-lg overflow-hidden mb-2">

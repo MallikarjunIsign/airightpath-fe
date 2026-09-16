@@ -7,6 +7,14 @@ interface UseScreenRecorderOptions {
 
 export function useScreenRecorder(options?: UseScreenRecorderOptions) {
   const [isRecording, setIsRecording] = useState(false);
+  /**
+   * The shared screen, for showing the candidate what is being captured.
+   *
+   * Video only — deliberately not the combined stream `start` returns, which
+   * carries the microphone track too and would feed the candidate's own voice
+   * back at them through any element it is attached to.
+   */
+  const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
@@ -27,6 +35,7 @@ export function useScreenRecorder(options?: UseScreenRecorderOptions) {
       audio: false,
     });
     screenStreamRef.current = screenStream;
+    setScreenStream(screenStream);
 
     // 2. Get mic audio separately
     const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -57,7 +66,12 @@ export function useScreenRecorder(options?: UseScreenRecorderOptions) {
 
     // 4. Fire onScreenStop when candidate stops sharing (browser stop button)
     screenStream.getVideoTracks().forEach((track) => {
-      track.onended = () => onScreenStopRef.current?.();
+      track.onended = () => {
+        // Drop the preview as well, so the panel does not keep showing a frozen
+        // last frame of a screen that is no longer being captured.
+        setScreenStream(null);
+        onScreenStopRef.current?.();
+      };
     });
 
     recorderRef.current = recorder;
@@ -72,6 +86,7 @@ export function useScreenRecorder(options?: UseScreenRecorderOptions) {
     micStreamRef.current?.getTracks().forEach((t) => t.stop());
     screenStreamRef.current = null;
     micStreamRef.current = null;
+    setScreenStream(null);
   }, []);
 
   const stopAndGetBlob = useCallback((): Promise<Blob | null> => {
@@ -102,8 +117,9 @@ export function useScreenRecorder(options?: UseScreenRecorderOptions) {
       micStreamRef.current?.getTracks().forEach((t) => t.stop());
       screenStreamRef.current = null;
       micStreamRef.current = null;
+      setScreenStream(null);
     });
   }, []);
 
-  return { isRecording, start, stop, stopAndGetBlob };
+  return { isRecording, start, stop, stopAndGetBlob, screenStream };
 }

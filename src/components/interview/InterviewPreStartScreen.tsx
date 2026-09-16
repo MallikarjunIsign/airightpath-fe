@@ -21,6 +21,7 @@ import {
 import { Button } from '@/components/ui/Button';
 import { DeviceCheckPreview } from '@/components/testmode/DeviceCheckPreview';
 import { APP_CONFIG } from '@/config/app.config';
+import { PROCTORING_CONFIG } from '@/config/proctoring.config';
 
 /** Status icon for a device/permission check (granted / denied / checking / pending). */
 function PermissionIcon({ status }: Readonly<{ status: string }>) {
@@ -71,6 +72,22 @@ function Step({
       {children}
     </section>
   );
+}
+
+/** What the capture step is called, given which captures are switched on. */
+function captureStepTitle(photoRequired: boolean, roomScanRequired: boolean): string {
+  if (photoRequired && roomScanRequired) return 'Photo and room scan';
+  return photoRequired ? 'Photo' : 'Room scan';
+}
+
+/** Why Start is closed while a capture is outstanding. Names only what is asked for. */
+function captureBlockedReason(photoRequired: boolean, roomScanRequired: boolean): string {
+  if (photoRequired && roomScanRequired) {
+    return 'Take your photo and complete the room scan in step 2.';
+  }
+  return photoRequired
+    ? 'Take your photo in step 2.'
+    : 'Complete the room scan in step 2.';
 }
 
 interface InterviewPreStartScreenProps {
@@ -130,6 +147,23 @@ export function InterviewPreStartScreen({
   capturesReady,
   onCapturesReadyChange,
 }: Readonly<InterviewPreStartScreenProps>) {
+  /**
+   * Proctoring switches, read from the same VITE_PROCTORING_* values the
+   * assessment reads.
+   *
+   * The interview used to require the camera and both captures outright while
+   * the exam honoured the environment, so the two flows disagreed about the
+   * same candidate on the same machine. One source of truth means an
+   * administrator changing a switch changes both.
+   */
+  const cameraRequired = PROCTORING_CONFIG.camera.required;
+  const photoRequired = PROCTORING_CONFIG.identityPhoto.required;
+  const roomScanRequired = PROCTORING_CONFIG.roomScan.required;
+  const capturesNeeded = photoRequired || roomScanRequired;
+
+  // The steps renumber when one is switched off — a visible 1, 3 reads as a
+  // rendering fault rather than a configuration choice.
+  const phoneStepIndex = capturesNeeded ? 3 : 2;
   const devicesReady = micPermission === 'granted' && cameraPermission === 'granted';
   const rulesRead = !isCountdownActive;
 
@@ -143,12 +177,14 @@ export function InterviewPreStartScreen({
   let blockedReason: string | null = null;
   if (micPermission === 'denied') {
     blockedReason = 'Microphone access is blocked. Enable it in your browser settings, then reload.';
-  } else if (cameraPermission === 'denied') {
+  } else if (cameraRequired && cameraPermission === 'denied') {
     blockedReason = 'Camera access is blocked. Enable it in your browser settings, then reload.';
   } else if (!rulesRead) {
     blockedReason = 'Finish reading the rules — the timer above has to reach zero.';
-  } else if (!capturesReady) {
-    blockedReason = 'Take your photo and complete the room scan in step 2.';
+  } else if (capturesNeeded && !capturesReady) {
+    // Only a gate while at least one capture is switched on. Waiting on a step
+    // that is configured off would leave Start permanently disabled.
+    blockedReason = captureBlockedReason(photoRequired, roomScanRequired);
   } else if (mobileVerified && !canStartInterview) {
     blockedReason = 'Finishing the phone check…';
   }
@@ -266,10 +302,23 @@ export function InterviewPreStartScreen({
                 Proctoring rules
               </p>
             </div>
+            {/* Only the rules that are actually switched on. Warning someone
+                about a check that is disabled is as misleading as staying quiet
+                about one that is not — the exam instructions read the same
+                switches for the same reason. */}
             <ul className="space-y-1.5 text-sm text-amber-700 dark:text-amber-300">
-              <li>Switching tabs or windows is counted as a warning.</li>
-              <li>A second face in frame, or no face at all, is a warning.</li>
-              <li>Leaving fullscreen or opening developer tools is a warning.</li>
+              {PROCTORING_CONFIG.tabSwitch.enabled && (
+                <li>Switching tabs or windows is counted as a warning.</li>
+              )}
+              {PROCTORING_CONFIG.eyeDetection.enabled && (
+                <li>A second face in frame, or no face at all, is a warning.</li>
+              )}
+              {PROCTORING_CONFIG.fullscreen.enabled && (
+                <li>Leaving fullscreen or opening developer tools is a warning.</li>
+              )}
+              {roomScanRequired && (
+                <li>You will be asked to scan your room with your camera before you begin.</li>
+              )}
               <li>
                 {APP_CONFIG.INTERVIEW_MAX_PROCTORING_WARNINGS} warnings ends the interview
                 automatically.
@@ -278,11 +327,14 @@ export function InterviewPreStartScreen({
           </div>
         </Step>
 
-        {/* ── Step 2: identity and room ─────────────────────────────── */}
+        {/* ── Step 2: identity and room ───────────────────────────────
+            Hidden outright when both captures are switched off, rather than
+            shown as an empty step the candidate cannot complete. */}
+        {capturesNeeded && (
         <Step
           index={2}
-          title="Photo and room scan"
-          subtitle="Required. This is how we confirm who sat the interview and what was around you."
+          title={captureStepTitle(photoRequired, roomScanRequired)}
+          subtitle="This is how we confirm who sat the interview and what was around you."
           status={capturesReady ? 'done' : 'active'}
         >
           <div className="flex items-start gap-2 rounded-lg bg-[var(--surface2)] p-3 text-sm text-[var(--textSecondary)]">
@@ -296,9 +348,9 @@ export function InterviewPreStartScreen({
 
           {devicesReady ? (
             <DeviceCheckPreview
-              // DeviceCheckPreview already forces both captures on regardless
-              // of the environment switches; `persist` is what makes them real
-              // evidence rather than a rehearsal.
+              // `persist` marks this as the real check rather than a rehearsal:
+              // the captures become stored evidence, and the VITE_PROCTORING_*
+              // switches decide which of them are asked for.
               persist
               target={{ kind: 'interview', scheduleId }}
               candidateEmail={candidateEmail}
@@ -310,11 +362,12 @@ export function InterviewPreStartScreen({
             </p>
           )}
         </Step>
+        )}
 
         {/* ── Step 3: the phone ─────────────────────────────────────── */}
         {isSetupActive && (
           <Step
-            index={3}
+            index={phoneStepIndex}
             title="Connect your phone"
             subtitle="A second camera, showing you and your screen together."
             status={mobileVerified ? 'done' : 'active'}

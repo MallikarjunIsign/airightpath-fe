@@ -41,6 +41,15 @@ export function useVoiceInterview() {
   const [questionsAsked, setQuestionsAsked] = useState(0);
   const [streamingText, setStreamingText] = useState("");
   const [isWsConnected, setIsWsConnected] = useState(false);
+  /**
+   * Whether the interview socket has ever been up.
+   *
+   * The "Connection lost" banner keys off this. Without it the banner shows
+   * from the moment the interview screen renders — including when the real
+   * failure was the start call, which has nothing to do with the network.
+   */
+  const [hasEverConnected, setHasEverConnected] = useState(false);
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [evaluation, setEvaluation] = useState<VoiceEvaluationResult | null>(
     null,
@@ -423,11 +432,14 @@ export function useVoiceInterview() {
       
           onConnect: () => {
             setIsWsConnected(true);
+            setHasEverConnected(true);
+            setReconnectAttempts(0);
             setupSubscriptions(response.scheduleId);
           },
           onDisconnect: () => {
             setIsWsConnected(false);
           },
+          onReconnectAttempt: setReconnectAttempts,
         });
 
         // Play first question audio
@@ -674,6 +686,8 @@ export function useVoiceInterview() {
     questionsAsked,
     streamingText,
     isWsConnected,
+    hasEverConnected,
+    reconnectAttempts,
     error,
     evaluation,
     currentTranscript,
