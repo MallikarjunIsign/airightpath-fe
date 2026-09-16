@@ -35,6 +35,13 @@ export interface VoiceConversationEntryDTO {
   speechDurationSeconds?: number;
   codeContent?: string;
   codeLanguage?: string;
+  /**
+   * What the code printed when the candidate last ran it.
+   *
+   * Sent to the interviewer model with the answer, so a reviewer who cannot see
+   * it is reading a different transcript than the one that was scored.
+   */
+  codeOutput?: string;
   timestamp: string;
 }
 

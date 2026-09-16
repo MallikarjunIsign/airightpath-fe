@@ -884,6 +884,19 @@ export function InterviewResultsPage() {
                           {entry.role === 'CANDIDATE' && entry.codeContent && (
                             <CodeBlock code={entry.codeContent} language={entry.codeLanguage} />
                           )}
+                          {/* What it printed when they ran it. The model was
+                              given this alongside the code, so leaving it out
+                              here shows the reviewer less than the grader saw. */}
+                          {entry.role === 'CANDIDATE' && entry.codeOutput?.trim() && (
+                            <div className="mt-2 rounded-lg bg-black/20 p-2">
+                              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-white/70">
+                                Run output
+                              </p>
+                              <pre className="max-h-40 overflow-auto whitespace-pre-wrap text-xs text-white/90">
+                                {entry.codeOutput}
+                              </pre>
+                            </div>
+                          )}
                           <div className="flex items-center gap-2 mt-1.5">
                             <span className={`text-xs ${entry.role === 'INTERVIEWER' ? 'text-[var(--textTertiary)]' : 'text-white/60'}`}>
                               {new Date(entry.timestamp).toLocaleTimeString()}
