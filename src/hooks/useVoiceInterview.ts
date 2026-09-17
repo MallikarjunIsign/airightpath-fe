@@ -502,7 +502,11 @@ export function useVoiceInterview() {
       }
 
       const transcript = manualTranscript || transcriptRef.current;
-      if (!transcript.trim()) {
+
+      // Code counts as an answer on its own. A coding question can be answered
+      // entirely in the editor, and requiring speech as well left a candidate
+      // with a working solution no way to submit it.
+      if (!transcript.trim() && !codeContent.trim()) {
         // Say so. This used to return to "active" in silence: the candidate had
         // spoken, nothing was transcribed, no question advanced and no reason
         // was given — which reads exactly like an interview stuck on its first
@@ -532,7 +536,9 @@ export function useVoiceInterview() {
         ...prev,
         {
           role: "candidate",
-          content: transcript,
+          // The bubble needs words. An empty string renders as a blank box,
+          // which reads as a failed submission rather than a code-only answer.
+          content: transcript.trim() || "(Submitted code without a spoken explanation)",
           timestamp: new Date().toISOString(),
           codeContent: submittedCode || undefined,
           codeLanguage: submittedCode ? submittedLanguage : undefined,

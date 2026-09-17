@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import {
   Clock, Mic, User, Bot, Loader2, Video, AlertTriangle, Maximize, Shield,
   Wifi, WifiOff, Square, LogOut, CheckCircle2, Circle, Volume2,
-  EyeOff, Users, Timer, Monitor, MonitorUp, Play, Smartphone,
+  EyeOff, Users, Timer, Monitor, MonitorUp, Play, Send, Smartphone,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/Toast';
@@ -21,6 +21,7 @@ import { aiService } from '@/services/ai.service';
 import { interviewWsService } from '@/services/interview-ws.service';
 import { AIAvatar } from '@/components/interview/AIAvatar';
 import { CodingEditor } from '@/components/interview/CodingEditor';
+import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
@@ -118,6 +119,22 @@ export function InterviewPage() {
   const inactivityWarningRef = useRef<number | null>(null);
   const inactivityTimeoutRef = useRef<number | null>(null);
   const inactivityWarningShownRef = useRef(false);
+  /** "Are you still there?" — a question, never a countdown to ending. */
+  const [stillThereOpen, setStillThereOpen] = useState(false);
+  /**
+   * The question on the table, for the panel above the code editor.
+   *
+   * The last thing the interviewer said, which is the question being answered.
+   * Fillers and system notices are skipped — neither is a question.
+   */
+  const currentQuestion = useMemo(() => {
+    const interviewerTurns = voiceInterview.conversation.filter(
+      (entry) => entry.role === 'interviewer',
+    );
+    return interviewerTurns.length > 0
+      ? interviewerTurns[interviewerTurns.length - 1].content
+      : null;
+  }, [voiceInterview.conversation]);
   const runPostCompletionFlowRef = useRef<(skip: boolean) => void>(() => { });
 
   // Global timer
@@ -362,19 +379,32 @@ export function InterviewPage() {
       showToast(MESSAGES.interview.inactivityWarning, 'warning');
     }, APP_CONFIG.INTERVIEW_INACTIVITY_WARNING_SECONDS * 1000);
     inactivityTimeoutRef.current = window.setTimeout(() => {
-      showToast(MESSAGES.interview.endingInactivity, 'error');
-      runPostCompletionFlowRef.current(false);
+      // Asks, rather than ends. Silence is not evidence of abandonment — a
+      // candidate reading a question or writing code makes no sound at all,
+      // and this used to end their interview after three minutes of it. An
+      // interview now finishes only on a proctoring violation, on running out
+      // of time, or because the candidate said they were done.
+      setStillThereOpen(true);
     }, APP_CONFIG.INTERVIEW_INACTIVITY_TIMEOUT_SECONDS * 1000);
   }, [clearInactivityTimers, showToast]);
 
   useEffect(() => {
+    // Restarted on every keystroke in the editor, because the code length is a
+    // dependency: someone typing is plainly still present, and the check exists
+    // to notice an empty chair.
     if (voiceInterview.state === 'active' && !voiceInterview.isPlaying) {
       startInactivityTimers();
     } else {
       clearInactivityTimers();
     }
     return () => clearInactivityTimers();
-  }, [voiceInterview.state, voiceInterview.isPlaying, startInactivityTimers, clearInactivityTimers]);
+  }, [
+    voiceInterview.state,
+    voiceInterview.isPlaying,
+    voiceInterview.codeContent.length,
+    startInactivityTimers,
+    clearInactivityTimers,
+  ]);
 
   // Answer timer
   const submitAnswerRef = useRef(voiceInterview.submitAnswer);
@@ -790,6 +820,30 @@ export function InterviewPage() {
         </div>
       )}
 
+      {/* "Still there?" — shown after a long silence, and only ever asking.
+          Dismissing it restarts the check; nothing here ends the interview. */}
+      <Modal
+        isOpen={stillThereOpen}
+        onClose={() => setStillThereOpen(false)}
+        title="Are you still there?"
+        size="sm"
+        footer={
+          <Button
+            onClick={() => {
+              setStillThereOpen(false);
+              startInactivityTimers();
+            }}
+          >
+            Yes, I&apos;m still here
+          </Button>
+        }
+      >
+        <p className="text-sm text-[var(--textSecondary)]">
+          We have not heard anything for a few minutes. Your interview is still running and nothing
+          has been submitted — carry on when you are ready.
+        </p>
+      </Modal>
+
       {/* Post-completion overlay */}
       {postCompletionStep && (
         <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center backdrop-blur-sm">
@@ -922,11 +976,41 @@ export function InterviewPage() {
           {/* Coding Editor & Compile */}
           {voiceInterview.isCodingQuestion && voiceInterview.state !== 'completed' && !postCompletionStep && (
             <div className="border-t border-[var(--border)] px-4 py-3 space-y-2">
+              {/* The question, pinned above the editor. The chat scrolls, and
+                  once the editor and its output are open the question that was
+                  asked is usually off the top of it — leaving the candidate
+                  writing code against something they can no longer read. It
+                  scrolls inside its own box so a long one cannot push the
+                  editor off the screen. */}
+              {currentQuestion && (
+                <details open className="rounded-lg border border-[var(--border)] bg-[var(--surface1)]">
+                  <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wider text-[var(--textSecondary)]">
+                    The question
+                  </summary>
+                  <p className="max-h-32 overflow-y-auto whitespace-pre-wrap px-3 pb-3 text-sm text-[var(--text)]">
+                    {currentQuestion}
+                  </p>
+                </details>
+              )}
               <CodingEditor code={voiceInterview.codeContent} language={voiceInterview.codeLanguage} onCodeChange={voiceInterview.setCodeContent} onLanguageChange={voiceInterview.setCodeLanguage} disabled={voiceInterview.state === 'processing'} />
-              <div className="flex justify-end">
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 <Button size="sm" variant="outline" onClick={handleCompile} disabled={compiling || !voiceInterview.codeContent.trim()}>
                   {compiling ? <Loader2 size={14} className="animate-spin mr-2" /> : <Play size={14} className="mr-2" />}
                   Compile & Run
+                </Button>
+                {/* There was no way to submit code at all. The only route was
+                    to speak and stop the mic, so a candidate who had written a
+                    working solution and had nothing to say about it was stuck.
+                    Any spoken explanation already recorded goes with it. */}
+                <Button
+                  size="sm"
+                  onClick={() => voiceInterview.submitAnswer()}
+                  disabled={
+                    voiceInterview.state === 'processing' || !voiceInterview.codeContent.trim()
+                  }
+                  leftIcon={<Send size={14} />}
+                >
+                  Submit answer
                 </Button>
               </div>
               {compileOutput && (
