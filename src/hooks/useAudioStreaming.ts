@@ -12,6 +12,16 @@ import { getAccessToken } from "@/services/api.service";
  * approach only puts headers in the first chunk, making subsequent
  * chunks undecodeable.
  */
+/**
+ * Level, on the same 0-100 scale as `audioLevel`, below which a chunk is
+ * treated as holding no speech.
+ *
+ * Deliberately low. The cost of the two errors is not symmetric: dropping a
+ * very quiet answer loses a few seconds the candidate can repeat, while sending
+ * silence puts words in their mouth that are then scored.
+ */
+const SILENCE_FLOOR = 4;
+
 export function useAudioStreaming(scheduleId: number | null) {
   const [isRecording, setIsRecording] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
@@ -26,12 +36,30 @@ export function useAudioStreaming(scheduleId: number | null) {
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
+  /**
+   * Loudest moment since the last chunk was sent.
+   *
+   * Whisper does not return an empty string for silence — it returns fluent
+   * invention, and "Thank you for joining us" reached a candidate's transcript
+   * that way. A chunk that never rose above the floor below held no speech, so
+   * it is dropped rather than transcribed.
+   */
+  const peakSinceChunkRef = useRef(0);
 
   /** Send a complete audio blob to the backend via WebSocket. */
   const sendChunk = useCallback(
     (blob: Blob) => {
       if (blob.size === 0 || !interviewWsService.connected || !scheduleId)
         return;
+
+      // Read and reset before the async work below, so the next chunk measures
+      // its own window rather than inheriting this one's peak.
+      const peak = peakSinceChunkRef.current;
+      peakSinceChunkRef.current = 0;
+      if (peak < SILENCE_FLOOR) {
+        console.debug(`Skipping silent audio chunk (peak ${peak} < ${SILENCE_FLOOR})`);
+        return;
+      }
 
       const reader = new FileReader();
       reader.onload = () => {
@@ -132,6 +160,9 @@ export function useAudioStreaming(scheduleId: number | null) {
         const avg = sum / dataArray.length;
         const normalized = Math.min(100, Math.round((avg / 255) * 100 * 2)); // boost sensitivity
         setAudioLevel(normalized);
+        if (normalized > peakSinceChunkRef.current) {
+          peakSinceChunkRef.current = normalized;
+        }
         animFrameRef.current = requestAnimationFrame(updateLevel);
       };
 

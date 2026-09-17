@@ -23,6 +23,7 @@ import { Modal } from '@/components/ui/Modal';
 import { CandidateTable } from '@/components/admin/CandidateTable';
 import { CandidateDetailModal } from '@/components/admin/CandidateDetailModal';
 import { BulkActionModal } from '@/components/admin/BulkActionModal';
+import { InterviewPromptPanel } from '@/components/admin/InterviewPromptPanel';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { BackLink } from '@/components/ui/BackLink';
 import { jobService } from '@/services/job.service';
@@ -953,6 +954,14 @@ export function CandidateDetailsPage() {
           onContentChange={setModalContent}
           onClose={() => setModalAction(null)}
           onSend={handleSendAction}
+          extra={
+            modalAction.startsWith('interview-') ? (
+              <InterviewPromptPanel
+                jobPrefix={selectedPrefix}
+                round={modalAction === 'interview-l2' ? 'L2_TECHNICAL' : 'L3_BEHAVIORAL'}
+              />
+            ) : undefined
+          }
         />
       )}
 

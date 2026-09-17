@@ -15,6 +15,7 @@
 //   VITE_PROCTORING_NOISE_BLOCKS_START   "true" | "false"   (default true)
 //   VITE_PROCTORING_PHOTO_REQUIRED       "true" | "false"   (default true)
 //   VITE_PROCTORING_ROOM_SCAN_REQUIRED   "true" | "false"   (default false)
+//   VITE_PROCTORING_MOBILE_REQUIRED      "true" | "false"   (default false)
 //
 // For the count values, 0 means "warn only, never auto-submit".
 
@@ -128,6 +129,18 @@ export const PROCTORING_CONFIG = {
     frames: parseCount(env.VITE_PROCTORING_ROOM_SCAN_FRAMES, 8),
     /** How long the candidate is given to complete the full turn. */
     durationMs: parseCount(env.VITE_PROCTORING_ROOM_SCAN_DURATION_MS, 16000),
+  },
+  /**
+   * The phone used as a second camera during an interview.
+   *
+   * Defaults to false, which is how it has always behaved: the candidate is
+   * shown the QR code and can begin without pairing. That was the only option —
+   * there was no switch at all — so an interview meant to be watched from a
+   * second angle could be sat with the phone step skipped and nothing recorded
+   * it as skipped. Setting this true makes pairing a condition of starting.
+   */
+  mobileCompanion: {
+    required: parseBool(env.VITE_PROCTORING_MOBILE_REQUIRED, false),
   },
 } as const;
 

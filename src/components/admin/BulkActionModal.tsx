@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { CalendarClock } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Button } from '@/components/ui/Button';
@@ -19,6 +20,14 @@ interface BulkActionModalProps {
   onContentChange: (value: string) => void;
   onClose: () => void;
   onSend: () => void;
+  /**
+   * Extra content for the action being confirmed.
+   *
+   * Booking an interview has a precondition sending an email does not — the
+   * round needs a prompt — and the confirmation is the last place it can be
+   * caught before a candidate is told to attend.
+   */
+  extra?: ReactNode;
 }
 
 /** Confirmation modal for a bulk email action (ack / rejection / exam link / …). */
@@ -35,6 +44,7 @@ export function BulkActionModal({
   onContentChange,
   onClose,
   onSend,
+  extra,
 }: Readonly<BulkActionModalProps>) {
   // The picker blocks past times, but a value can still go stale while the
   // modal sits open — keep the guard on the Send button too.
@@ -62,6 +72,8 @@ export function BulkActionModal({
           Sending to <strong>{recipientCount}</strong> candidate
           {recipientCount !== 1 ? 's' : ''}.
         </p>
+
+        {extra}
 
         {hasDateTime && (
           <div className="space-y-2">

@@ -113,6 +113,8 @@ interface InterviewPreStartScreenProps {
   candidateEmail: string;
   /** True once the identity photo and room sweep are both done. */
   capturesReady: boolean;
+  /** When true the phone must be paired before the interview can begin. */
+  mobileRequired: boolean;
   onCapturesReadyChange: (ready: boolean) => void;
 }
 
@@ -145,6 +147,7 @@ export function InterviewPreStartScreen({
   scheduleId,
   candidateEmail,
   capturesReady,
+  mobileRequired,
   onCapturesReadyChange,
 }: Readonly<InterviewPreStartScreenProps>) {
   /**
@@ -185,6 +188,8 @@ export function InterviewPreStartScreen({
     // Only a gate while at least one capture is switched on. Waiting on a step
     // that is configured off would leave Start permanently disabled.
     blockedReason = captureBlockedReason(photoRequired, roomScanRequired);
+  } else if (mobileRequired && isSetupActive && !mobileVerified) {
+    blockedReason = 'Scan the QR code with your phone and keep that page open — this interview requires it.';
   } else if (mobileVerified && !canStartInterview) {
     blockedReason = 'Finishing the phone check…';
   }
@@ -193,7 +198,9 @@ export function InterviewPreStartScreen({
 
   let startLabel = 'Begin AI Interview';
   if (!canStart) startLabel = 'Complete the steps above';
-  else if (isSetupActive && !mobileVerified) startLabel = 'Begin without a phone';
+  // Only offered where a phone is optional; promising it otherwise would be a
+  // button that refuses to do what it says.
+  else if (isSetupActive && !mobileVerified && !mobileRequired) startLabel = 'Begin without a phone';
 
   return (
     <div className="min-h-screen bg-[var(--background)]">

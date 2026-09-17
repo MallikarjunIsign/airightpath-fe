@@ -414,6 +414,10 @@ function RoundDetailPanel({ round }: Readonly<{ round: RoundDetail }>) {
             <CardTitle>Scores by area</CardTitle>
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="info" size="sm">{completionLabel(schedule.completionReason)}</Badge>
+              {/* Two separate recordings: the candidate's camera and the
+                  screen they shared. For a coding round the screen is the only
+                  evidence of how the answer was reached, so it gets its own
+                  button rather than being folded into "Recording". */}
               {schedule.recordReferences && (
                 <Button
                   variant="ghost"
@@ -421,7 +425,17 @@ function RoundDetailPanel({ round }: Readonly<{ round: RoundDetail }>) {
                   leftIcon={<ExternalLink size={14} />}
                   onClick={() => window.open(schedule.recordReferences, '_blank')}
                 >
-                  Recording
+                  Camera
+                </Button>
+              )}
+              {schedule.screenRecordReferences && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  leftIcon={<ExternalLink size={14} />}
+                  onClick={() => window.open(schedule.screenRecordReferences, '_blank')}
+                >
+                  Shared screen
                 </Button>
               )}
             </div>

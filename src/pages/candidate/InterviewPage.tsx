@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { APP_CONFIG } from '@/config/app.config';
+import { PROCTORING_CONFIG } from '@/config/proctoring.config';
 import { ROUTES } from '@/config/routes';
 import { MESSAGES } from '@/config/messages';
 import { InterviewPreStartScreen } from '@/components/interview/InterviewPreStartScreen';
@@ -130,7 +131,13 @@ export function InterviewPage() {
   });
 
   // Camera stream for face detection
-  const { start: startVideoRecording, stop: stopVideoRecording, isRecording: isVideoRecording, stream: recorderStream } = useMediaRecorder({
+  const {
+    start: startVideoRecording,
+    stop: stopVideoRecording,
+    stopAndGetBlob: stopVideoAndGetBlob,
+    isRecording: isVideoRecording,
+    stream: recorderStream,
+  } = useMediaRecorder({
     timeslice: APP_CONFIG.VIDEO_CHUNK_SECONDS * 1000,
   });
 
@@ -309,6 +316,23 @@ export function InterviewPage() {
         } catch (err) {
           console.error('Screen recording upload failed:', err);
         }
+
+        // The candidate's camera, which was being recorded and then discarded.
+        // uploadInterviewVideo and its endpoint both existed; nothing called
+        // them, so recordReferences stayed null and the reviewer's Recording
+        // button never appeared for any interview.
+        //
+        // Uploaded after the screen and in its own try/catch on purpose: this
+        // runs while the candidate waits on the "finishing" overlay, and a
+        // failed upload must not cost them a completed interview.
+        try {
+          const videoBlob = await stopVideoAndGetBlob();
+          if (videoBlob && voiceInterview.scheduleId) {
+            await aiService.uploadInterviewVideo(voiceInterview.scheduleId, videoBlob);
+          }
+        } catch (err) {
+          console.error('Camera recording upload failed:', err);
+        }
         setPostCompletionStep('done');
         setTimeout(() => {
           navigate(ROUTES.CANDIDATE.INTERVIEWS);
@@ -318,7 +342,7 @@ export function InterviewPage() {
         navigate(ROUTES.CANDIDATE.INTERVIEWS);
       }
     },
-    [voiceInterview, stopScreenAndGetBlob, stopDetection, navigate]
+    [voiceInterview, stopScreenAndGetBlob, stopVideoAndGetBlob, stopDetection, navigate]
   );
 
   useEffect(() => {
@@ -625,8 +649,14 @@ export function InterviewPage() {
       return;
     }
 
-    // If mobile is not verified, we proceed anyway if the user clicks "Skip & Begin"
     if (!mobileVerified) {
+      // Where pairing is required, this is a wall rather than a prompt —
+      // otherwise the second camera is only ever advisory and an interview can
+      // be sat with the step skipped and nothing recording that it was.
+      if (PROCTORING_CONFIG.mobileCompanion.required) {
+        showToast(MESSAGES.interview.mobileRequired, 'warning');
+        return;
+      }
       setMobileVerified(true);
       showToast(MESSAGES.interview.proceedingWithoutRoom, 'info');
     }
@@ -728,6 +758,7 @@ export function InterviewPage() {
         instructionCountdown={instructionCountdown}
         micPermission={micPermission}
         cameraPermission={cameraPermission}
+        mobileRequired={PROCTORING_CONFIG.mobileCompanion.required}
         error={voiceInterview.error ?? undefined}
         starting={voiceInterview.state === 'starting'}
         canStartInterview={canStartInterview}

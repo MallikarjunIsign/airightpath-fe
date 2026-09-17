@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Loader2, Video, Send, Mail, Calendar } from 'lucide-react';
+import { Loader2, Video, Send, Mail, Calendar, AlertTriangle } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -7,6 +7,7 @@ import { DateTimeInput } from '@/components/ui/DateTimeInput';
 import { nowDateTimeLocal, isPast } from '@/utils/datetime.utils';
 import { Select } from '@/components/ui/Select';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { InterviewPromptPanel } from '@/components/admin/InterviewPromptPanel';
 import { useToast } from '@/components/ui/Toast';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
@@ -38,6 +39,14 @@ export function InterviewSchedulerPage() {
    * exam; L3 is scheduled after it, for candidates who passed.
    */
   const [round, setRound] = useState<InterviewRound>('L2_TECHNICAL');
+  /**
+   * Whether the selected round has a prompt behind it.
+   *
+   * Reported by the panel below, which resolves it the same way the server
+   * does. Booking is still allowed without one — the deadline may be the reason
+   * for booking now — but the button says what will happen.
+   */
+  const [promptConfigured, setPromptConfigured] = useState(true);
   const [questionsFromDate, setQuestionsFromDate] = useState('');
   const [questionsToDate, setQuestionsToDate] = useState('');
 
@@ -204,6 +213,18 @@ export function InterviewSchedulerPage() {
               </div>
             )}
 
+            {/* The prompt this round will interview with. Placed between the
+                round and the candidate list because it is a property of the
+                round being booked, and because an interview with no prompt
+                cannot be started by the people about to be selected. */}
+            {selectedPrefix && (
+              <InterviewPromptPanel
+                jobPrefix={selectedPrefix}
+                round={round}
+                onConfiguredChange={setPromptConfigured}
+              />
+            )}
+
             {/* Candidate Selection */}
             {selectedPrefix && (
               <div>
@@ -310,7 +331,17 @@ export function InterviewSchedulerPage() {
             </label>
 
             {/* Submit */}
-            <div className="flex justify-end pt-4 border-t border-[var(--border)]">
+            <div className="flex flex-wrap items-center justify-end gap-3 pt-4 border-t border-[var(--border)]">
+              {/* Stated rather than enforced. Booking ahead of writing the
+                  prompt is legitimate — the deadline may be the reason to book
+                  today — but nobody should discover the gap from a candidate
+                  who cannot start. */}
+              {selectedPrefix && !promptConfigured && (
+                <p className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300">
+                  <AlertTriangle size={14} className="flex-shrink-0" />
+                  Add the prompt above before candidates try to start.
+                </p>
+              )}
               <Button
                 onClick={handleSubmit}
                 isLoading={submitting}

@@ -88,6 +88,8 @@ export interface InterviewSchedule {
   attemptStatus: AttemptStatus;
   interviewResult: InterviewResult;
   recordReferences?: string;
+  /** Where the shared screen was stored, when the candidate shared one. */
+  screenRecordReferences?: string;
   summaryReferences?: string;
   assignedAt: string;
   deadlineTime: string;

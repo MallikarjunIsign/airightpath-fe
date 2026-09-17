@@ -134,6 +134,8 @@ export const MESSAGES = {
     mobileVerified: 'Mobile verification successful!',
     proctoringWarning: (reason: string) => `Proctoring Warning: ${reason}`,
     proceedingWithoutRoom: 'Proceeding without room verification...',
+    mobileRequired:
+      'This interview needs your phone as a second camera. Scan the QR code and keep that page open.',
     videoRecordFailed: 'Could not start video recording.',
     stillConnecting: 'Still connecting...',
   },
