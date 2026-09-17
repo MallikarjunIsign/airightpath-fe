@@ -93,6 +93,18 @@ export const interviewService = {
   },
 
   // Item 16: Get proctoring events
+  /**
+   * A temporary URL that plays one of an interview's recordings.
+   *
+   * @param kind 'camera' for the webcam, 'screen' for the shared screen
+   */
+  getRecordingLink(scheduleId: number, kind: 'camera' | 'screen') {
+    return api.get<{ url: string; expiresInSeconds: number }>(
+      ENDPOINTS.INTERVIEWS.RECORDING_LINK(scheduleId),
+      { params: { kind } },
+    );
+  },
+
   getProctoringEvents(scheduleId: number) {
     return api.get<ProctoringEvent[]>(
       ENDPOINTS.INTERVIEW_ADMIN.PROCTORING_EVENTS(scheduleId),

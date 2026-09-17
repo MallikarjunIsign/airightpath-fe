@@ -110,6 +110,9 @@ export const ENDPOINTS = {
     GET_ACTIVE: "/api/interview/active",
     GET_RESULTS: "/api/interview/results",
     GET_RESULT_DETAIL: (id: number) => `/api/interview/results/${id}`,
+    // A signed, playable link to a stored recording. The schedule holds an
+    // `s3://` reference, which no browser can open.
+    RECORDING_LINK: (id: number) => `/api/interview/${id}/recording`,
   },
   AI: {
     START_INTERVIEW: "/api/interview/start",

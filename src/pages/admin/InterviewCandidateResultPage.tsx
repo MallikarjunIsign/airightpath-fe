@@ -419,24 +419,10 @@ function RoundDetailPanel({ round }: Readonly<{ round: RoundDetail }>) {
                   evidence of how the answer was reached, so it gets its own
                   button rather than being folded into "Recording". */}
               {schedule.recordReferences && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  leftIcon={<ExternalLink size={14} />}
-                  onClick={() => window.open(schedule.recordReferences, '_blank')}
-                >
-                  Camera
-                </Button>
+                <RecordingButton scheduleId={schedule.id} kind="camera" label="Camera" />
               )}
               {schedule.screenRecordReferences && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  leftIcon={<ExternalLink size={14} />}
-                  onClick={() => window.open(schedule.screenRecordReferences, '_blank')}
-                >
-                  Shared screen
-                </Button>
+                <RecordingButton scheduleId={schedule.id} kind="screen" label="Shared screen" />
               )}
             </div>
           </div>
@@ -550,6 +536,57 @@ function RoundDetailPanel({ round }: Readonly<{ round: RoundDetail }>) {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+/**
+ * Opens a stored recording for playback.
+ *
+ * <p>The schedule holds an `s3://bucket/key` reference, and passing that to
+ * `window.open` is what produced a blank tab: no browser speaks that scheme.
+ * The server signs a temporary https URL instead.</p>
+ */
+function RecordingButton({
+  scheduleId,
+  kind,
+  label,
+}: Readonly<{ scheduleId: number; kind: 'camera' | 'screen'; label: string }>) {
+  const [opening, setOpening] = useState(false);
+
+  async function open() {
+    setOpening(true);
+    // The tab is opened now, before the await. A window.open that runs after an
+    // async gap is treated as unsolicited and blocked, which is its own blank
+    // tab — this one is ours to navigate once the link comes back.
+    const tab = window.open('', '_blank');
+    try {
+      const res = await interviewService.getRecordingLink(scheduleId, kind);
+      const url = res.data?.url;
+      if (!url) throw new Error('no url');
+      if (tab) {
+        tab.location.href = url;
+      } else {
+        // Popups blocked outright — fall back to this tab rather than doing
+        // nothing, which is indistinguishable from a broken button.
+        window.location.href = url;
+      }
+    } catch {
+      tab?.close();
+    } finally {
+      setOpening(false);
+    }
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      leftIcon={opening ? <Loader2 size={14} className="animate-spin" /> : <ExternalLink size={14} />}
+      onClick={open}
+      disabled={opening}
+    >
+      {label}
+    </Button>
   );
 }
 
