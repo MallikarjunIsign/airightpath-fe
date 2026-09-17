@@ -503,6 +503,21 @@ export function useVoiceInterview() {
 
       const transcript = manualTranscript || transcriptRef.current;
       if (!transcript.trim()) {
+        // Say so. This used to return to "active" in silence: the candidate had
+        // spoken, nothing was transcribed, no question advanced and no reason
+        // was given — which reads exactly like an interview stuck on its first
+        // question. The turn is not sent, because an empty answer would be
+        // graded as one.
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content:
+              "We did not catch that — nothing was recorded. Check your microphone, then press the mic and answer again.",
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+        setError("Your answer was not recorded. Please try again.");
         setState("active");
         return;
       }
@@ -541,6 +556,7 @@ export function useVoiceInterview() {
       }
       sendToInterview("submit-answer", payload);
 
+      setError(null);
       setState("processing");
 
       // Start safety timeout — if response-complete never arrives, recover the UI

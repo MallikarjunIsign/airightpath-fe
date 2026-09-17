@@ -16,11 +16,12 @@ import { getAccessToken } from "@/services/api.service";
  * Level, on the same 0-100 scale as `audioLevel`, below which a chunk is
  * treated as holding no speech.
  *
- * Deliberately low. The cost of the two errors is not symmetric: dropping a
- * very quiet answer loses a few seconds the candidate can repeat, while sending
- * silence puts words in their mouth that are then scored.
+ * Set at near-digital-silence rather than at "quiet". Dropping a chunk is
+ * unrecoverable — the words are gone and the interview moves on without them —
+ * while a hallucinated fragment is now much less likely anyway, since Whisper
+ * is called with a pinned language and zero temperature.
  */
-const SILENCE_FLOOR = 4;
+const SILENCE_FLOOR = 2;
 
 export function useAudioStreaming(scheduleId: number | null) {
   const [isRecording, setIsRecording] = useState(false);
@@ -45,6 +46,17 @@ export function useAudioStreaming(scheduleId: number | null) {
    * it is dropped rather than transcribed.
    */
   const peakSinceChunkRef = useRef(0);
+  /**
+   * Whether the analyser has produced a single reading.
+   *
+   * The gate below has to fail open. An AudioContext can come back suspended,
+   * and level monitoring is best-effort inside a try/catch — in either case the
+   * analyser reports nothing, the peak stays zero, and gating on it alone would
+   * discard every chunk of every answer and leave the interview stuck on its
+   * first question with nothing said about why. Silence is only ever inferred
+   * from a measurement that actually happened.
+   */
+  const levelObservedRef = useRef(false);
 
   /** Send a complete audio blob to the backend via WebSocket. */
   const sendChunk = useCallback(
@@ -56,7 +68,7 @@ export function useAudioStreaming(scheduleId: number | null) {
       // its own window rather than inheriting this one's peak.
       const peak = peakSinceChunkRef.current;
       peakSinceChunkRef.current = 0;
-      if (peak < SILENCE_FLOOR) {
+      if (levelObservedRef.current && peak < SILENCE_FLOOR) {
         console.debug(`Skipping silent audio chunk (peak ${peak} < ${SILENCE_FLOOR})`);
         return;
       }
@@ -160,6 +172,7 @@ export function useAudioStreaming(scheduleId: number | null) {
         const avg = sum / dataArray.length;
         const normalized = Math.min(100, Math.round((avg / 255) * 100 * 2)); // boost sensitivity
         setAudioLevel(normalized);
+        levelObservedRef.current = true;
         if (normalized > peakSinceChunkRef.current) {
           peakSinceChunkRef.current = normalized;
         }

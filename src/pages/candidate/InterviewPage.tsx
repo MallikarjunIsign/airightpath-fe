@@ -946,10 +946,24 @@ export function InterviewPage() {
                   <span className="text-xs text-amber-700 dark:text-amber-300">Speech not captured: {voiceInterview.transcriptionError}</span>
                 </div>
               )}
-              {voiceInterview.isRecording && voiceInterview.currentTranscript && (
+              {/* Captions, shown for the whole time the mic is open — not only
+                  once text arrives. An empty panel that says "listening" tells
+                  the candidate their microphone is live and nothing has been
+                  heard yet; rendering nothing at all told them neither, and a
+                  candidate whose speech was not being captured had no way to
+                  know before their answer was submitted empty. */}
+              {voiceInterview.isRecording && (
                 <div className="mb-3 p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
-                  <p className="text-xs text-[var(--textTertiary)] mb-1">Live Transcription:</p>
-                  <p className="text-sm text-[var(--text)]">{voiceInterview.currentTranscript}</p>
+                  <p className="text-xs text-[var(--textTertiary)] mb-1">
+                    Live captions — this is what gets sent to the interviewer
+                  </p>
+                  {voiceInterview.currentTranscript ? (
+                    <p className="text-sm text-[var(--text)]">{voiceInterview.currentTranscript}</p>
+                  ) : (
+                    <p className="text-sm italic text-[var(--textTertiary)]">
+                      Listening… your words will appear here as you speak.
+                    </p>
+                  )}
                 </div>
               )}
               {voiceInterview.isRecording && (
