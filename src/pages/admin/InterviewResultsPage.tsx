@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   Loader2,
   Video,
-  ExternalLink,
   Eye,
   Download,
   Users,
@@ -16,6 +15,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { RecordingPlayerButton } from '@/components/admin/RecordingPlayerButton';
 import { jobService } from '@/services/job.service';
 import { interviewService } from '@/services/interview.service';
 import { usePersistentState } from '@/hooks/usePersistentState';
@@ -208,16 +208,14 @@ function InterviewActions({
       >
         View
       </Button>
+      {/* Was window.open on the stored s3:// reference, which no browser can
+          open — the same blank tab the result page had. Both now use the one
+          player, so a recording behaves the same from either place. */}
       {interview.recordReferences && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="px-2"
-          leftIcon={<ExternalLink size={14} />}
-          onClick={() => window.open(interview.recordReferences, '_blank')}
-        >
-          Recording
-        </Button>
+        <RecordingPlayerButton scheduleId={interview.id} kind="camera" label="Camera" />
+      )}
+      {interview.screenRecordReferences && (
+        <RecordingPlayerButton scheduleId={interview.id} kind="screen" label="Screen" />
       )}
     </div>
   );

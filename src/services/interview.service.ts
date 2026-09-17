@@ -98,10 +98,14 @@ export const interviewService = {
    *
    * @param kind 'camera' for the webcam, 'screen' for the shared screen
    */
-  getRecordingLink(scheduleId: number, kind: 'camera' | 'screen') {
+  getRecordingLink(
+    scheduleId: number,
+    kind: 'camera' | 'screen',
+    disposition: 'inline' | 'attachment' = 'inline',
+  ) {
     return api.get<{ url: string; expiresInSeconds: number }>(
       ENDPOINTS.INTERVIEWS.RECORDING_LINK(scheduleId),
-      { params: { kind } },
+      { params: { kind, disposition } },
     );
   },
 
