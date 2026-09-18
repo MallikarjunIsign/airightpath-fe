@@ -702,6 +702,10 @@ export function InterviewPage() {
       await voiceInterview.startInterview({
         email: user.email,
         jobPrefix: interview.jobPrefix,
+        // The interview this screen is showing. Without it the server picked
+        // the most recently assigned one, so a candidate with a repeat L2 and
+        // an L3 outstanding could start the round they had not chosen.
+        scheduleId: interview.id,
         mobileToken: mobileToken || undefined,
       });
       startGlobalTimer();

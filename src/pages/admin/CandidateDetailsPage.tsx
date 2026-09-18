@@ -24,6 +24,7 @@ import { CandidateTable } from '@/components/admin/CandidateTable';
 import { CandidateDetailModal } from '@/components/admin/CandidateDetailModal';
 import { BulkActionModal } from '@/components/admin/BulkActionModal';
 import { InterviewPromptPanel } from '@/components/admin/InterviewPromptPanel';
+import { InterviewRoundsPanel } from '@/components/admin/InterviewRoundsPanel';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { BackLink } from '@/components/ui/BackLink';
 import { jobService } from '@/services/job.service';
@@ -196,11 +197,14 @@ const STAGE_ACTIONS: Record<string, BulkAction[]> = {
   // The forward step after an exam. Before this, moving someone into the
   // interview stage meant leaving Candidates for the Interview Scheduler and
   // finding them again there.
-  EXAM_COMPLETED: ['interview-l2', 'rejection'],
-  // L3 is offered from the interview stages: a candidate reaches the behavioural
-  // round after sitting the technical one, not straight out of the exam.
-  INTERVIEW_SCHEDULED: ['interview-l3', 'rejection'],
-  INTERVIEW_COMPLETED: ['interview-l3', 'success', 'rejection'],
+  // Booking interviews is not a stage action any more — see the Interview
+  // rounds section, which offers both rounds at any point and as often as
+  // needed. Gating them here made a re-attempt impossible: a candidate whose
+  // L2 dropped out could not be given another, because their stage had already
+  // moved past the one button that could book it.
+  EXAM_COMPLETED: ['rejection'],
+  INTERVIEW_SCHEDULED: ['rejection'],
+  INTERVIEW_COMPLETED: ['success', 'rejection'],
   SELECTED: ['rejection'],
 };
 
@@ -233,6 +237,8 @@ export function CandidateDetailsPage() {
 
   // Modal state
   const [modalAction, setModalAction] = useState<BulkAction | null>(null);
+  /** Bumped after an assignment so the round counts re-read themselves. */
+  const [roundsRefreshKey, setRoundsRefreshKey] = useState(0);
   const [modalDateTime, setModalDateTime] = useState('');
   const [modalContent, setModalContent] = useState('');
   const [sending, setSending] = useState(false);
@@ -634,6 +640,11 @@ export function CandidateDetailsPage() {
           break;
       }
       showToast(MESSAGES.admin.candidates.actionSent(BULK_ACTION_CONFIG[modalAction].label), 'success');
+      if (modalAction.startsWith('interview-')) {
+        // The attempt counts in the rounds section come from the schedules, not
+        // from the candidate rows, so they need their own nudge.
+        setRoundsRefreshKey((key) => key + 1);
+      }
       setModalAction(null);
       setSelectedEmails(new Set());
       fetchCandidates();
@@ -890,6 +901,19 @@ export function CandidateDetailsPage() {
                 );
               })}
             </div>
+          )}
+
+          {/* Booking interviews, as its own step rather than a stage action.
+              Placed above the table so the selection it acts on is in view. */}
+          {selectedPrefix && (
+            <InterviewRoundsPanel
+              jobPrefix={selectedPrefix}
+              selectedEmails={selectedEmails}
+              refreshKey={roundsRefreshKey}
+              onAssignRound={(round) =>
+                openActionModal(round === 'L2_TECHNICAL' ? 'interview-l2' : 'interview-l3')
+              }
+            />
           )}
 
           {/* Candidate Table */}

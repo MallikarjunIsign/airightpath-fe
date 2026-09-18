@@ -115,6 +115,15 @@ export interface StartInterviewRequest {
   jobPrefix: string;
   resumeSummary?: string;
   mobileToken?: string;
+  /**
+   * Which booked interview to start.
+   *
+   * A candidate can have more than one outstanding — a repeat L2 alongside an
+   * L3 — and they have already chosen from a list by the time they reach the
+   * interview screen. Omitting this let the server fall back to whichever was
+   * assigned most recently, which discarded that choice.
+   */
+  scheduleId?: number;
 }
 
 export interface StartInterviewResponse {
