@@ -136,6 +136,8 @@ export const MESSAGES = {
     proceedingWithoutRoom: 'Proceeding without room verification...',
     mobileRequired:
       'This interview needs your phone as a second camera. Scan the QR code and keep that page open.',
+    mobileSkipNotConfirmed:
+      'Pair your phone, or tick "Continue without my phone" to go ahead with one camera.',
     videoRecordFailed: 'Could not start video recording.',
     stillConnecting: 'Still connecting...',
   },

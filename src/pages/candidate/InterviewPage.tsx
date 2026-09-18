@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import {
   Clock, Mic, User, Bot, Loader2, Video, AlertTriangle, Maximize, Shield,
   Wifi, WifiOff, Square, LogOut, CheckCircle2, Circle, Volume2,
-  EyeOff, Users, Timer, Monitor, MonitorUp, Play, Send, Smartphone,
+  EyeOff, Users, Timer, Monitor, MonitorUp, Play, Send, Smartphone, BookOpen,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/Toast';
@@ -30,6 +30,7 @@ import { PROCTORING_CONFIG } from '@/config/proctoring.config';
 import { ROUTES } from '@/config/routes';
 import { MESSAGES } from '@/config/messages';
 import { InterviewPreStartScreen } from '@/components/interview/InterviewPreStartScreen';
+import { buildProctoringRules } from '@/components/interview/interview-rules';
 import { formatTimer } from '@/utils/format.utils';
 import { interviewService } from '@/services/interview.service';
 import type { InterviewSchedule } from '@/types/interview.types';
@@ -58,12 +59,22 @@ export function InterviewPage() {
   /**
    * Whether the identity photo and room sweep are both done.
    *
-   * Gates the start button. Required for every interview rather than read from
-   * PROCTORING_CONFIG: the photo and the sweep are the only record of who sat
-   * the interview and what was around them, so they are part of the flow, not a
-   * switch a deployment can turn off.
+   * Gates the start button, but only while at least one of them is switched on
+   * — the pre-start screen reads the same VITE_PROCTORING_* values as the exam
+   * and hides the step entirely where both are off.
    */
   const [capturesReady, setCapturesReady] = useState(false);
+  /**
+   * The candidate has declared they are going ahead without a phone.
+   *
+   * A deliberate tick rather than an inference from "they pressed Start
+   * anyway": where the phone is optional the start button used to be live from
+   * the moment the QR appeared, so the second camera was skipped by people who
+   * never realised it was on offer. Now the waiver is the thing that opens the
+   * button, and it is only ever offered where the config says a phone is
+   * optional.
+   */
+  const [mobileSkipped, setMobileSkipped] = useState(false);
   const [mobileToken, setMobileToken] = useState<string | null>(null);
   const [mobileConnected, setMobileConnected] = useState(false);
   const [mobileVerified, setMobileVerified] = useState(false);
@@ -89,6 +100,15 @@ export function InterviewPage() {
 
   // Confirmation dialog
   const [showEndConfirm, setShowEndConfirm] = useState(false);
+  /**
+   * The rules, reachable from inside the interview.
+   *
+   * They were read once on the instructions screen and then gone. A candidate
+   * ten minutes in who cannot remember whether leaving fullscreen costs them a
+   * warning had no way to check without leaving fullscreen to find out — so the
+   * same list the instructions screen builds is one button away throughout.
+   */
+  const [showRules, setShowRules] = useState(false);
   const [postCompletionStep, setPostCompletionStep] = useState<PostCompletionStep>(null);
   const postCompletionStartedRef = useRef(false);
 
@@ -156,6 +176,10 @@ export function InterviewPage() {
     stream: recorderStream,
   } = useMediaRecorder({
     timeslice: APP_CONFIG.VIDEO_CHUNK_SECONDS * 1000,
+    // Stream-only when the camera recording is switched off: face detection
+    // still needs live frames, and taking the camera down to stop the recording
+    // would quietly take the face check with it.
+    record: PROCTORING_CONFIG.recording.camera.required,
   });
 
   // Screen recording
@@ -163,6 +187,10 @@ export function InterviewPage() {
   const { start: startScreenRecording, stop: stopScreenRecording, stopAndGetBlob: stopScreenAndGetBlob, isRecording: isScreenRecording, screenStream } = useScreenRecorder({
     timeslice: APP_CONFIG.VIDEO_CHUNK_SECONDS * 1000,
     onScreenStop: () => {
+      // Nothing was asked for, so nothing can have been stopped. Without this
+      // guard a deployment with screen recording switched off could still fire
+      // a "candidate stopped sharing" proctoring event off a stray track end.
+      if (!PROCTORING_CONFIG.recording.screen.required) return;
       setScreenPermission('denied');
       showToast(MESSAGES.interview.screenShareStopped, 'warning');
       voiceInterview.sendProctoringEvent('screen_share_stopped', 'Candidate stopped screen sharing');
@@ -312,6 +340,20 @@ export function InterviewPage() {
 
   const totalWarnings = faceWarnings + fullscreenExitCount + devToolsCount;
 
+  /**
+   * Whether the camera is opened at all once the interview starts.
+   *
+   * Three unrelated things want it — the recording kept as evidence, the frames
+   * the face check reads, and the plain rule that it be on — and any one of
+   * them is reason enough. Where none of them is switched on the candidate is
+   * never prompted for their camera, which is what "skip" has to mean if it is
+   * to mean anything.
+   */
+  const cameraStreamWanted =
+    PROCTORING_CONFIG.recording.camera.required ||
+    PROCTORING_CONFIG.eyeDetection.enabled ||
+    PROCTORING_CONFIG.camera.required;
+
   // Post-completion flow
   const runPostCompletionFlow = useCallback(
     async (skipEndCall: boolean) => {
@@ -325,13 +367,15 @@ export function InterviewPage() {
         }
         stopDetection();
         setPostCompletionStep('uploading-screen');
-        try {
-          const screenBlob = await stopScreenAndGetBlob();
-          if (screenBlob && voiceInterview.scheduleId) {
-            await aiService.uploadScreenRecording(voiceInterview.scheduleId, screenBlob);
+        if (PROCTORING_CONFIG.recording.screen.required) {
+          try {
+            const screenBlob = await stopScreenAndGetBlob();
+            if (screenBlob && voiceInterview.scheduleId) {
+              await aiService.uploadScreenRecording(voiceInterview.scheduleId, screenBlob);
+            }
+          } catch (err) {
+            console.error('Screen recording upload failed:', err);
           }
-        } catch (err) {
-          console.error('Screen recording upload failed:', err);
         }
 
         // The candidate's camera, which was being recorded and then discarded.
@@ -343,6 +387,8 @@ export function InterviewPage() {
         // runs while the candidate waits on the "finishing" overlay, and a
         // failed upload must not cost them a completed interview.
         try {
+          // stopVideoAndGetBlob is called either way — it is what releases the
+          // camera. In stream-only mode it resolves null and nothing is sent.
           const videoBlob = await stopVideoAndGetBlob();
           if (videoBlob && voiceInterview.scheduleId) {
             await aiService.uploadInterviewVideo(voiceInterview.scheduleId, videoBlob);
@@ -529,6 +575,19 @@ export function InterviewPage() {
     }
   }, [interview, mobileToken]);
 
+  /**
+   * Show the phone step as soon as there is a token to encode.
+   *
+   * It used to appear only after the candidate pressed Start once, so the first
+   * press never started anything — and a candidate who had read the rules,
+   * taken their photo and scanned their room met a QR code they had not been
+   * told to expect, on a screen that had just refused to begin. The step is now
+   * one of the things they work through, and Start means start.
+   */
+  useEffect(() => {
+    if (mobileToken) setIsSetupActive(true);
+  }, [mobileToken]);
+
   // 2. Connect WebSocket and register desktop
   useEffect(() => {
     const token = mobileToken;
@@ -673,18 +732,19 @@ export function InterviewPage() {
   const handleStartInterview = async () => {
     if (!interview || !user?.email) return;
 
-    // If setup is not active, start setup (show QR)
-    if (!isSetupActive) {
-      setIsSetupActive(true);
-      return;
-    }
-
     if (!mobileVerified) {
       // Where pairing is required, this is a wall rather than a prompt —
       // otherwise the second camera is only ever advisory and an interview can
       // be sat with the step skipped and nothing recording that it was.
       if (PROCTORING_CONFIG.mobileCompanion.required) {
         showToast(MESSAGES.interview.mobileRequired, 'warning');
+        return;
+      }
+      // The waiver has to have been ticked. The pre-start screen keeps the
+      // button shut until it is, and this is the same rule stated where the
+      // interview actually begins.
+      if (!mobileSkipped) {
+        showToast(MESSAGES.interview.mobileSkipNotConfirmed, 'warning');
         return;
       }
       setMobileVerified(true);
@@ -697,8 +757,10 @@ export function InterviewPage() {
 
     stopInstruction();
     try {
-      await enterFullscreen();
-      await loadModels();
+      if (PROCTORING_CONFIG.fullscreen.enabled) await enterFullscreen();
+      // The models are a multi-megabyte download; fetching them for a check
+      // that is switched off spends the candidate's bandwidth on nothing.
+      if (PROCTORING_CONFIG.eyeDetection.enabled) await loadModels();
       await voiceInterview.startInterview({
         email: user.email,
         jobPrefix: interview.jobPrefix,
@@ -709,21 +771,28 @@ export function InterviewPage() {
         mobileToken: mobileToken || undefined,
       });
       startGlobalTimer();
-      try {
-        const mediaStream = await startVideoRecording({ audio: true, video: true });
-        if (videoRef.current && mediaStream) {
-          videoRef.current.srcObject = mediaStream;
-          startDetection(videoRef.current);
+      // The camera is opened when anything wants it: the recording, the face
+      // check, or the plain requirement that it be on. Where nothing does, the
+      // candidate is not prompted for it at all.
+      if (cameraStreamWanted) {
+        try {
+          const mediaStream = await startVideoRecording({ audio: true, video: true });
+          if (videoRef.current && mediaStream) {
+            videoRef.current.srcObject = mediaStream;
+            if (PROCTORING_CONFIG.eyeDetection.enabled) startDetection(videoRef.current);
+          }
+        } catch {
+          showToast(MESSAGES.interview.videoRecordFailed, 'warning');
         }
-      } catch {
-        showToast(MESSAGES.interview.videoRecordFailed, 'warning');
       }
-      try {
-        await startScreenRecording();
-        setScreenPermission('granted');
-      } catch {
-        setScreenPermission('denied');
-        voiceInterview.sendProctoringEvent('screen_share_denied', 'Screen recording permission denied');
+      if (PROCTORING_CONFIG.recording.screen.required) {
+        try {
+          await startScreenRecording();
+          setScreenPermission('granted');
+        } catch {
+          setScreenPermission('denied');
+          voiceInterview.sendProctoringEvent('screen_share_denied', 'Screen recording permission denied');
+        }
       }
     } catch (err) {
       console.error(err);
@@ -793,6 +862,8 @@ export function InterviewPage() {
         micPermission={micPermission}
         cameraPermission={cameraPermission}
         mobileRequired={PROCTORING_CONFIG.mobileCompanion.required}
+        mobileSkipped={mobileSkipped}
+        onMobileSkippedChange={setMobileSkipped}
         error={voiceInterview.error ?? undefined}
         starting={voiceInterview.state === 'starting'}
         canStartInterview={canStartInterview}
@@ -808,7 +879,12 @@ export function InterviewPage() {
 
   // Main interview screen
   return (
-    <div className="h-screen overflow-hidden bg-[var(--background)] flex flex-col">
+    // Locked to the viewport on a desktop, where the transcript and the sidebar
+    // each scroll in their own right. Below that breakpoint the two stack and
+    // the page scrolls as one — `h-screen overflow-hidden` there simply cut the
+    // sidebar, and with it the camera preview and the warning count, off the
+    // bottom of the screen with no way to reach them.
+    <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-[var(--background)] flex flex-col">
       {/* Disconnect banner.
           Gated on hasEverConnected: before the socket has connected once there
           is nothing to have lost, and saying otherwise sent candidates chasing
@@ -848,10 +924,32 @@ export function InterviewPage() {
         </p>
       </Modal>
 
+      {/* The rules, on demand and in the same shape the instructions used.
+          contained={false} because the interview runs fullscreen with no app
+          chrome to keep clear of — contained would offset it against a sidebar
+          that is not there. */}
+      <Modal
+        isOpen={showRules}
+        onClose={() => setShowRules(false)}
+        title="Interview Rules"
+        size="lg"
+        contained={false}
+        footer={<Button onClick={() => setShowRules(false)}>Back to interview</Button>}
+      >
+        <ul className="space-y-3">
+          {buildProctoringRules().map((rule) => (
+            <li key={rule.text} className="flex items-start gap-3">
+              <span className="mt-0.5 flex-shrink-0 text-[var(--primary)]">{rule.icon}</span>
+              <span className="text-sm text-[var(--text)]">{rule.text}</span>
+            </li>
+          ))}
+        </ul>
+      </Modal>
+
       {/* Post-completion overlay */}
       {postCompletionStep && (
-        <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center backdrop-blur-sm">
-          <div className="bg-[var(--cardBg)] rounded-2xl p-8 max-w-md w-full text-center space-y-6 shadow-2xl">
+        <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center backdrop-blur-sm p-4">
+          <div className="bg-[var(--cardBg)] rounded-2xl p-6 sm:p-8 max-w-md w-full text-center space-y-6 shadow-2xl">
             <h2 className="text-xl font-bold text-[var(--text)]">Finishing Interview...</h2>
             <div className="space-y-4 text-left">
               <div className="flex items-center gap-3">
@@ -884,10 +982,14 @@ export function InterviewPage() {
         variant="warning"
       />
 
-      {/* Fullscreen enforcement */}
-      {!isFullscreen && voiceInterview.state !== 'completed' && !postCompletionStep && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center backdrop-blur-sm">
-          <div className="bg-[var(--cardBg)] rounded-2xl p-8 max-w-md text-center space-y-4 shadow-2xl">
+      {/* Fullscreen enforcement. Gated on the switch: with fullscreen disabled
+          the interview never asks for it, so this overlay sat over the whole
+          screen from the first frame with a button that put the candidate into
+          a mode the deployment had turned off. */}
+      {PROCTORING_CONFIG.fullscreen.enabled && !isFullscreen
+        && voiceInterview.state !== 'completed' && !postCompletionStep && (
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center backdrop-blur-sm p-4">
+          <div className="bg-[var(--cardBg)] rounded-2xl p-6 sm:p-8 w-full max-w-md text-center space-y-4 shadow-2xl">
             <div className="w-16 h-16 mx-auto rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
               <Maximize className="w-8 h-8 text-amber-600 dark:text-amber-400" />
             </div>
@@ -900,13 +1002,13 @@ export function InterviewPage() {
 
 
       {/* Top bar */}
-      <div className="sticky top-0 z-10 bg-[var(--cardBg)] border-b border-[var(--border)] px-4 py-3">
-        <div className="flex items-center justify-between max-w-6xl mx-auto">
-          <div className="flex items-center gap-4">
+      <div className="sticky top-0 z-20 bg-[var(--cardBg)] border-b border-[var(--border)] px-3 sm:px-4 py-2 sm:py-3">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 max-w-7xl mx-auto">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-4">
             <Badge variant="info">Voice Interview</Badge>
-            <span className="text-sm text-[var(--textSecondary)]">{interview.jobPrefix}</span>
+            <span className="truncate text-sm text-[var(--textSecondary)]">{interview.jobPrefix}</span>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center justify-end gap-2 sm:gap-3">
             {isScreenRecording && (
               <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
                 <Monitor size={12} className="text-red-500" />
@@ -927,35 +1029,60 @@ export function InterviewPage() {
             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-mono text-sm font-semibold ${globalSecondsLeft <= 300 ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' : 'bg-[var(--surface1)] text-[var(--text)]'}`}>
               <Clock size={16} /> {formatTimer(globalSecondsLeft)}
             </div>
+            {/* The warning pill and its breakdown, as the exam shows them —
+                and, like the exam's, listing only the checks that are actually
+                switched on. A counter for a check that never runs reads as a
+                score the candidate cannot affect. */}
             <div className="relative group">
               <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--surface1)] cursor-default ${getWarningColor()}`}>
                 <Shield size={14} /> <span className="text-xs font-semibold">{totalWarnings}/{APP_CONFIG.INTERVIEW_MAX_PROCTORING_WARNINGS}</span>
               </div>
-              <div className="absolute right-0 top-full mt-2 w-56 bg-[var(--cardBg)] rounded-lg shadow-lg border border-[var(--border)] p-3 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-20">
+              <div className="absolute right-0 top-full mt-2 w-64 bg-[var(--cardBg)] rounded-lg shadow-lg border border-[var(--border)] p-3 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-30">
                 <p className="text-xs font-semibold text-[var(--text)] mb-2">Warning Breakdown</p>
-                <div className="space-y-1.5 text-xs">
-                  <div className="flex justify-between"><span>Face Warnings</span><span className="font-mono">{faceWarnings}</span></div>
-                  <div className="flex justify-between"><span>Fullscreen Exits</span><span className="font-mono">{fullscreenExitCount}</span></div>
+                <div className="space-y-1.5 text-xs text-[var(--textSecondary)]">
+                  {PROCTORING_CONFIG.eyeDetection.enabled && (
+                    <div className="flex justify-between"><span>Face / eye</span><span className="font-mono">{faceWarnings}</span></div>
+                  )}
+                  {PROCTORING_CONFIG.fullscreen.enabled && (
+                    <div className="flex justify-between"><span>Fullscreen exits</span><span className="font-mono">{fullscreenExitCount}</span></div>
+                  )}
                   <div className="flex justify-between"><span>DevTools</span><span className="font-mono">{devToolsCount}</span></div>
                 </div>
+                <p className="mt-2 text-[11px] text-[var(--textSecondary)] border-t border-[var(--border)] pt-2">
+                  {APP_CONFIG.INTERVIEW_MAX_PROCTORING_WARNINGS} warnings end the interview. Do not
+                  reload this page — the interview cannot be resumed.
+                </p>
               </div>
             </div>
-            <button onClick={() => setShowEndConfirm(true)} disabled={!!postCompletionStep} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium transition-colors">
+            <button
+              onClick={() => setShowRules(true)}
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-[var(--surface1)] text-[var(--textSecondary)] hover:bg-[var(--surface2)] hover:text-[var(--text)] text-sm font-medium transition-colors"
+              title="Interview rules"
+            >
+              <BookOpen size={14} /> <span className="hidden sm:inline">Rules</span>
+            </button>
+            <button onClick={() => setShowEndConfirm(true)} disabled={!!postCompletionStep} className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium transition-colors">
               <LogOut size={14} /> End
             </button>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 flex max-w-6xl mx-auto w-full min-h-0">
-        {/* Left Column */}
-        <div className="flex-1 flex flex-col min-h-0">
-          <div className="flex justify-center py-6 border-b border-[var(--border)]">
+      <div className="flex-1 flex flex-col lg:flex-row max-w-7xl mx-auto w-full min-h-0">
+        {/* Left Column. min-w-0 so a long transcript line or a wide code editor
+            shrinks the column rather than pushing the sidebar off-screen — a
+            flex child defaults to min-width:auto, which is what let the editor
+            overlap the sidebar at narrow widths. */}
+        <div className="flex-1 flex flex-col min-h-0 min-w-0">
+          <div className="flex flex-shrink-0 justify-center py-4 sm:py-6 border-b border-[var(--border)]">
             <AIAvatar isSpeaking={voiceInterview.isPlaying} isListening={voiceInterview.isRecording} isThinking={voiceInterview.state === 'processing'} amplitude={voiceInterview.amplitude} size="md" />
           </div>
 
           {/* Conversation area */}
-          <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-6 space-y-4">
+          <div
+            ref={chatContainerRef}
+            className="flex-1 min-h-[14rem] lg:min-h-0 overflow-y-auto p-4 sm:p-6 space-y-4"
+          >
             {voiceInterview.conversation.map((entry, idx) => (
               <div key={idx} className={`flex items-start gap-3 ${entry.role === 'candidate' ? 'flex-row-reverse' : ''} ${entry.role === 'filler' ? 'opacity-60' : ''}`}>
                 {entry.role !== 'filler' && entry.role !== 'system' && (
@@ -963,7 +1090,7 @@ export function InterviewPage() {
                     {entry.role === 'interviewer' ? <Bot className="w-4 h-4 text-blue-600 dark:text-blue-400" /> : <User className="w-4 h-4 text-green-600 dark:text-green-400" />}
                   </div>
                 )}
-                <div className={`max-w-[70%] p-4 rounded-lg ${entry.role === 'interviewer' ? 'bg-[var(--surface1)] text-[var(--text)]' : entry.role === 'candidate' ? 'bg-[var(--primary)] text-white' : entry.role === 'system' ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 text-sm border border-amber-200 dark:border-amber-800' : 'bg-transparent text-[var(--textTertiary)] italic text-sm p-2'} ${entry.isStreaming ? 'border border-blue-300 dark:border-blue-700' : ''}`}>
+                <div className={`max-w-[85%] sm:max-w-[70%] min-w-0 break-words p-3 sm:p-4 rounded-lg ${entry.role === 'interviewer' ? 'bg-[var(--surface1)] text-[var(--text)]' : entry.role === 'candidate' ? 'bg-[var(--primary)] text-white' : entry.role === 'system' ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 text-sm border border-amber-200 dark:border-amber-800' : 'bg-transparent text-[var(--textTertiary)] italic text-sm p-2'} ${entry.isStreaming ? 'border border-blue-300 dark:border-blue-700' : ''}`}>
                   <p className="text-sm whitespace-pre-wrap">{entry.content}</p>
                   {entry.role !== 'filler' && entry.role !== 'system' && <p className={`text-xs mt-2 ${entry.role === 'interviewer' ? 'text-[var(--textTertiary)]' : 'text-white/70'}`}>{new Date(entry.timestamp).toLocaleTimeString()}</p>}
                 </div>
@@ -979,7 +1106,7 @@ export function InterviewPage() {
 
           {/* Coding Editor & Compile */}
           {voiceInterview.isCodingQuestion && voiceInterview.state !== 'completed' && !postCompletionStep && (
-            <div className="border-t border-[var(--border)] px-4 py-3 space-y-2">
+            <div className="flex-shrink-0 border-t border-[var(--border)] px-3 sm:px-4 py-3 space-y-2 lg:max-h-[55vh] lg:overflow-y-auto">
               {/* The question, pinned above the editor. The chat scrolls, and
                   once the editor and its output are open the question that was
                   asked is usually off the top of it — leaving the candidate
@@ -1027,7 +1154,7 @@ export function InterviewPage() {
 
           {/* Voice controls */}
           {voiceInterview.state !== 'completed' && !postCompletionStep && (
-            <div className="border-t border-[var(--border)] bg-[var(--cardBg)] p-4">
+            <div className="flex-shrink-0 border-t border-[var(--border)] bg-[var(--cardBg)] p-3 sm:p-4">
               {voiceInterview.transcriptionError && (
                 <div className="mb-3 p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 flex items-center gap-2">
                   <AlertTriangle size={14} className="text-amber-500" />
@@ -1073,7 +1200,7 @@ export function InterviewPage() {
                   {questionTimer.consecutiveSkips > 0 && <span className="text-xs text-amber-500 font-medium">Skipped: {questionTimer.consecutiveSkips}/{APP_CONFIG.INTERVIEW_MAX_CONSECUTIVE_SKIPS}</span>}
                 </div>
               )}
-              <div className="flex items-center justify-center gap-4">
+              <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4">
                 {voiceInterview.state === 'active' && (
                   <>
                     <button onClick={() => { if (!voiceInterview.isWsConnected) showToast(MESSAGES.interview.stillConnecting, 'info'); else voiceInterview.startAnswering(); }} disabled={!voiceInterview.isWsConnected || voiceInterview.isPlaying} className="w-16 h-16 rounded-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white flex items-center justify-center transition-colors shadow-lg hover:shadow-xl"><Mic size={28} /></button>
@@ -1105,11 +1232,16 @@ export function InterviewPage() {
           )}
         </div>
 
-        {/* Right Sidebar */}
-        <div className="w-72 border-l border-[var(--border)] bg-[var(--cardBg)] p-4 flex flex-col gap-4 overflow-y-auto">
+        {/* Right Sidebar. Full width and in the page flow on small screens,
+            a fixed rail that scrolls on its own from lg up. */}
+        <div className="w-full lg:w-80 flex-shrink-0 border-t lg:border-t-0 lg:border-l border-[var(--border)] bg-[var(--cardBg)] p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-4 lg:flex lg:flex-col lg:overflow-y-auto">
           {/* Shared screen. First in the sidebar because it is the one feed the
               candidate is responsible for keeping correct — if they share the
-              wrong window, nothing else here tells them. */}
+              wrong window, nothing else here tells them. Hidden outright where
+              screen recording is switched off: the empty panel's caption reads
+              "your screen recording stopped", which would be a fault report for
+              something that was never started. */}
+          {PROCTORING_CONFIG.recording.screen.required && (
           <div className="p-3 rounded-xl bg-[var(--surface1)] border border-[var(--border)]">
             <h3 className="text-[10px] font-bold text-[var(--textSecondary)] uppercase tracking-wider mb-2 flex items-center justify-between">
               Shared Screen
@@ -1144,8 +1276,11 @@ export function InterviewPage() {
                 : 'Your screen recording stopped. Reload only if asked to — it cannot be restarted mid-interview.'}
             </p>
           </div>
+          )}
 
-          {/* Camera preview */}
+          {/* Camera preview. Only where the camera is opened at all — an empty
+              black rectangle labelled "Camera" is worse than no panel. */}
+          {cameraStreamWanted && (
           <div>
             <div className="aspect-video bg-black rounded-lg overflow-hidden mb-2">
               <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
@@ -1155,6 +1290,7 @@ export function InterviewPage() {
               {isVideoRecording && <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />}
             </div>
           </div>
+          )}
 
           {/* Mobile stream (second view) - Promoted to top of sidebar */}
           <div className="p-3 rounded-xl bg-[var(--surface1)] border border-[var(--border)]">
@@ -1166,7 +1302,14 @@ export function InterviewPage() {
               {!mobileConnected ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-[var(--textTertiary)] p-4 text-center">
                   <Smartphone size={24} className="mb-2 opacity-30" />
-                  <p className="text-[10px] leading-tight">Waiting for mobile proctoring stream...</p>
+                  {/* "Waiting" was shown even to candidates who had explicitly
+                      ticked the waiver, so a deliberate choice looked like a
+                      pairing that had failed and was still retrying. */}
+                  <p className="text-[10px] leading-tight">
+                    {mobileSkipped
+                      ? 'Running without a second camera.'
+                      : 'Waiting for mobile proctoring stream...'}
+                  </p>
                 </div>
               ) : (
                 <video
@@ -1193,11 +1336,15 @@ export function InterviewPage() {
           </div>
 
           {/* Proctoring status */}
-          <div className="space-y-3">
+          <div className="space-y-3 sm:col-span-2 lg:col-span-1">
             <h3 className="text-xs font-semibold text-[var(--text)] uppercase tracking-wider">Proctoring Status</h3>
             <div className="space-y-2 text-xs">
-              <div className="flex items-center justify-between"><span>Face Warnings</span><span className={`font-mono font-semibold ${faceWarnings > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>{faceWarnings}</span></div>
-              <div className="flex items-center justify-between"><span>Fullscreen Exits</span><span className={`font-mono font-semibold ${fullscreenExitCount > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>{fullscreenExitCount}</span></div>
+              {PROCTORING_CONFIG.eyeDetection.enabled && (
+                <div className="flex items-center justify-between"><span>Face Warnings</span><span className={`font-mono font-semibold ${faceWarnings > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>{faceWarnings}</span></div>
+              )}
+              {PROCTORING_CONFIG.fullscreen.enabled && (
+                <div className="flex items-center justify-between"><span>Fullscreen Exits</span><span className={`font-mono font-semibold ${fullscreenExitCount > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>{fullscreenExitCount}</span></div>
+              )}
               <div className="flex items-center justify-between"><span>DevTools</span><span className={`font-mono font-semibold ${devToolsCount > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>{devToolsCount}</span></div>
               {lookingAway && <div className="flex items-center gap-2 p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20"><EyeOff size={14} className="text-amber-500" /><span className="text-xs text-amber-700 dark:text-amber-300 font-medium">Looking Away</span></div>}
               {multipleFaces && <div className="flex items-center gap-2 p-2 rounded-lg bg-red-50 dark:bg-red-900/20"><Users size={14} className="text-red-500" /><span className="text-xs text-red-600 dark:text-red-400 font-medium">Multiple Faces</span></div>}

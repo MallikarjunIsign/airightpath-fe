@@ -171,9 +171,12 @@ export default function MobileConnect() {
     };
 
     useEffect(() => {
-        let interval: NodeJS.Timeout | null = null;
+        // window.setInterval, not the bare global: the bare one is typed as
+        // Node's and `NodeJS.Timeout` does not exist in a browser tsconfig, so
+        // this file failed the typecheck on every run.
+        let interval: number | null = null;
         if (streaming) {
-            interval = setInterval(monitorRoom, 20000); // Check every 20 seconds
+            interval = window.setInterval(monitorRoom, 20000); // Check every 20 seconds
         }
         return () => {
             if (interval) clearInterval(interval);

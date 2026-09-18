@@ -4,6 +4,17 @@ interface UseMediaRecorderOptions {
   mimeType?: string;
   onDataAvailable?: (blob: Blob) => void;
   timeslice?: number;
+  /**
+   * False opens the stream but records nothing: no MediaRecorder, no chunks,
+   * and `stopAndGetBlob` resolves null.
+   *
+   * The camera is wanted for two unrelated reasons — the recording kept as
+   * evidence, and the live frames face detection reads — and a deployment can
+   * want the second without the first. Without this the only way to stop
+   * recording was to stop opening the camera, which silently took the face
+   * check down with it.
+   */
+  record?: boolean;
 }
 
 export function useMediaRecorder(options?: UseMediaRecorderOptions) {
@@ -19,6 +30,13 @@ export function useMediaRecorder(options?: UseMediaRecorderOptions) {
       streamRef.current = stream;
       chunksRef.current = [];
       setChunks([]);
+
+      // Stream only: the caller wants live frames, not a recording.
+      if (options?.record === false) {
+        recorderRef.current = null;
+        setIsRecording(false);
+        return stream;
+      }
 
       const mimeType = options?.mimeType || 'video/webm;codecs=vp9,opus';
       const recorder = new MediaRecorder(stream, {
@@ -45,7 +63,11 @@ export function useMediaRecorder(options?: UseMediaRecorderOptions) {
   }, [options]);
 
   const stop = useCallback(() => {
-    recorderRef.current?.stop();
+    // Guarded: in stream-only mode there is no recorder, and calling stop() on
+    // one that never started throws.
+    if (recorderRef.current && recorderRef.current.state !== 'inactive') {
+      recorderRef.current.stop();
+    }
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
   }, []);
@@ -54,6 +76,11 @@ export function useMediaRecorder(options?: UseMediaRecorderOptions) {
     return new Promise((resolve) => {
       const recorder = recorderRef.current;
       if (!recorder || recorder.state === 'inactive') {
+        // Also the stream-only path, where there is no recorder at all — the
+        // camera still has to be released or its light stays on after the
+        // interview ends.
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
         const allChunks = chunksRef.current;
         resolve(
           allChunks.length > 0

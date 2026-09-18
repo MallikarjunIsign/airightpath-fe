@@ -16,6 +16,8 @@
 //   VITE_PROCTORING_PHOTO_REQUIRED       "true" | "false"   (default true)
 //   VITE_PROCTORING_ROOM_SCAN_REQUIRED   "true" | "false"   (default false)
 //   VITE_PROCTORING_MOBILE_REQUIRED      "true" | "false"   (default false)
+//   VITE_PROCTORING_CAMERA_RECORDING_REQUIRED "true" | "false" (default true)
+//   VITE_PROCTORING_SCREEN_RECORDING_REQUIRED "true" | "false" (default true)
 //
 // For the count values, 0 means "warn only, never auto-submit".
 
@@ -129,6 +131,34 @@ export const PROCTORING_CONFIG = {
     frames: parseCount(env.VITE_PROCTORING_ROOM_SCAN_FRAMES, 8),
     /** How long the candidate is given to complete the full turn. */
     durationMs: parseCount(env.VITE_PROCTORING_ROOM_SCAN_DURATION_MS, 16000),
+  },
+  /**
+   * What is captured for the whole length of an interview, as opposed to the
+   * one-off photo and sweep above.
+   *
+   * Each stream is either asked for or skipped outright — there is no "offer it
+   * and shrug when it is declined". A recording a candidate can wave away is
+   * not evidence, and the browser prompt it costs them is worse than useless if
+   * the answer does not matter. Turn a stream off where it is not wanted and
+   * the candidate is never prompted for it at all.
+   */
+  recording: {
+    /**
+     * The candidate's camera and microphone, recorded and uploaded with the
+     * interview. False also skips the upload — the camera itself may still be
+     * opened for face detection, which is a separate switch.
+     */
+    camera: {
+      required: parseBool(env.VITE_PROCTORING_CAMERA_RECORDING_REQUIRED, true),
+    },
+    /**
+     * The candidate's screen, via the browser's display-capture prompt. False
+     * skips the prompt entirely, and the interview no longer reports a stopped
+     * or denied share as a proctoring event — there is nothing to stop.
+     */
+    screen: {
+      required: parseBool(env.VITE_PROCTORING_SCREEN_RECORDING_REQUIRED, true),
+    },
   },
   /**
    * The phone used as a second camera during an interview.
