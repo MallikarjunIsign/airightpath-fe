@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useSidebar } from "@/contexts/SidebarContext";
 import { usePendingAssessments } from "@/contexts/PendingAssessmentsContext";
+import { usePendingInterviews } from "@/contexts/PendingInterviewsContext";
 import { useRbac } from "@/hooks/useRbac";
 import { ROUTES } from "@/config/routes";
 import { TEST_MODE_GROUPS, testModesInGroup } from "@/config/test-mode";
@@ -60,6 +61,8 @@ interface NavItem {
    * indicator moves with the route if it is ever renamed.
    */
   showsPendingAssessments?: boolean;
+  /** The same, for interviews the candidate still has to sit. */
+  showsPendingInterviews?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +187,7 @@ const candidateNavItems: NavItem[] = [
     label: "Interviews",
     icon: <Video size={18} />,
     path: ROUTES.CANDIDATE.INTERVIEWS,
+    showsPendingInterviews: true,
   },
   {
     label: "Results",
@@ -241,6 +245,7 @@ export function Sidebar({ environment = "prod" }: SidebarProps) {
   const location = useLocation();
   const { hasAnyRole } = useRbac();
   const { pending } = usePendingAssessments();
+  const { pending: pendingInterviews } = usePendingInterviews();
 
   const isAdmin = hasAnyRole(["ADMIN", "SUPER_ADMIN"]);
   const navItems = isAdmin ? adminNavItems : candidateNavItems;
@@ -384,7 +389,14 @@ export function Sidebar({ environment = "prod" }: SidebarProps) {
         >
           {navItems.map((item) => {
             const isActive = location.pathname === item.path;
-            const pendingCount = item.showsPendingAssessments ? pending.length : 0;
+            // One item carries one kind of count, so a single number and the
+            // noun that goes with it is all the badge below needs.
+            const pendingCount = item.showsPendingAssessments
+              ? pending.length
+              : item.showsPendingInterviews
+                ? pendingInterviews.length
+                : 0;
+            const pendingNoun = item.showsPendingInterviews ? "interview" : "assessment";
             // Children are only reachable while the rail shows labels. Collapsed,
             // the parent still navigates to its hub, which lists the same links.
             const hasChildren = !!item.children?.length && isExpanded;
@@ -456,7 +468,7 @@ export function Sidebar({ environment = "prod" }: SidebarProps) {
                   {pendingCount > 0 && isExpanded && (
                     <span
                       className="flex-shrink-0 min-w-[1.25rem] h-5 px-1.5 rounded-full bg-[var(--error)] text-white text-[0.6875rem] font-semibold flex items-center justify-center"
-                      title={`${pendingCount} assessment${pendingCount === 1 ? '' : 's'} to complete`}
+                      title={`${pendingCount} ${pendingNoun}${pendingCount === 1 ? '' : 's'} to complete`}
                     >
                       {pendingCount}
                     </span>

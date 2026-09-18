@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   BarChart3,
+  ChevronDown,
   Clock,
   Loader2,
   MessageSquare,
@@ -48,6 +49,20 @@ interface RoundDetail {
   evaluation: VoiceEvaluationResult | null;
   transcript: VoiceConversationEntryDTO[];
   proctoring: ProctoringEvent[];
+}
+
+/** One sitting, told where it falls in the sequence of sittings of its round. */
+interface RoundAttempt extends RoundDetail {
+  /** 1-based, oldest first, so "Attempt 2" means the same thing on every visit. */
+  attemptNumber: number;
+  attemptCount: number;
+}
+
+/** Every sitting of one round, newest first. */
+interface RoundGroup {
+  key: InterviewRound;
+  label: string;
+  attempts: RoundAttempt[];
 }
 
 /**
@@ -97,16 +112,90 @@ function completionLabel(reason?: CompletionReason): string {
   }
 }
 
-function durationLabel(startedAt?: string, endedAt?: string): string {
-  if (!startedAt || !endedAt) return '--';
-  const minutes = Math.round(
-    (new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 60000,
-  );
-  return minutes < 1 ? '<1 min' : `${minutes} min`;
+function durationLabel(schedule: InterviewSchedule): string {
+  return minutesLabel(durationMinutes(schedule));
 }
 
 function warningsOf(schedule: InterviewSchedule): number {
   return schedule.warningCount ?? schedule.proctoringWarnings ?? 0;
+}
+
+/**
+ * When a sitting happened, for ordering attempts of the same round.
+ *
+ * `startedAt` is the sitting itself; `assignedAt` stands in for one that was
+ * booked and never opened, so a no-show still takes its place in the sequence
+ * instead of collapsing to the epoch alongside every other no-show.
+ */
+function attemptTime(schedule: InterviewSchedule): number {
+  const stamp = new Date(schedule.startedAt ?? schedule.assignedAt).getTime();
+  return Number.isNaN(stamp) ? 0 : stamp;
+}
+
+/**
+ * The rows for one candidate, split into rounds and then into the sittings of
+ * each round.
+ *
+ * A round can be sat more than once — a repeat L2 after a borderline first
+ * attempt — and those rows arrive as siblings with nothing marking them apart.
+ * Numbering runs oldest-first so an attempt keeps its number as more are added;
+ * the list is handed back newest-first because that is the one being decided on.
+ */
+function groupByRound(details: RoundDetail[]): RoundGroup[] {
+  const byRound = new Map<InterviewRound, RoundDetail[]>();
+  for (const detail of details) {
+    const key = roundKeyOf(detail.schedule);
+    const bucket = byRound.get(key);
+    if (bucket) bucket.push(detail);
+    else byRound.set(key, [detail]);
+  }
+
+  return [...byRound.entries()]
+    .sort(([a], [b]) => ROUND_ORDER.indexOf(a) - ROUND_ORDER.indexOf(b))
+    .map(([key, bucket]) => {
+      // Oldest first to number them, then reversed — id breaks a tie so two
+      // sittings stamped the same second do not swap places between renders.
+      const chronological = [...bucket].sort(
+        (a, b) =>
+          attemptTime(a.schedule) - attemptTime(b.schedule) || a.schedule.id - b.schedule.id,
+      );
+      const attempts = chronological
+        .map((detail, index) => ({
+          ...detail,
+          attemptNumber: index + 1,
+          attemptCount: chronological.length,
+        }))
+        .reverse();
+      return { key, label: roundLabelOf(attempts[0].schedule), attempts };
+    });
+}
+
+/** Minutes a sitting ran for, or null when it was never opened or never closed. */
+function durationMinutes(schedule: InterviewSchedule): number | null {
+  if (!schedule.startedAt || !schedule.endedAt) return null;
+  const minutes = Math.round(
+    (new Date(schedule.endedAt).getTime() - new Date(schedule.startedAt).getTime()) / 60000,
+  );
+  return Number.isFinite(minutes) && minutes >= 0 ? minutes : null;
+}
+
+function minutesLabel(minutes: number | null): string {
+  if (minutes == null) return '--';
+  return minutes < 1 ? '<1 min' : `${minutes} min`;
+}
+
+/** "Sep 18, 2026, 14:05" for an attempt heading, or nothing if it will not parse. */
+function attemptDateLabel(schedule: InterviewSchedule): string {
+  const raw = schedule.startedAt ?? schedule.assignedAt;
+  const stamp = new Date(raw);
+  if (Number.isNaN(stamp.getTime())) return '';
+  return stamp.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 /**
@@ -185,18 +274,45 @@ export function InterviewCandidateResultPage() {
     load();
   }, [load]);
 
+  const groups = useMemo(() => groupByRound(rounds), [rounds]);
+
+  /**
+   * Mean over rounds, taking each round's most recent scored sitting.
+   *
+   * Averaging every row instead would let a failed first attempt keep dragging
+   * the headline down after the candidate re-sat and passed — which reads as a
+   * worse candidate rather than as an earlier attempt.
+   */
   const overall = useMemo(() => {
-    const scored = rounds
-      .map((r) => r.evaluation?.overallScore ?? r.schedule.evaluation?.overallScore)
+    const scored = groups
+      .map((group) =>
+        group.attempts
+          .map((a) => a.evaluation?.overallScore ?? a.schedule.evaluation?.overallScore)
+          .find((score): score is number => score != null),
+      )
       .filter((score): score is number => score != null);
     if (scored.length === 0) return null;
     return scored.reduce((sum, score) => sum + score, 0) / scored.length;
-  }, [rounds]);
+  }, [groups]);
 
   const totalWarnings = useMemo(
     () => rounds.reduce((sum, r) => sum + warningsOf(r.schedule), 0),
     [rounds],
   );
+
+  /**
+   * Time actually spent interviewing, summed over sittings.
+   *
+   * Not the span from the first start to the last end: L2 on Monday and L3 on
+   * Friday are four days apart and none of that gap was an interview.
+   */
+  const totalMinutes = useMemo(() => {
+    const measured = rounds
+      .map((r) => durationMinutes(r.schedule))
+      .filter((minutes): minutes is number => minutes != null);
+    if (measured.length === 0) return null;
+    return measured.reduce((sum, minutes) => sum + minutes, 0);
+  }, [rounds]);
 
   if (loading) {
     return (
@@ -221,7 +337,7 @@ export function InterviewCandidateResultPage() {
     );
   }
 
-  const tabs: Tab[] = ['overview', ...rounds.map((r) => roundKeyOf(r.schedule))];
+  const tabs: Tab[] = ['overview', ...groups.map((group) => group.key)];
 
   return (
     <div className="space-y-6">
@@ -240,14 +356,27 @@ export function InterviewCandidateResultPage() {
                 <p className="mt-0.5 text-sm text-[var(--textSecondary)]">
                   Job: {jobPrefix}
                   <span className="mx-2 text-[var(--textTertiary)]">|</span>
-                  {rounds.length} round{rounds.length === 1 ? '' : 's'}
+                  {groups.length} round{groups.length === 1 ? '' : 's'}
+                  {/* Only worth saying when a round was sat more than once —
+                      otherwise it restates the round count. */}
+                  {rounds.length > groups.length && (
+                    <>
+                      <span className="mx-2 text-[var(--textTertiary)]">|</span>
+                      {rounds.length} attempts
+                    </>
+                  )}
                 </p>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {rounds.map((r) => (
-                <Badge key={r.schedule.id} variant={resultVariant(r.schedule.interviewResult)}>
-                  {roundLabelOf(r.schedule)}: {r.schedule.interviewResult}
+              {/* The standing of each round is its latest sitting; older ones
+                  are read inside the round's own tab. */}
+              {groups.map((group) => (
+                <Badge
+                  key={group.key}
+                  variant={resultVariant(group.attempts[0].schedule.interviewResult)}
+                >
+                  {group.label}: {group.attempts[0].schedule.interviewResult}
                 </Badge>
               ))}
             </div>
@@ -262,12 +391,17 @@ export function InterviewCandidateResultPage() {
           value={overall != null ? `${overall.toFixed(1)}/10` : '--'}
           label="Overall score"
           tone={overall == null ? 'neutral' : overall >= 6 ? 'success' : 'error'}
-          hint="Mean of the rounds that have been scored"
+          hint="Mean of the latest scored attempt at each round"
         />
         <SummaryStat
           icon={<Users size={16} />}
-          value={rounds.length}
+          value={groups.length}
           label="Rounds sat"
+          hint={
+            rounds.length > groups.length
+              ? `${rounds.length} attempts in total`
+              : undefined
+          }
         />
         <SummaryStat
           icon={<Shield size={16} />}
@@ -277,11 +411,9 @@ export function InterviewCandidateResultPage() {
         />
         <SummaryStat
           icon={<Clock size={16} />}
-          value={durationLabel(
-            rounds[0]?.schedule.startedAt,
-            rounds[rounds.length - 1]?.schedule.endedAt,
-          )}
+          value={minutesLabel(totalMinutes)}
           label="Time in interview"
+          hint="Summed over every sitting"
         />
       </div>
 
@@ -289,8 +421,15 @@ export function InterviewCandidateResultPage() {
       <div className="flex gap-1 rounded-2xl border border-[var(--borderMuted,var(--border))] bg-[var(--bgSubtle,var(--surface1))] p-1.5">
         {tabs.map((tab) => {
           const isActive = activeTab === tab;
+          const group = tab === 'overview' ? undefined : groups.find((g) => g.key === tab);
+          // The server's label where there is one, and the attempt count beside
+          // it so a re-sat round says so before the tab is opened.
           const label =
-            tab === 'overview' ? 'Overview' : INTERVIEW_ROUND_LABELS[tab as InterviewRound];
+            tab === 'overview'
+              ? 'Overview'
+              : `${group?.label ?? INTERVIEW_ROUND_LABELS[tab as InterviewRound]}${
+                  (group?.attempts.length ?? 0) > 1 ? ` (${group?.attempts.length})` : ''
+                }`;
           return (
             <button
               key={tab}
@@ -312,18 +451,31 @@ export function InterviewCandidateResultPage() {
 
       {activeTab === 'overview' ? (
         <div className="grid gap-4 xl:grid-cols-2">
-          {rounds.map((round) => (
-            <RoundSummaryCard
-              key={round.schedule.id}
-              round={round}
-              onOpen={() => setActiveTab(roundKeyOf(round.schedule))}
-            />
-          ))}
+          {groups.flatMap((group) =>
+            group.attempts.map((attempt) => (
+              <RoundSummaryCard
+                key={attempt.schedule.id}
+                attempt={attempt}
+                onOpen={() => setActiveTab(group.key)}
+              />
+            )),
+          )}
         </div>
       ) : (
-        rounds
-          .filter((round) => roundKeyOf(round.schedule) === activeTab)
-          .map((round) => <RoundDetailPanel key={round.schedule.id} round={round} />)
+        <div className="space-y-4">
+          {(groups.find((group) => group.key === activeTab)?.attempts ?? []).map(
+            (attempt, index) => (
+              <AttemptSection
+                key={attempt.schedule.id}
+                attempt={attempt}
+                // The newest sitting is the one being decided on, so it opens;
+                // earlier ones stay folded rather than burying it under a
+                // transcript that has already been superseded.
+                defaultOpen={index === 0}
+              />
+            ),
+          )}
+        </div>
       )}
     </div>
   );
@@ -344,10 +496,10 @@ function BackLink({ label, onClick }: Readonly<{ label: string; onClick: () => v
 // ── Overview ──────────────────────────────────────────────────────────
 
 function RoundSummaryCard({
-  round,
+  attempt,
   onOpen,
-}: Readonly<{ round: RoundDetail; onOpen: () => void }>) {
-  const { schedule, evaluation } = round;
+}: Readonly<{ attempt: RoundAttempt; onOpen: () => void }>) {
+  const { schedule, evaluation, attemptNumber, attemptCount } = attempt;
   const score = evaluation?.overallScore ?? schedule.evaluation?.overallScore;
   const recommendation = evaluation?.recommendation ?? schedule.evaluation?.recommendation;
 
@@ -355,7 +507,15 @@ function RoundSummaryCard({
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
-          <CardTitle>{roundLabelOf(schedule)}</CardTitle>
+          <div className="min-w-0">
+            <CardTitle>{roundLabelOf(schedule)}</CardTitle>
+            {attemptCount > 1 && (
+              <p className="mt-0.5 text-xs text-[var(--textTertiary)]">
+                Attempt {attemptNumber} of {attemptCount}
+                {attemptDateLabel(schedule) && ` · ${attemptDateLabel(schedule)}`}
+              </p>
+            )}
+          </div>
           <Badge variant={statusVariant(schedule.attemptStatus)} size="sm">
             {schedule.attemptStatus.replace(/_/g, ' ')}
           </Badge>
@@ -386,9 +546,7 @@ function RoundSummaryCard({
             <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
               <div>
                 <dt className="text-[var(--textTertiary)]">Duration</dt>
-                <dd className="text-[var(--textSecondary)]">
-                  {durationLabel(schedule.startedAt, schedule.endedAt)}
-                </dd>
+                <dd className="text-[var(--textSecondary)]">{durationLabel(schedule)}</dd>
               </div>
               <div>
                 <dt className="text-[var(--textTertiary)]">Warnings</dt>
@@ -406,7 +564,81 @@ function RoundSummaryCard({
   );
 }
 
-// ── One round in full ─────────────────────────────────────────────────
+// ── One attempt in full ───────────────────────────────────────────────
+
+/**
+ * One sitting, boxed and headed with which sitting it is.
+ *
+ * A round sat twice used to render as two panels butted together in one flow,
+ * so a reviewer scrolling through scores, transcript and proctoring evidence
+ * had no way of telling where the first sitting ended and the second began.
+ * Each one now opens and closes on its own.
+ */
+function AttemptSection({
+  attempt,
+  defaultOpen,
+}: Readonly<{ attempt: RoundAttempt; defaultOpen: boolean }>) {
+  const [open, setOpen] = useState(defaultOpen);
+  const { schedule, attemptNumber, attemptCount } = attempt;
+  const date = attemptDateLabel(schedule);
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface1)]">
+      <div className="flex flex-wrap items-center gap-2 px-2 py-2 sm:px-3">
+        <button
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-[var(--bgMuted,var(--surface2))]"
+        >
+          <ChevronDown
+            size={16}
+            className={`flex-shrink-0 text-[var(--textTertiary)] transition-transform duration-200 ${
+              open ? '' : '-rotate-90'
+            }`}
+          />
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold text-[var(--text)]">
+              {attemptCount > 1
+                ? `Attempt ${attemptNumber} of ${attemptCount}`
+                : roundLabelOf(schedule)}
+            </span>
+            {date && (
+              <span className="block truncate text-xs text-[var(--textTertiary)]">{date}</span>
+            )}
+          </span>
+        </button>
+
+        {/* Outside the toggle: a button cannot hold buttons, and these open
+            players rather than folding the section. */}
+        <div className="flex flex-wrap items-center gap-2 px-2">
+          <Badge variant={statusVariant(schedule.attemptStatus)} size="sm">
+            {schedule.attemptStatus.replace(/_/g, ' ')}
+          </Badge>
+          <Badge variant={resultVariant(schedule.interviewResult)} size="sm">
+            {schedule.interviewResult}
+          </Badge>
+          <Badge variant="info" size="sm">{completionLabel(schedule.completionReason)}</Badge>
+          {/* Two separate recordings: the candidate's camera and the screen
+              they shared. For a coding round the screen is the only evidence of
+              how the answer was reached, so it gets its own button rather than
+              being folded into "Recording". */}
+          {schedule.recordReferences && (
+            <RecordingPlayerButton scheduleId={schedule.id} kind="camera" label="Camera" />
+          )}
+          {schedule.screenRecordReferences && (
+            <RecordingPlayerButton scheduleId={schedule.id} kind="screen" label="Shared screen" />
+          )}
+        </div>
+      </div>
+
+      {open && (
+        <div className="border-t border-[var(--border)] p-3 sm:p-4">
+          <RoundDetailPanel round={attempt} />
+        </div>
+      )}
+    </section>
+  );
+}
 
 function RoundDetailPanel({ round }: Readonly<{ round: RoundDetail }>) {
   const { schedule, evaluation, transcript, proctoring } = round;
@@ -424,28 +656,61 @@ function RoundDetailPanel({ round }: Readonly<{ round: RoundDetail }>) {
         </div>
       )}
 
+      {/* ── Who sat it, and where ───────────────────────────────────── */}
+      <ProctoringCaptures
+        interviewScheduleId={schedule.id}
+        candidateEmail={schedule.email}
+        jobPrefix={schedule.jobPrefix}
+        moduleLabel={roundLabelOf(schedule)}
+        contextNoun="interview"
+      />
+
+      {/* ── Proctoring ──────────────────────────────────────────────── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Shield size={18} className="text-[var(--warning,orange)]" />
+            <CardTitle>Proctoring events ({proctoring.length})</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {proctoring.length === 0 ? (
+            <p className="py-6 text-center text-sm text-[var(--textSecondary)]">
+              Nothing was flagged during this round.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {proctoring.map((event, index) => (
+                <li
+                  key={index}
+                  className="flex items-start justify-between gap-3 rounded-lg bg-[var(--surface1)] p-3"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-[var(--text)]">
+                      {event.eventType?.replace(/_/g, ' ') ?? 'Event'}
+                    </p>
+                    {event.details && (
+                      <p className="text-xs text-[var(--textSecondary)]">{event.details}</p>
+                    )}
+                  </div>
+                  {event.timestamp && (
+                    <span className="flex-shrink-0 text-xs text-[var(--textTertiary)]">
+                      {new Date(event.timestamp).toLocaleTimeString()}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
       {/* ── Scores by area ──────────────────────────────────────────── */}
       <Card>
         <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <BarChart3 size={18} className="text-[var(--primary)]" />
             <CardTitle>Scores by area</CardTitle>
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="info" size="sm">{completionLabel(schedule.completionReason)}</Badge>
-              {/* Two separate recordings: the candidate's camera and the
-                  screen they shared. For a coding round the screen is the only
-                  evidence of how the answer was reached, so it gets its own
-                  button rather than being folded into "Recording". */}
-              {schedule.recordReferences && (
-                <RecordingPlayerButton scheduleId={schedule.id} kind="camera" label="Camera" />
-              )}
-              {schedule.screenRecordReferences && (
-                <RecordingPlayerButton
-                  scheduleId={schedule.id}
-                  kind="screen"
-                  label="Shared screen"
-                />
-              )}
-            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -508,54 +773,6 @@ function RoundDetailPanel({ round }: Readonly<{ round: RoundDetail }>) {
         </CardContent>
       </Card>
 
-      {/* ── Who sat it, and where ───────────────────────────────────── */}
-      <ProctoringCaptures
-        interviewScheduleId={schedule.id}
-        candidateEmail={schedule.email}
-        jobPrefix={schedule.jobPrefix}
-        moduleLabel={roundLabelOf(schedule)}
-        contextNoun="interview"
-      />
-
-      {/* ── Proctoring ──────────────────────────────────────────────── */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Shield size={18} className="text-[var(--warning,orange)]" />
-            <CardTitle>Proctoring events ({proctoring.length})</CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {proctoring.length === 0 ? (
-            <p className="py-6 text-center text-sm text-[var(--textSecondary)]">
-              Nothing was flagged during this round.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {proctoring.map((event, index) => (
-                <li
-                  key={index}
-                  className="flex items-start justify-between gap-3 rounded-lg bg-[var(--surface1)] p-3"
-                >
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-[var(--text)]">
-                      {event.eventType?.replace(/_/g, ' ') ?? 'Event'}
-                    </p>
-                    {event.details && (
-                      <p className="text-xs text-[var(--textSecondary)]">{event.details}</p>
-                    )}
-                  </div>
-                  {event.timestamp && (
-                    <span className="flex-shrink-0 text-xs text-[var(--textTertiary)]">
-                      {new Date(event.timestamp).toLocaleTimeString()}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 }

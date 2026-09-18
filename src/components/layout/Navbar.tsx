@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Bell,
@@ -9,17 +9,22 @@ import {
   Settings,
   Menu,
   ClipboardList,
+  Video,
 } from 'lucide-react';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useProfileImage } from '@/contexts/ProfileImageContext';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { usePendingAssessments } from '@/contexts/PendingAssessmentsContext';
+import { usePendingInterviews } from '@/contexts/PendingInterviewsContext';
 import { useRbac } from '@/hooks/useRbac';
 import { ROUTES } from '@/config/routes';
 import { formatName, formatDate, formatRelativeTime } from '@/utils/format.utils';
 import { Avatar } from '../ui/Avatar';
 import { Badge } from '../ui/Badge';
+import { INTERVIEW_ROUND_LABELS } from '@/types/interview.types';
+import type { Assessment } from '@/types/assessment.types';
+import type { InterviewSchedule } from '@/types/interview.types';
 
 /** Absolute date plus the relative gap — "Aug 20, 2026" alone reads as trivia. */
 function deadlineLabel(deadline: string): string {
@@ -35,6 +40,59 @@ function isDueSoon(deadline: string): boolean {
   return time - Date.now() <= DUE_SOON_MS;
 }
 
+/**
+ * One row of the bell, whatever it came from.
+ *
+ * Assessments and interviews reach the candidate as two separate lists, but a
+ * candidate reads the bell as one queue of things they owe — so they are
+ * flattened to a common shape here and ordered by deadline together, rather
+ * than stacked as two sections that each look sorted and jointly do not.
+ */
+interface PendingNotification {
+  key: string;
+  icon: ReactNode;
+  title: string;
+  subtitle: string;
+  deadline: string;
+  route: string;
+}
+
+function assessmentNotification(assessment: Assessment): PendingNotification {
+  return {
+    key: `assessment-${assessment.id}`,
+    icon: <ClipboardList size={16} className="mt-0.5 flex-shrink-0" />,
+    title: `${assessment.assessmentType === 'APTITUDE' ? 'Aptitude' : 'Coding'} assessment`,
+    subtitle: assessment.jobPrefix,
+    deadline: assessment.deadline,
+    route: ROUTES.CANDIDATE.ASSESSMENTS,
+  };
+}
+
+function interviewNotification(interview: InterviewSchedule): PendingNotification {
+  // Prefer the server's label: it is the same wording the interviews page
+  // shows, and it stays right for rounds this client has not been taught yet.
+  const round =
+    interview.roundLabel ??
+    (interview.round ? INTERVIEW_ROUND_LABELS[interview.round] : undefined);
+  return {
+    key: `interview-${interview.id}`,
+    icon: <Video size={16} className="mt-0.5 flex-shrink-0" />,
+    title: round ? `${round} interview` : 'AI interview',
+    subtitle: interview.jobPrefix,
+    deadline: interview.deadlineTime,
+    route: ROUTES.CANDIDATE.INTERVIEWS,
+  };
+}
+
+/** Soonest deadline first; an unparseable one sinks rather than jumping the queue. */
+function byDeadline(a: PendingNotification, b: PendingNotification): number {
+  const left = new Date(a.deadline).getTime();
+  const right = new Date(b.deadline).getTime();
+  if (Number.isNaN(left)) return Number.isNaN(right) ? 0 : 1;
+  if (Number.isNaN(right)) return -1;
+  return left - right;
+}
+
 // ---------------------------------------------------------------------------
 // Navbar Component — Floating, borderless, semi-transparent
 // ---------------------------------------------------------------------------
@@ -48,7 +106,18 @@ export function Navbar() {
   const { imageUrl } = useProfileImage();
   const { toggleMobile } = useSidebar();
   const { pending } = usePendingAssessments();
+  const { pending: pendingInterviews } = usePendingInterviews();
   const { roles, hasAnyRole } = useRbac();
+
+  const notifications = useMemo(
+    () =>
+      [
+        ...pending.map(assessmentNotification),
+        ...pendingInterviews.map(interviewNotification),
+      ].sort(byDeadline),
+    [pending, pendingInterviews]
+  );
+  const notificationCount = notifications.length;
   const navigate = useNavigate();
 
   const profileRef = useRef<HTMLDivElement>(null);
@@ -161,11 +230,11 @@ export function Navbar() {
             <button
               onClick={() => { setShowNotifications(!showNotifications); setShowThemeMenu(false); setShowProfileMenu(false); }}
               className="navbar-action-btn relative"
-              title={pending.length > 0 ? `${pending.length} assessment${pending.length === 1 ? '' : 's'} to complete` : 'Notifications'}
-              aria-label={pending.length > 0 ? `Notifications, ${pending.length} unread` : 'Notifications'}
+              title={notificationCount > 0 ? `${notificationCount} item${notificationCount === 1 ? '' : 's'} to complete` : 'Notifications'}
+              aria-label={notificationCount > 0 ? `Notifications, ${notificationCount} unread` : 'Notifications'}
             >
               <Bell size={18} />
-              {pending.length > 0 && (
+              {notificationCount > 0 && (
                 <span
                   className="absolute top-1 right-1 w-2 h-2 rounded-full bg-[var(--error)] ring-2 ring-[var(--navbarBg,var(--surface1))]"
                   aria-hidden="true"
@@ -176,44 +245,44 @@ export function Navbar() {
               <div className="dropdown-menu right-0 top-11 w-80">
                 <div className="px-4 py-3 flex items-center justify-between gap-2">
                   <h3 className="text-[0.8125rem] font-semibold text-[var(--text)]">Notifications</h3>
-                  {pending.length > 0 && (
+                  {notificationCount > 0 && (
                     <span className="text-[0.6875rem] font-semibold text-white bg-[var(--error)] rounded-full px-2 py-0.5">
-                      {pending.length}
+                      {notificationCount}
                     </span>
                   )}
                 </div>
 
-                {pending.length === 0 ? (
+                {notificationCount === 0 ? (
                   <div className="px-4 py-10 text-center text-[var(--textTertiary)] text-[0.8125rem]">
                     All caught up
                   </div>
                 ) : (
                   <div className="max-h-80 overflow-y-auto py-1">
-                    {pending.map((assessment) => (
+                    {notifications.map((notification) => (
                       <button
-                        key={assessment.id}
-                        onClick={() => { closeAll(); navigate(ROUTES.CANDIDATE.ASSESSMENTS); }}
+                        key={notification.key}
+                        onClick={() => { closeAll(); navigate(notification.route); }}
                         className="dropdown-item items-start text-left"
                       >
-                        <ClipboardList size={16} className="mt-0.5 flex-shrink-0" />
+                        {notification.icon}
                         <span className="min-w-0 flex-1">
                           <span className="block text-[0.8125rem] font-medium text-[var(--text)]">
-                            {assessment.assessmentType === 'APTITUDE' ? 'Aptitude' : 'Coding'} assessment
+                            {notification.title}
                           </span>
                           <span className="block text-[0.6875rem] text-[var(--textTertiary)] truncate">
-                            {assessment.jobPrefix}
+                            {notification.subtitle}
                           </span>
                           {/* The deadline is the reason this is a notification
                               at all, so it gets the emphasis — and turns red
                               once it is close enough to act on today. */}
                           <span
                             className={`block text-[0.6875rem] mt-0.5 ${
-                              isDueSoon(assessment.deadline)
+                              isDueSoon(notification.deadline)
                                 ? 'text-[var(--error)] font-semibold'
                                 : 'text-[var(--textSecondary)]'
                             }`}
                           >
-                            {deadlineLabel(assessment.deadline)}
+                            {deadlineLabel(notification.deadline)}
                           </span>
                         </span>
                       </button>

@@ -69,10 +69,18 @@ export const interviewService = {
     );
   },
 
-  getActiveInterviews(email: string) {
+  /**
+   * The interviews a candidate still has in front of them.
+   *
+   * `silent` suppresses the global error toast — for background reads like the
+   * sidebar/notification badge, where a failure should cost a badge rather than
+   * put a red toast on a screen the candidate did not ask to load.
+   */
+  getActiveInterviews(email: string, opts?: SilentOpts) {
     return api.get<InterviewSchedule[]>(ENDPOINTS.INTERVIEWS.GET_ACTIVE, {
       params: { email },
-    });
+      ...(opts?.silent ? { _skipErrorToast: true } : {}),
+    } as never);
   },
 
   /** `round` omitted returns every round. */
