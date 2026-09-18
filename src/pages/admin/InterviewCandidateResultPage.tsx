@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -19,6 +19,7 @@ import { RadialScore, SummaryStat, SkillBar } from '@/components/admin/result/Re
 import { ProctoringCaptures } from '@/components/admin/result/ProctoringCaptures';
 import { CodeBlock } from '@/components/interview/CodeBlock';
 import { ROUTES } from '@/config/routes';
+import type { NavOrigin } from '@/components/ui/BackLink';
 import { interviewService, type VoiceConversationEntryDTO } from '@/services/interview.service';
 import { aiService } from '@/services/ai.service';
 import { INTERVIEW_ROUND_LABELS } from '@/types/interview.types';
@@ -119,6 +120,22 @@ function warningsOf(schedule: InterviewSchedule): number {
  */
 export function InterviewCandidateResultPage() {
   const { jobPrefix = '', email = '' } = useParams();
+  const location = useLocation();
+
+  /**
+   * Where "back" goes.
+   *
+   * This page is reachable from two places now — the Interview Results list and
+   * a candidate row on Candidates — and it used to send everyone to the list
+   * regardless. An admin who opened a result from Candidates was put on a
+   * screen they had not come from, with their job selection, stage tab and
+   * ticked rows gone. Whoever navigated here says where back leads; the list
+   * stays the fallback for a link opened cold.
+   */
+  const back: NavOrigin = (location.state as { from?: NavOrigin } | null)?.from ?? {
+    label: 'Interview Results',
+    path: ROUTES.ADMIN.INTERVIEWS_RESULTS,
+  };
   const navigate = useNavigate();
 
   const [rounds, setRounds] = useState<RoundDetail[]>([]);
@@ -192,7 +209,7 @@ export function InterviewCandidateResultPage() {
   if (loadError || rounds.length === 0) {
     return (
       <div className="space-y-6">
-        <BackLink onClick={() => navigate(ROUTES.ADMIN.INTERVIEWS_RESULTS)} />
+        <BackLink label={back.label} onClick={() => navigate(back.path, { state: back.state })} />
         <EmptyState
           icon={<Users size={48} />}
           title={loadError ? 'Could not load results' : 'No interview rounds'}
@@ -208,7 +225,7 @@ export function InterviewCandidateResultPage() {
 
   return (
     <div className="space-y-6">
-      <BackLink onClick={() => navigate(ROUTES.ADMIN.INTERVIEWS_RESULTS)} />
+      <BackLink label={back.label} onClick={() => navigate(back.path, { state: back.state })} />
 
       {/* ── Header ──────────────────────────────────────────────────── */}
       <Card>
@@ -312,14 +329,14 @@ export function InterviewCandidateResultPage() {
   );
 }
 
-function BackLink({ onClick }: Readonly<{ onClick: () => void }>) {
+function BackLink({ label, onClick }: Readonly<{ label: string; onClick: () => void }>) {
   return (
     <button
       onClick={onClick}
       className="flex items-center gap-2 text-sm font-medium text-[var(--textSecondary)] transition-colors hover:text-[var(--text)]"
     >
       <ArrowLeft size={16} />
-      Back to Interview Results
+      Back to {label}
     </button>
   );
 }

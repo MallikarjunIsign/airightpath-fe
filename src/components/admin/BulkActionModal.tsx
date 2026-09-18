@@ -28,6 +28,14 @@ interface BulkActionModalProps {
    * caught before a candidate is told to attend.
    */
   extra?: ReactNode;
+  /**
+   * Holds Send shut for a reason the modal cannot see.
+   *
+   * Booking an interview can have nobody left to book — every selected
+   * candidate already has that round open — and the modal has no way to know
+   * that; the content in `extra` works it out and says why.
+   */
+  sendDisabled?: boolean;
 }
 
 /** Confirmation modal for a bulk email action (ack / rejection / exam link / …). */
@@ -45,6 +53,7 @@ export function BulkActionModal({
   onClose,
   onSend,
   extra,
+  sendDisabled = false,
 }: Readonly<BulkActionModalProps>) {
   // The picker blocks past times, but a value can still go stale while the
   // modal sits open — keep the guard on the Send button too.
@@ -61,7 +70,7 @@ export function BulkActionModal({
           <Button variant="ghost" onClick={onClose} disabled={sending}>
             Cancel
           </Button>
-          <Button onClick={onSend} isLoading={sending} disabled={scheduledInPast}>
+          <Button onClick={onSend} isLoading={sending} disabled={scheduledInPast || sendDisabled}>
             Send
           </Button>
         </>

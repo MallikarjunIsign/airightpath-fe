@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Loader2,
@@ -15,6 +15,7 @@ import {
   ExternalLink,
   BarChart3,
   Video,
+  RotateCcw,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -24,16 +25,22 @@ import { CandidateTable } from '@/components/admin/CandidateTable';
 import { CandidateDetailModal } from '@/components/admin/CandidateDetailModal';
 import { BulkActionModal } from '@/components/admin/BulkActionModal';
 import { InterviewPromptPanel } from '@/components/admin/InterviewPromptPanel';
-import { InterviewRoundsPanel } from '@/components/admin/InterviewRoundsPanel';
+import {
+  InterviewRoundPicker,
+  type RoundEligibility,
+} from '@/components/admin/InterviewRoundPicker';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { BackLink } from '@/components/ui/BackLink';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
 import { interviewService } from '@/services/interview.service';
+import { INTERVIEW_ROUND_LABELS } from '@/types/interview.types';
+import type { InterviewRound } from '@/types/interview.types';
 import { resumeService } from '@/services/resume.service';
 import axios from 'axios';
 import { usePersistentState, writePersistentValue } from '@/hooks/usePersistentState';
 import { useJobScoreboard } from '@/hooks/useJobScoreboard';
+import { useJobInterviews } from '@/hooks/useJobInterviews';
 import { useToast } from '@/components/ui/Toast';
 import { ROUTES } from '@/config/routes';
 import { getAppEmail } from '@/utils/application.utils';
@@ -71,6 +78,42 @@ const ASSIGN_STAGES: JobApplicationStatus[] = [
  * admin wants in front of them while they decide the next step. Earlier stages
  * are excluded because the results screen would only have an empty row for them.
  */
+/**
+ * Stages that offer the Assign Interview button.
+ *
+ * Every stage except Rejected. Gating interviews by stage is what made
+ * re-attempts impossible before: a candidate whose L2 dropped out had already
+ * been moved past the one stage that could book it, so the only route back was
+ * to edit their status. The check that matters is not which stage they are in
+ * but whether the round is still open for them, and the booking modal makes it.
+ */
+const INTERVIEW_ASSIGN_STAGES: JobApplicationStatus[] = [
+  'APPLIED',
+  'SHORTLISTED',
+  'ACKNOWLEDGED',
+  'ACKNOWLEDGED_BACK' as JobApplicationStatus,
+  'RECONFIRMED',
+  'EXAM_SENT',
+  'EXAM_COMPLETED',
+  'INTERVIEW_SCHEDULED',
+  'INTERVIEW_COMPLETED',
+  'SELECTED',
+];
+
+/**
+ * Stages where the Interview column is shown unconditionally.
+ *
+ * From EXAM_COMPLETED, which is the first point an interview is normally
+ * booked. Earlier stages get the column only if somebody on screen actually has
+ * an interview — see `showInterviewStandings`.
+ */
+const INTERVIEW_COLUMN_STAGES: JobApplicationStatus[] = [
+  'EXAM_COMPLETED',
+  'INTERVIEW_SCHEDULED',
+  'INTERVIEW_COMPLETED',
+  'SELECTED',
+];
+
 const RESULT_STAGES: JobApplicationStatus[] = [
   'EXAM_COMPLETED',
   'INTERVIEW_SCHEDULED',
@@ -133,7 +176,13 @@ const STAGE_LABELS: Record<string, string> = {
   RECONFIRMED: 'Reconfirmed',
   EXAM_SENT: 'Exam Sent',
   EXAM_COMPLETED: 'Exam Completed',
-  INTERVIEW_SCHEDULED: 'Interview',
+  // "Interview Sent", not "Interview". A candidate lands on this stage because
+  // an interview was booked and mailed to them — it is the exact mirror of
+  // "Exam Sent" — but the tab said "Interview", which reads as the stage where
+  // interviewing happens. So the one tab that means "already sent" was the tab
+  // an admin went to looking for people still to send to, and the pool that
+  // actually needs sending sits behind on Exam Completed.
+  INTERVIEW_SCHEDULED: 'Interview Sent',
   INTERVIEW_COMPLETED: 'Interview Done',
   SELECTED: 'Selected',
   REJECTED: 'Rejected',
@@ -149,10 +198,12 @@ type BulkAction =
   | 'reconfirmation'
   | 'success'
   | 'failure'
-  /** Books the L2 technical round and moves the candidate out of the exam stage. */
-  | 'interview-l2'
-  /** Books the L3 behavioural round, normally after L2 has been passed. */
-  | 'interview-l3';
+  /**
+   * Books an interview. Which round is chosen inside the modal, as the paper is
+   * chosen inside Assign Assessment — one action, asked for where the people
+   * have already been picked.
+   */
+  | 'interview';
 
 const BULK_ACTION_CONFIG: Record<
   BulkAction,
@@ -166,11 +217,13 @@ const BULK_ACTION_CONFIG: Record<
   // The only action here that creates something rather than sending a message:
   // it books the interview and advances the candidate's stage. The date/time is
   // the deadline by which they must sit it, so it is required, not optional.
-  // One action per round. The round is carried by the button rather than a
-  // dropdown inside the modal, so the label states exactly what gets booked and
-  // the confirmation cannot disagree with it.
-  'interview-l2': { label: 'Send to L2 Technical', hasDateTime: true, icon: <Video size={16} /> },
-  'interview-l3': { label: 'Send to L3 Behavioural', hasDateTime: true, icon: <Video size={16} /> },
+  //
+  // There used to be one action per round, offered from a card that stood above
+  // the table on every stage listing both rounds whether or not anybody was
+  // being booked. The round is now picked inside the modal, next to the count of
+  // who it can actually be booked for — which is the only place that count can
+  // be honest, because it depends on the round.
+  interview: { label: 'Assign Interview', hasDateTime: true, icon: <Video size={16} /> },
 };
 
 /**
@@ -238,7 +291,20 @@ export function CandidateDetailsPage() {
   // Modal state
   const [modalAction, setModalAction] = useState<BulkAction | null>(null);
   /** Bumped after an assignment so the round counts re-read themselves. */
-  const [roundsRefreshKey, setRoundsRefreshKey] = useState(0);
+  /** The round being booked. Only meaningful while the interview modal is open. */
+  const [modalRound, setModalRound] = useState<InterviewRound>('L2_TECHNICAL');
+  /**
+   * Who the chosen round can actually be booked for.
+   *
+   * Owned here rather than inside the picker because it decides two things the
+   * picker does not: whether Send is live, and which emails are sent. It starts
+   * empty so Send stays shut until the picker has read the existing attempts.
+   */
+  const [interviewEligibility, setInterviewEligibility] = useState<RoundEligibility>({
+    assignable: [],
+    blocked: [],
+    repeats: 0,
+  });
   const [modalDateTime, setModalDateTime] = useState('');
   const [modalContent, setModalContent] = useState('');
   const [sending, setSending] = useState(false);
@@ -339,6 +405,15 @@ export function CandidateDetailsPage() {
   }, [activeStage, legacyCount, loadingCandidates, setActiveStage]);
 
   /**
+   * The selection as a stable array.
+   *
+   * The picker memoises on this and reports the result back up, so a new array
+   * identity every render would loop: report → parent re-renders → new array →
+   * recompute → report.
+   */
+  const selectedEmailList = useMemo(() => Array.from(selectedEmails), [selectedEmails]);
+
+  /**
    * Scored only for the stage being looked at, not the whole job: the standings
    * cost one request per candidate, and a recruiter on "Applied" is not asking
    * about exam results.
@@ -356,6 +431,48 @@ export function CandidateDetailsPage() {
   const { standings, loading: standingsLoading } = useJobScoreboard(
     showStandings ? selectedPrefix : '',
     standingEmails,
+  );
+
+  /**
+   * Every interview booked on this job — one read, two readers.
+   *
+   * The Interview column reports where each candidate stands; the booking modal
+   * refuses to double-book a round that is still live. Both have to agree, so
+   * both come from here rather than fetching separately.
+   *
+   * Loaded for the whole job rather than the stage on screen, because that is
+   * exactly the point: a candidate sitting at "Interview" and one at "Interview
+   * Done" are the two the admin is trying to tell apart, and they live on
+   * different tabs.
+   */
+  const {
+    schedules: interviewSchedules,
+    standings: interviewStandings,
+    loading: interviewsLoading,
+    failed: interviewsFailed,
+    reload: reloadInterviews,
+  } = useJobInterviews(selectedPrefix);
+
+  /**
+   * Whether the Interview column is worth a column.
+   *
+   * Shown from the exam onward, and on any stage where somebody on screen has
+   * actually been booked — a re-attempt can be sitting against a candidate whose
+   * stage moved on, and hiding the column there is what hid it from the admin
+   * chasing precisely that.
+   */
+  const showInterviewStandings =
+    INTERVIEW_COLUMN_STAGES.includes(activeStage) ||
+    candidates.some((c) => interviewStandings.has(getAppEmail(c).toLowerCase()));
+
+  /**
+   * Whether this selection has sat, or been booked for, anything before.
+   *
+   * Decides the button's word. "Assign" on someone who already has two attempts
+   * on record reads as a first booking and hides the history the admin needs.
+   */
+  const selectionHasInterviews = selectedEmailList.some((email) =>
+    interviewStandings.has(email.toLowerCase()),
   );
 
   // Available actions for the current stage
@@ -389,6 +506,13 @@ export function CandidateDetailsPage() {
     setModalAction(action);
     setModalDateTime('');
     setModalContent('');
+    if (action === 'interview') {
+      setModalRound('L2_TECHNICAL');
+      // Cleared, not carried over: the picker reports the real figure once it
+      // has read this job's attempts, and a stale one would decide who gets
+      // booked this time.
+      setInterviewEligibility({ assignable: [], blocked: [], repeats: 0 });
+    }
   }
 
   async function openResume(candidate: JobApplicationDTO) {
@@ -560,7 +684,7 @@ export function CandidateDetailsPage() {
     navigate(ROUTES.ADMIN.ASSESSMENTS_RESULTS, { state: { from: resultsOrigin } });
   }
 
-  /** Straight to one candidate's scorecard, skipping the results list. */
+  /** Straight to one candidate's exam scorecard, skipping the results list. */
   function handleViewCandidateResult(candidate: JobApplicationDTO) {
     const email = getAppEmail(candidate);
     if (!selectedPrefix || !email) return;
@@ -568,6 +692,42 @@ export function CandidateDetailsPage() {
     navigate(ROUTES.ADMIN.candidateResultDetail(selectedPrefix, email), {
       state: { from: resultsOrigin },
     });
+  }
+
+  /**
+   * Straight to one candidate's interview scorecard — every round they sat, on
+   * its own page.
+   *
+   * A separate destination from the exam result above, which is the whole point
+   * of it being a separate button: the row used to offer one "Result" and it
+   * always meant the exam, so an interview transcript was only reachable by
+   * leaving for Interview Results and finding the candidate again by email.
+   *
+   * `from` rides along so Back returns here, to this job and this stage tab,
+   * rather than stranding the admin on the Interview Results list.
+   */
+  function handleViewInterviewResult(candidate: JobApplicationDTO) {
+    const email = getAppEmail(candidate);
+    if (!selectedPrefix || !email) return;
+    navigate(ROUTES.ADMIN.interviewResultDetail(selectedPrefix, email), {
+      state: { from: resultsOrigin },
+    });
+  }
+
+  /**
+   * The success toast, which for an interview says how many were booked and how
+   * many were left alone — "Assign Interview sent" over a selection of five that
+   * booked two would be a quiet lie.
+   */
+  function interviewSentMessage(): string {
+    if (modalAction !== 'interview') {
+      return MESSAGES.admin.candidates.actionSent(BULK_ACTION_CONFIG[modalAction!].label);
+    }
+    return MESSAGES.admin.candidates.interviewBooked(
+      INTERVIEW_ROUND_LABELS[modalRound],
+      interviewEligibility.assignable.length,
+      interviewEligibility.blocked.length,
+    );
   }
 
   async function handleSendAction() {
@@ -584,6 +744,14 @@ export function CandidateDetailsPage() {
     // while the modal was open.
     if (modalDateTime && isPast(modalDateTime)) {
       showToast(MESSAGES.admin.candidates.dateTimeInPast, 'warning');
+      return;
+    }
+
+    // Nothing to book: every selected candidate already has this round open.
+    // The Send button is disabled in that state; this catches the case where
+    // the last one became eligible or ineligible while the modal sat open.
+    if (modalAction === 'interview' && interviewEligibility.assignable.length === 0) {
+      showToast(MESSAGES.admin.candidates.interviewNoneAssignable, 'warning');
       return;
     }
 
@@ -625,29 +793,32 @@ export function CandidateDetailsPage() {
         case 'failure':
           await jobApplicationService.sendFailureMail(payload);
           break;
-        case 'interview-l2':
-        case 'interview-l3':
+        case 'interview':
           // Not a mail action: this books the interview itself. The server
           // creates a schedule per candidate, emails the invitation, and moves
           // anyone still in the exam stage to Interview Scheduled.
+          //
+          // Sent to the eligible emails, not the whole selection. Anyone with
+          // this round still open is left alone — a second live invitation for
+          // a round they are already sitting is not a re-attempt, it is two
+          // interviews nobody can tell apart afterwards.
           await interviewService.assignInterviewBulk({
             jobPrefix: selectedPrefix,
-            emails,
+            emails: interviewEligibility.assignable,
             deadlineTime: modalDateTime,
             sendEmail: true,
-            round: modalAction === 'interview-l2' ? 'L2_TECHNICAL' : 'L3_BEHAVIORAL',
+            round: modalRound,
           });
           break;
       }
-      showToast(MESSAGES.admin.candidates.actionSent(BULK_ACTION_CONFIG[modalAction].label), 'success');
-      if (modalAction.startsWith('interview-')) {
-        // The attempt counts in the rounds section come from the schedules, not
-        // from the candidate rows, so they need their own nudge.
-        setRoundsRefreshKey((key) => key + 1);
-      }
+      showToast(interviewSentMessage(), 'success');
       setModalAction(null);
       setSelectedEmails(new Set());
       fetchCandidates();
+      // The Interview column is built from the schedules, not the candidate
+      // rows, so it needs its own nudge — otherwise a booking made on this
+      // screen is invisible on it until the next reload.
+      if (modalAction === 'interview') reloadInterviews();
     } catch {
       // Error toast auto-handled by interceptor
     } finally {
@@ -869,6 +1040,28 @@ export function CandidateDetailsPage() {
                   {assignButtonLabel(activeStage)}
                 </Button>
               )}
+              {/* Booking an interview reads as the sibling of assigning an
+                  assessment, so it sits next to it and behaves the same way:
+                  pick candidates, press this, choose what they get. Offered on
+                  every stage but Rejected, because a re-attempt is needed
+                  exactly where the candidate's stage has already moved past the
+                  round being re-booked. */}
+              {INTERVIEW_ASSIGN_STAGES.includes(activeStage) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  leftIcon={selectionHasInterviews ? <RotateCcw size={16} /> : <Video size={16} />}
+                  onClick={() => openActionModal('interview')}
+                  title={
+                    selectionHasInterviews
+                      ? 'Books a further attempt. Rounds that are still open are skipped.'
+                      : 'Books an interview for the selected candidates.'
+                  }
+                >
+                  {selectionHasInterviews ? 'Reassign Interview' : 'Assign Interview'}
+                  {selectedEmails.size > 0 ? ` (${selectedEmails.size})` : ''}
+                </Button>
+              )}
               {/* Once the paper has been sat, the score is the next thing an
                   admin looks at — this is the shortcut to it for the whole job,
                   with the per-row action going straight to one scorecard. */}
@@ -903,23 +1096,10 @@ export function CandidateDetailsPage() {
             </div>
           )}
 
-          {/* Booking interviews, as its own step rather than a stage action.
-              Placed above the table so the selection it acts on is in view. */}
-          {selectedPrefix && (
-            <InterviewRoundsPanel
-              jobPrefix={selectedPrefix}
-              selectedEmails={selectedEmails}
-              refreshKey={roundsRefreshKey}
-              onAssignRound={(round) =>
-                openActionModal(round === 'L2_TECHNICAL' ? 'interview-l2' : 'interview-l3')
-              }
-            />
-          )}
-
           {/* Candidate Table */}
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                 <CardTitle>
                   {STAGE_LABELS[activeStage]} ({filteredCandidates.length})
                 </CardTitle>
@@ -951,9 +1131,16 @@ export function CandidateDetailsPage() {
                   onViewResult={
                     RESULT_STAGES.includes(activeStage) ? handleViewCandidateResult : undefined
                   }
+                  // Offered wherever the Interview column is, and gated per row
+                  // by whether that candidate has actually sat a round.
+                  onViewInterviewResult={
+                    showInterviewStandings ? handleViewInterviewResult : undefined
+                  }
                   statusLabels={STAGE_LABELS}
                   standings={showStandings ? standings : undefined}
                   standingsLoading={standingsLoading}
+                  interviewStandings={showInterviewStandings ? interviewStandings : undefined}
+                  interviewStandingsLoading={interviewsLoading}
                 />
               )}
             </CardContent>
@@ -968,8 +1155,18 @@ export function CandidateDetailsPage() {
           hasDateTime={BULK_ACTION_CONFIG[modalAction].hasDateTime}
           // An interview with no deadline never expires and never chases the
           // candidate, so the date is as mandatory here as on the ack mail.
-          dateTimeRequired={modalAction === 'ack' || modalAction.startsWith('interview-')}
-          recipientCount={selectedEmails.size}
+          dateTimeRequired={modalAction === 'ack' || modalAction === 'interview'}
+          // For an interview this is who will actually be booked, not who is
+          // ticked — the modal says "sending to N", and N has to be the number
+          // of invitations that go out.
+          recipientCount={
+            modalAction === 'interview'
+              ? interviewEligibility.assignable.length
+              : selectedEmails.size
+          }
+          sendDisabled={
+            modalAction === 'interview' && interviewEligibility.assignable.length === 0
+          }
           sending={sending}
           dateTime={modalDateTime}
           onDateTimeChange={setModalDateTime}
@@ -979,11 +1176,27 @@ export function CandidateDetailsPage() {
           onClose={() => setModalAction(null)}
           onSend={handleSendAction}
           extra={
-            modalAction.startsWith('interview-') ? (
-              <InterviewPromptPanel
-                jobPrefix={selectedPrefix}
-                round={modalAction === 'interview-l2' ? 'L2_TECHNICAL' : 'L3_BEHAVIORAL'}
-              />
+            modalAction === 'interview' ? (
+              <div className="space-y-4">
+                <InterviewRoundPicker
+                  schedules={interviewSchedules}
+                  loading={interviewsLoading}
+                  failed={interviewsFailed}
+                  onRetry={reloadInterviews}
+                  emails={selectedEmailList}
+                  round={modalRound}
+                  onRoundChange={setModalRound}
+                  onEligibilityChange={setInterviewEligibility}
+                />
+                {/* Keyed by round so switching rounds re-reads the prompt: the
+                    panel reports which prompt the booking would interview with,
+                    and L2's is not L3's. */}
+                <InterviewPromptPanel
+                  key={modalRound}
+                  jobPrefix={selectedPrefix}
+                  round={modalRound}
+                />
+              </div>
             ) : undefined
           }
         />
@@ -1005,6 +1218,16 @@ export function CandidateDetailsPage() {
           onViewResult={
             RESULT_STAGES.includes(selectedCandidate.status as JobApplicationStatus)
               ? handleViewCandidateResult
+              : undefined
+          }
+          // Gated on a round actually having been sat, not on the stage: a
+          // re-attempt can sit against a candidate whose stage moved on, and
+          // the schedules are what know it either way.
+          onViewInterviewResult={
+            interviewStandings
+              .get(getAppEmail(selectedCandidate).toLowerCase())
+              ?.rounds.some((round) => round.state === 'completed')
+              ? handleViewInterviewResult
               : undefined
           }
         />

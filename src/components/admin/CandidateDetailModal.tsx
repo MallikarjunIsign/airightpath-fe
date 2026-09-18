@@ -1,4 +1,4 @@
-import { Mail, Phone, Clock, CalendarClock, Briefcase, MapPin, CheckCircle, XCircle, FileText, Loader2, Eye, BarChart3 } from 'lucide-react';
+import { Mail, Phone, Clock, CalendarClock, Briefcase, MapPin, CheckCircle, XCircle, FileText, Loader2, Eye, BarChart3, Video } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
@@ -26,6 +26,12 @@ interface CandidateDetailModalProps {
    * been sat — before that there is nothing on the results screen to show.
    */
   onViewResult?: (candidate: JobApplicationDTO) => void;
+  /**
+   * Opens this candidate's interview scorecard. Only passed once a round has
+   * been sat — a booked but untaken interview has no scorecard, and the button
+   * would lead to an empty page.
+   */
+  onViewInterviewResult?: (candidate: JobApplicationDTO) => void;
   /**
    * The job being reviewed. Without it the assignments section cannot tell this
    * job's papers from another job's, so it is left out rather than shown wrong.
@@ -59,6 +65,7 @@ export function CandidateDetailModal({
   onViewResume,
   resumeLoading,
   onViewResult,
+  onViewInterviewResult,
   jobPrefix,
 }: Readonly<CandidateDetailModalProps>) {
   const referralStatus = candidate.referralStatus?.toUpperCase();
@@ -81,6 +88,15 @@ export function CandidateDetailModal({
               onClick={() => onViewResult(candidate)}
             >
               View Assessment Result
+            </Button>
+          )}
+          {onViewInterviewResult && (
+            <Button
+              variant="outline"
+              leftIcon={<Video size={16} />}
+              onClick={() => onViewInterviewResult(candidate)}
+            >
+              View Interview Result
             </Button>
           )}
           {/* Rejected candidates can be overruled — an ATS score is advice, and

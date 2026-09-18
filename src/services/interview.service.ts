@@ -45,6 +45,14 @@ export interface VoiceConversationEntryDTO {
   timestamp: string;
 }
 
+/**
+ * Suppresses the interceptor's error toast, so a caller that renders its own
+ * failure state is not shouted over by a generic one.
+ */
+interface SilentOpts {
+  silent?: boolean;
+}
+
 export const interviewService = {
   assignInterview(data: {
     email: string;
@@ -68,10 +76,11 @@ export const interviewService = {
   },
 
   /** `round` omitted returns every round. */
-  getResults(jobPrefix?: string, round?: InterviewRound) {
+  getResults(jobPrefix?: string, round?: InterviewRound, opts?: SilentOpts) {
     return api.get<InterviewSchedule[]>(ENDPOINTS.INTERVIEWS.GET_RESULTS, {
       params: buildResultsParams(jobPrefix, round),
-    });
+      ...(opts?.silent ? { _skipErrorToast: true } : {}),
+    } as never);
   },
 
   getResultDetail(id: number) {

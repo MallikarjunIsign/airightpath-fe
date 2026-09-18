@@ -194,6 +194,20 @@ export const MESSAGES = {
       ackDateTimeRequired: 'Date & Time is required for acknowledgement mail',
       dateTimeInPast: 'Date & Time cannot be in the past. Please pick a future slot.',
       actionSent: (label: string) => `${label} sent successfully!`,
+      interviewNoneAssignable:
+        'Nobody in this selection can be booked for that round yet — they all have one still open.',
+      /**
+       * Names the skipped as well as the booked. A recruiter who selected five
+       * and booked two needs to be told, at the moment it happens, that three
+       * were left alone — finding out later from the results screen is finding
+       * out too late.
+       */
+      interviewBooked: (round: string, booked: number, skipped: number) => {
+        const head = `${round} booked for ${booked} candidate${booked === 1 ? '' : 's'}.`;
+        return skipped > 0
+          ? `${head} ${skipped} skipped — that round is still open for them.`
+          : head;
+      },
     },
     interviewScheduler: {
       deadlineTimeRequired: 'Please set a deadline time',

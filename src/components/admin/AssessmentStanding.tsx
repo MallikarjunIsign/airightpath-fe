@@ -22,7 +22,10 @@ function ModuleLine({ label, module }: Readonly<{ label: string; module: ModuleS
 
   const isAptitude = label === 'Aptitude';
   return (
-    <div className="flex items-center gap-1.5 min-w-0">
+    // flex-wrap, because the line can carry a label, a repeat marker, a score
+    // and a verdict at once — on one line that ran straight past the column and
+    // printed over the next one.
+    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 min-w-0">
       {isAptitude ? (
         <BookOpen size={12} className="flex-shrink-0" style={{ color: 'var(--info)' }} />
       ) : (
