@@ -1073,15 +1073,39 @@ export function InterviewPage() {
             shrinks the column rather than pushing the sidebar off-screen — a
             flex child defaults to min-width:auto, which is what let the editor
             overlap the sidebar at narrow widths. */}
-        <div className="flex-1 flex flex-col min-h-0 min-w-0">
-          <div className="flex flex-shrink-0 justify-center py-4 sm:py-6 border-b border-[var(--border)]">
-            <AIAvatar isSpeaking={voiceInterview.isPlaying} isListening={voiceInterview.isRecording} isThinking={voiceInterview.state === 'processing'} amplitude={voiceInterview.amplitude} size="md" />
+        {/* The column scrolls as a whole. It used to be a fixed-height flex
+            column inside `lg:overflow-hidden`: once the code editor was open,
+            the avatar, the editor and the controls together came to more than
+            the viewport, and the mic controls were simply clipped off the
+            bottom with no way to scroll to them. Now anything that does not
+            fit scrolls, and the two things that must always be reachable —
+            who is speaking, and the mic — are pinned to the top and bottom. */}
+        <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-y-auto">
+          {/* Presence strip. Compact and horizontal: the old centred avatar
+              block cost ~10rem of height that the editor needed. */}
+          <div className="sticky top-0 z-10 flex flex-shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--background)]/90 px-4 py-2.5 backdrop-blur-md">
+            <AIAvatar
+              isSpeaking={voiceInterview.isPlaying}
+              isListening={voiceInterview.isRecording}
+              isThinking={voiceInterview.state === 'processing'}
+              amplitude={voiceInterview.amplitude}
+              size="sm"
+              layout="inline"
+            />
+            <div className="min-w-0 text-right">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--textTertiary)]">
+                Interviewer
+              </p>
+              <p className="truncate text-sm font-semibold text-[var(--text)]">
+                {voiceInterview.interviewerName}
+              </p>
+            </div>
           </div>
 
           {/* Conversation area */}
           <div
             ref={chatContainerRef}
-            className="flex-1 min-h-[14rem] lg:min-h-0 overflow-y-auto p-4 sm:p-6 space-y-4"
+            className="flex-1 min-h-[12rem] overflow-y-auto p-4 sm:p-6 space-y-4"
           >
             {voiceInterview.conversation.map((entry, idx) => (
               <div key={idx} className={`flex items-start gap-3 ${entry.role === 'candidate' ? 'flex-row-reverse' : ''} ${entry.role === 'filler' ? 'opacity-60' : ''}`}>
@@ -1104,9 +1128,13 @@ export function InterviewPage() {
             )}
           </div>
 
-          {/* Coding Editor & Compile */}
+          {/* Coding Editor & Compile.
+              No height cap of its own any more — the candidate sets the
+              editor's height with its grip, and the column scrolls. Capping it
+              at 55vh only meant a tall editor squeezed the transcript to
+              nothing and pushed the controls off-screen. */}
           {voiceInterview.isCodingQuestion && voiceInterview.state !== 'completed' && !postCompletionStep && (
-            <div className="flex-shrink-0 border-t border-[var(--border)] px-3 sm:px-4 py-3 space-y-2 lg:max-h-[55vh] lg:overflow-y-auto">
+            <div className="flex-shrink-0 border-t border-[var(--border)] px-3 sm:px-4 py-3 space-y-2">
               {/* The question, pinned above the editor. The chat scrolls, and
                   once the editor and its output are open the question that was
                   asked is usually off the top of it — leaving the candidate
@@ -1118,7 +1146,7 @@ export function InterviewPage() {
                   <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wider text-[var(--textSecondary)]">
                     The question
                   </summary>
-                  <p className="max-h-32 overflow-y-auto whitespace-pre-wrap px-3 pb-3 text-sm text-[var(--text)]">
+                  <p className="max-h-48 overflow-y-auto whitespace-pre-wrap px-3 pb-3 text-sm text-[var(--text)]">
                     {currentQuestion}
                   </p>
                 </details>
@@ -1152,9 +1180,11 @@ export function InterviewPage() {
             </div>
           )}
 
-          {/* Voice controls */}
+          {/* Voice controls. Pinned to the bottom of the scrolling column: the
+              mic is the one control the candidate must always be able to reach,
+              whatever else is open above it. */}
           {voiceInterview.state !== 'completed' && !postCompletionStep && (
-            <div className="flex-shrink-0 border-t border-[var(--border)] bg-[var(--cardBg)] p-3 sm:p-4">
+            <div className="sticky bottom-0 z-10 mt-auto flex-shrink-0 border-t border-[var(--border)] bg-[var(--cardBg)]/95 p-3 sm:p-4 backdrop-blur-md">
               {voiceInterview.transcriptionError && (
                 <div className="mb-3 p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 flex items-center gap-2">
                   <AlertTriangle size={14} className="text-amber-500" />
@@ -1203,8 +1233,21 @@ export function InterviewPage() {
               <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4">
                 {voiceInterview.state === 'active' && (
                   <>
-                    <button onClick={() => { if (!voiceInterview.isWsConnected) showToast(MESSAGES.interview.stillConnecting, 'info'); else voiceInterview.startAnswering(); }} disabled={!voiceInterview.isWsConnected || voiceInterview.isPlaying} className="w-16 h-16 rounded-full bg-emerald-500 hover:bg-emerald-600 disabled:bg-gray-400 disabled:cursor-not-allowed text-white flex items-center justify-center transition-colors shadow-lg hover:shadow-xl"><Mic size={28} /></button>
-                    <button onClick={voiceInterview.repeatQuestion} className="w-10 h-10 rounded-full bg-[var(--surface1)] hover:bg-[var(--border)] text-[var(--textSecondary)] flex items-center justify-center transition-colors"><Volume2 size={18} /></button>
+                    <button
+                      onClick={() => { if (!voiceInterview.isWsConnected) showToast(MESSAGES.interview.stillConnecting, 'info'); else voiceInterview.startAnswering(); }}
+                      disabled={!voiceInterview.isWsConnected || voiceInterview.isPlaying}
+                      title="Start answering"
+                      className="group flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 text-white shadow-lg ring-4 ring-emerald-500/15 transition-all hover:scale-105 hover:shadow-emerald-500/30 hover:shadow-xl disabled:cursor-not-allowed disabled:from-gray-400 disabled:to-gray-500 disabled:ring-0 disabled:hover:scale-100"
+                    >
+                      <Mic size={26} />
+                    </button>
+                    <button
+                      onClick={voiceInterview.repeatQuestion}
+                      title="Play the question again"
+                      className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--surface1)] text-[var(--textSecondary)] transition-colors hover:bg-[var(--surface2)] hover:text-[var(--text)]"
+                    >
+                      <Volume2 size={18} />
+                    </button>
                   </>
                 )}
                 {voiceInterview.state === 'answering' && (
@@ -1214,7 +1257,13 @@ export function InterviewPage() {
                       <Timer size={14} className={answerSecondsLeft <= 30 ? 'animate-pulse' : ''} />
                       {Math.floor(answerSecondsLeft / 60)}:{String(answerSecondsLeft % 60).padStart(2, '0')}
                     </div>
-                    <button onClick={() => voiceInterview.submitAnswer()} className="w-16 h-16 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition-colors shadow-lg hover:shadow-xl animate-pulse"><Square size={24} /></button>
+                    <button
+                      onClick={() => voiceInterview.submitAnswer()}
+                      title="Stop and submit"
+                      className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-rose-400 to-rose-600 text-white shadow-lg ring-4 ring-rose-500/20 transition-all hover:scale-105 hover:shadow-rose-500/30 hover:shadow-xl"
+                    >
+                      <Square size={22} />
+                    </button>
                   </>
                 )}
                 {voiceInterview.state === 'processing' && (
@@ -1329,29 +1378,30 @@ export function InterviewPage() {
             )}
           </div>
 
-          {/* Interviewer info */}
-          <div className="p-3 rounded-lg bg-[var(--surface1)]">
-            <p className="text-xs text-[var(--textTertiary)] mb-1">Interviewer</p>
-            <p className="text-sm font-medium text-[var(--text)]">{voiceInterview.interviewerName}</p>
-          </div>
-
-          {/* Proctoring status */}
-          <div className="space-y-3 sm:col-span-2 lg:col-span-1">
-            <h3 className="text-xs font-semibold text-[var(--text)] uppercase tracking-wider">Proctoring Status</h3>
-            <div className="space-y-2 text-xs">
-              {PROCTORING_CONFIG.eyeDetection.enabled && (
-                <div className="flex items-center justify-between"><span>Face Warnings</span><span className={`font-mono font-semibold ${faceWarnings > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>{faceWarnings}</span></div>
+          {/* The counters that used to live here — face warnings, fullscreen
+              exits, DevTools, the running total and the "follow the guidelines"
+              note — are gone. Every one of them was already in the top bar's
+              warning pill and its breakdown, and a tally repeated twice on the
+              same screen reads as two separate accusations rather than one
+              count. What is left is only what the top bar cannot say: a live
+              nudge while something is actually happening, which the candidate
+              can act on in the moment. */}
+          {(lookingAway || multipleFaces) && (
+            <div className="space-y-2 sm:col-span-2 lg:col-span-1">
+              {lookingAway && (
+                <div className="flex items-center gap-2 p-2.5 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                  <EyeOff size={14} className="text-amber-500 flex-shrink-0" />
+                  <span className="text-xs text-amber-700 dark:text-amber-300 font-medium">Eyes back on the screen</span>
+                </div>
               )}
-              {PROCTORING_CONFIG.fullscreen.enabled && (
-                <div className="flex items-center justify-between"><span>Fullscreen Exits</span><span className={`font-mono font-semibold ${fullscreenExitCount > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>{fullscreenExitCount}</span></div>
+              {multipleFaces && (
+                <div className="flex items-center gap-2 p-2.5 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                  <Users size={14} className="text-red-500 flex-shrink-0" />
+                  <span className="text-xs text-red-600 dark:text-red-400 font-medium">More than one person in frame</span>
+                </div>
               )}
-              <div className="flex items-center justify-between"><span>DevTools</span><span className={`font-mono font-semibold ${devToolsCount > 0 ? 'text-amber-500' : 'text-emerald-500'}`}>{devToolsCount}</span></div>
-              {lookingAway && <div className="flex items-center gap-2 p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20"><EyeOff size={14} className="text-amber-500" /><span className="text-xs text-amber-700 dark:text-amber-300 font-medium">Looking Away</span></div>}
-              {multipleFaces && <div className="flex items-center gap-2 p-2 rounded-lg bg-red-50 dark:bg-red-900/20"><Users size={14} className="text-red-500" /><span className="text-xs text-red-600 dark:text-red-400 font-medium">Multiple Faces</span></div>}
-              <div className="pt-2 border-t border-[var(--border)]"><div className="flex items-center justify-between"><span className="font-medium">Total Warnings</span><span className={`font-mono font-bold ${getWarningColor()}`}>{totalWarnings}/{APP_CONFIG.INTERVIEW_MAX_PROCTORING_WARNINGS}</span></div></div>
             </div>
-            {totalWarnings > 0 && <div className="flex items-start gap-2 p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20"><AlertTriangle size={14} className="text-amber-500 mt-0.5 flex-shrink-0" /><p className="text-xs text-amber-700 dark:text-amber-300">{totalWarnings >= 4 ? 'Critical: One more warning will end the interview.' : 'Please follow the interview guidelines to avoid warnings.'}</p></div>}
-          </div>
+          )}
 
           {voiceInterview.isRecording && (
             <div className="flex items-center gap-2 p-2 rounded-lg bg-red-50 dark:bg-red-900/20"><Mic size={14} className="text-red-500" /><span className="text-xs text-red-600 dark:text-red-400 font-medium">Audio Recording Active</span></div>

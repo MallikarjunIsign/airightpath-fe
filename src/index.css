@@ -690,61 +690,58 @@
 }
 
 /* ============================================================================
-   AI Avatar Animations
+   AI Avatar — voice orb
    ============================================================================ */
-@keyframes avatar-blink {
-  0%, 90%, 100% { transform: scaleY(1); }
-  95% { transform: scaleY(0.1); }
-}
-
-@keyframes avatar-breathe {
+@keyframes orb-float {
   0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-3px); }
+  50%      { transform: translateY(-4px); }
 }
 
-@keyframes avatar-pulse-ring {
-  0% { transform: scale(0.9); opacity: 0.6; }
-  50% { transform: scale(1.05); opacity: 0.3; }
-  100% { transform: scale(0.9); opacity: 0.6; }
+@keyframes orb-halo {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 0.85; }
 }
 
-.avatar-pulse-ring {
-  animation: avatar-pulse-ring 1.5s ease-in-out infinite;
+/* Two drifts at different periods, so the orb never repeats a visible loop. */
+@keyframes orb-drift-a {
+  0%, 100% { transform: translate3d(-8%, -6%, 0) scale(1); }
+  33%      { transform: translate3d(10%, 8%, 0) scale(1.14); }
+  66%      { transform: translate3d(-4%, 12%, 0) scale(0.92); }
 }
 
-/* Mouth states */
-.avatar-mouth-idle {
-  width: 12px;
-  height: 3px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.7);
+@keyframes orb-drift-b {
+  0%, 100% { transform: translate3d(9%, 7%, 0) scale(1.08); }
+  40%      { transform: translate3d(-11%, -5%, 0) scale(0.9); }
+  70%      { transform: translate3d(3%, -10%, 0) scale(1.16); }
 }
 
-.avatar-mouth-open {
-  width: 14px;
-  height: 10px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.8);
+/* Resting waveform: a slow, shallow sway rather than a flat line. */
+@keyframes orb-bar-idle {
+  0%, 100% { transform: scaleY(0.12); }
+  50%      { transform: scaleY(0.22); }
 }
 
-.avatar-mouth-wide {
-  width: 16px;
-  height: 14px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.85);
+@keyframes orb-bar-think {
+  0%, 100% { transform: scaleY(0.16); }
+  25%      { transform: scaleY(0.62); }
+  50%      { transform: scaleY(0.28); }
+  75%      { transform: scaleY(0.8); }
 }
 
-.avatar-mouth-thinking {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.5);
-}
+.orb-float     { animation: orb-float 5s ease-in-out infinite; }
+.orb-halo      { animation: orb-halo 4.5s ease-in-out infinite; }
+.orb-drift-a   { animation: orb-drift-a 11s ease-in-out infinite; filter: blur(8px); }
+.orb-drift-b   { animation: orb-drift-b 14s ease-in-out infinite; filter: blur(10px); }
+.orb-bar-idle  { animation: orb-bar-idle 3.2s ease-in-out infinite; }
+.orb-bar-think { animation: orb-bar-think 1.6s ease-in-out infinite; }
 
-.avatar-mouth-listening {
-  width: 16px;
-  height: 4px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.7);
-  transform: scaleX(1.1);
+@media (prefers-reduced-motion: reduce) {
+  .orb-float,
+  .orb-halo,
+  .orb-drift-a,
+  .orb-drift-b,
+  .orb-bar-idle,
+  .orb-bar-think {
+    animation: none;
+  }
 }
