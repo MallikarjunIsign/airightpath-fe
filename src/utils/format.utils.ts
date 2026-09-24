@@ -13,26 +13,53 @@ export function formatDateTime(dateStr: string): string {
 }
 
 /**
- * A timestamp the server stamped, shown in the reader's own timezone.
+ * A bare server stamp read as the instant it actually is.
  *
  * The server writes its `LocalDateTime` columns bare — `2026-08-14T08:23:27` —
- * and they are UTC. `parseISO` reads a bare stamp as local time, so putting one
- * through {@link formatDateTime} prints the UTC digits unchanged and an admin in
- * IST reads 08:23 for something that happened at 13:53 their time.
+ * and they are UTC. `parseISO` reads a bare stamp as *local* time, so a stamp
+ * left as-is is off by the reader's whole UTC offset. Anything that already
+ * carries a `Z` or a numeric offset is a real instant and is left alone.
+ */
+function parseServerInstant(dateStr: string): Date {
+  const zoned = /(?:Z|[+-]\d{2}:?\d{2})$/.test(dateStr) ? dateStr : `${dateStr.replace(' ', 'T')}Z`;
+  return parseISO(zoned);
+}
+
+/**
+ * A timestamp the server stamped, shown in the reader's own timezone.
  *
- * Use this for anything the server recorded: when a paper was assigned, opened
- * or handed in. NOT for the exam window: `startTime` and `deadline` are the
- * wall-clock a recruiter typed into the scheduler and are stored as typed, so
- * they must be shown back exactly as typed — {@link formatDateTime} does that.
+ * The stamp is bare UTC, so putting one through {@link formatDateTime} prints
+ * the UTC digits unchanged and an admin in IST reads 08:23 for something that
+ * happened at 13:53 their time. Parsing it as the instant it is and letting
+ * `format` render it means the clock follows whoever is looking: IST in India,
+ * GST in Dubai, EST in New York, with nothing to configure and nothing to keep
+ * in step when the app is used from somewhere new.
+ *
+ * Use this for anything the server recorded: when an application was filed, a
+ * paper assigned, opened or handed in. NOT for the exam window: `startTime` and
+ * `deadline` are the wall-clock a recruiter typed into the scheduler and are
+ * stored as typed, so they must be shown back exactly as typed —
+ * {@link formatDateTime} does that.
  */
 export function formatServerDateTime(dateStr?: string | null): string {
   if (!dateStr) return '';
-  const zoned = /(?:Z|[+-]\d{2}:?\d{2})$/.test(dateStr) ? dateStr : `${dateStr.replace(' ', 'T')}Z`;
-  try {
-    return format(parseISO(zoned), 'MMM dd, yyyy HH:mm');
-  } catch {
-    return dateStr;
-  }
+  const date = parseServerInstant(dateStr);
+  if (Number.isNaN(date.getTime())) return dateStr;
+  return format(date, 'MMM dd, yyyy HH:mm');
+}
+
+/**
+ * "3 hours ago" for a server-recorded stamp.
+ *
+ * {@link formatRelativeTime} reads a bare stamp as local time, which puts the
+ * distance out by the reader's whole UTC offset — in IST that turns an
+ * application filed minutes ago into one filed "in 5 hours".
+ */
+export function formatServerRelativeTime(dateStr?: string | null): string {
+  if (!dateStr) return '';
+  const date = parseServerInstant(dateStr);
+  if (Number.isNaN(date.getTime())) return dateStr;
+  return formatDistanceToNow(date, { addSuffix: true });
 }
 
 export function formatRelativeTime(dateStr: string): string {

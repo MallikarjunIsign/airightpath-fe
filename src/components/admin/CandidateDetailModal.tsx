@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { ReferralFields } from '@/components/application/ReferralFields';
 import { CandidateExamAssignments } from './CandidateExamAssignments';
 import { getAppEmail } from '@/utils/application.utils';
-import { formatDateTime, formatRelativeTime } from '@/utils/format.utils';
+import { formatServerDateTime, formatServerRelativeTime } from '@/utils/format.utils';
 import { hasReferral, referralStatusLabel } from '@/utils/referral.utils';
 import type { JobApplicationDTO } from '@/types/job.types';
 
@@ -164,17 +164,21 @@ export function CandidateDetailModal({
             {/* When they applied. The status column says where a candidate is,
                 never how long they have been waiting there — which is what
                 decides who to chase. Absent on applications filed before the
-                API returned it, so it is hidden rather than shown as "N/A". */}
+                API returned it, so it is hidden rather than shown as "N/A".
+
+                `createdAt` is a bare UTC stamp off the server, so it goes
+                through the server-stamp formatters — the plain ones would print
+                the UTC digits as if they were the reader's own wall clock. */}
             {candidate.createdAt && (
               <div className="flex items-center gap-2 text-sm">
                 <CalendarClock size={16} className="text-[var(--primary)] flex-shrink-0" />
                 <div>
                   <p className="text-[var(--textTertiary)] text-xs">Applied On</p>
                   <p className="text-[var(--text)] font-medium">
-                    {formatDateTime(candidate.createdAt)}
+                    {formatServerDateTime(candidate.createdAt)}
                     <span className="text-[var(--textTertiary)] font-normal">
                       {' '}
-                      ({formatRelativeTime(candidate.createdAt)})
+                      ({formatServerRelativeTime(candidate.createdAt)})
                     </span>
                   </p>
                 </div>

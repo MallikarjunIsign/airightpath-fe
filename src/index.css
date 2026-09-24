@@ -93,6 +93,29 @@
     cursor: pointer;
   }
 
+  /* The calendar/clock indicator and the picker panel are drawn by the browser,
+     not by us, and the browser picks their colour from `color-scheme` — which
+     it reads off the OS unless a page says otherwise. Our theme only sets CSS
+     variables and a `.dark` class, so the browser never learned which way the
+     app is facing: in dark mode it kept painting the dark glyph, which
+     disappeared into the dark field. The mismatch runs both ways — app in light
+     mode on a dark OS gave a white glyph on a white field — so both states are
+     declared rather than only the dark one.
+
+     Scoped to these controls on purpose. Setting `color-scheme` on the root
+     would also repaint scrollbars, autofill and every other native widget in
+     one go, which is a much wider change than this fix needs. */
+  html.dark input[type="date"],
+  html.dark input[type="time"],
+  html.dark input[type="datetime-local"] {
+    color-scheme: dark;
+  }
+  html:not(.dark) input[type="date"],
+  html:not(.dark) input[type="time"],
+  html:not(.dark) input[type="datetime-local"] {
+    color-scheme: light;
+  }
+
   /* Prevent iOS Safari from auto-zooming when a date/time field is focused —
      it zooms whenever the control's font-size is below 16px, which makes the
      native picker overlap and mis-render on mobile. */

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Loader2,
@@ -31,6 +31,7 @@ import { assessmentService } from '@/services/assessment.service';
 import { promptService } from '@/services/prompt.service';
 import { ROUTES } from '@/config/routes';
 import { nowDateTimeLocal, isPast } from '@/utils/datetime.utils';
+import { usePersistentState } from '@/hooks/usePersistentState';
 import { parseQuestionPaper } from '@/utils/question-paper.utils';
 import {
   clampMinutesPerQuestion,
@@ -72,6 +73,34 @@ function hasExamAlready(status: JobApplicationStatus): boolean {
 interface FileState {
   file: File | null;
   source: 'ai' | 'upload' | null;
+}
+
+/**
+ * Every serialisable field on this form is persisted (see the `assign:` keys
+ * below), so leaving for another module and coming back no longer wipes the
+ * half-filled form. Keys are namespaced and sessionStorage-backed: per tab, and
+ * gone when the tab closes.
+ */
+const KEY = 'assign:';
+
+/**
+ * The two question papers, held outside React.
+ *
+ * A File cannot go into sessionStorage, and an AI-generated paper costs a long
+ * backend call — losing it was the expensive half of the bug. This cache
+ * outlives the component, which is the thing that unmounts when the admin
+ * visits another module, without pretending to outlive the tab. A real reload
+ * still drops it, which is what the unload guard further down warns about.
+ */
+const paperCache: { aptitude: FileState; coding: FileState } = {
+  aptitude: { file: null, source: null },
+  coding: { file: null, source: null },
+};
+
+/** Wipe the retained form after a successful assign, so the next one starts clean. */
+function clearPaperCache(): void {
+  paperCache.aptitude = { file: null, source: null };
+  paperCache.coding = { file: null, source: null };
 }
 
 /**
@@ -134,13 +163,23 @@ export function AssignAssessmentPage() {
   // Candidates to pre-select once they load (passed from the Candidate page).
   const pendingEmailsRef = useRef<string[] | null>(null);
   const preselectAppliedRef = useRef(false);
+  // False until the job-change effect has run once, so its first (mount) pass
+  // can be told apart from an actual change of job.
+  const mountedPrefixRef = useRef(false);
 
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
-  const [selectedPrefix, setSelectedPrefix] = useState('');
+  const [selectedPrefix, setSelectedPrefix] = usePersistentState(`${KEY}jobPrefix`, '');
   const [candidates, setCandidates] = useState<JobApplicationDTO[]>([]);
-  const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set());
-  const [startTime, setStartTime] = useState('');
-  const [deadline, setDeadline] = useState('');
+  // Persisted as an array — a Set does not survive JSON. The Set is what the
+  // rest of the screen reads, and it is derived rather than mirrored so the two
+  // can never drift apart.
+  const [selectedEmailList, setSelectedEmailList] = usePersistentState<string[]>(
+    `${KEY}selectedEmails`,
+    []
+  );
+  const selectedEmails = useMemo(() => new Set(selectedEmailList), [selectedEmailList]);
+  const [startTime, setStartTime] = usePersistentState(`${KEY}startTime`, '');
+  const [deadline, setDeadline] = usePersistentState(`${KEY}deadline`, '');
   // Floor for the date-time pickers (computed once on mount).
   const [minDateTime] = useState(nowDateTimeLocal);
 
@@ -155,23 +194,71 @@ export function AssignAssessmentPage() {
       (!!startTime && new Date(deadline).getTime() <= new Date(startTime).getTime()));
 
   // Checkbox state for assessment types
-  const [aptitudeChecked, setAptitudeChecked] = useState(false);
-  const [codingChecked, setCodingChecked] = useState(false);
+  const [aptitudeChecked, setAptitudeChecked] = usePersistentState(`${KEY}aptitudeChecked`, false);
+  const [codingChecked, setCodingChecked] = usePersistentState(`${KEY}codingChecked`, false);
 
-  // File state for each type
-  const [aptitudeFile, setAptitudeFile] = useState<FileState>({ file: null, source: null });
-  const [codingFile, setCodingFile] = useState<FileState>({ file: null, source: null });
+  // File state for each type, seeded from whatever survived the last visit.
+  const [aptitudeFile, setAptitudeFile] = useState<FileState>(() => paperCache.aptitude);
+  const [codingFile, setCodingFile] = useState<FileState>(() => paperCache.coding);
+
+  useEffect(() => {
+    paperCache.aptitude = aptitudeFile;
+  }, [aptitudeFile]);
+
+  useEffect(() => {
+    paperCache.coding = codingFile;
+  }, [codingFile]);
+
+  /**
+   * A reload is the one exit this screen cannot cover on its own: the fields
+   * come back from sessionStorage, the attached paper cannot, and regenerating
+   * one is a minutes-long AI call. So warn — but only when there is a paper to
+   * lose. An unconditional guard on a form this long would nag on every
+   * refresh, and people stop reading a prompt that always fires.
+   */
+  const hasAttachedPaper = !!aptitudeFile.file || !!codingFile.file;
+
+  useEffect(() => {
+    if (!hasAttachedPaper) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      // Browsers show their own wording and ignore this string, but setting it
+      // is still what makes the prompt appear at all.
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [hasAttachedPaper]);
 
   // Per-question time, and the question counts used to show the resulting total.
-  const [aptitudeMinutes, setAptitudeMinutes] = useState(defaultMinutesPerQuestion('APTITUDE'));
-  const [codingMinutes, setCodingMinutes] = useState(defaultMinutesPerQuestion('CODING'));
+  const [aptitudeMinutes, setAptitudeMinutes] = usePersistentState(
+    `${KEY}aptitudeMinutes`,
+    defaultMinutesPerQuestion('APTITUDE')
+  );
+  const [codingMinutes, setCodingMinutes] = usePersistentState(
+    `${KEY}codingMinutes`,
+    defaultMinutesPerQuestion('CODING')
+  );
   // Held as strings so the field can be emptied while typing; validated on submit.
-  const [aptitudePassMark, setAptitudePassMark] = useState(String(DEFAULT_PASS_PERCENTAGE));
-  const [codingPassMark, setCodingPassMark] = useState(String(DEFAULT_PASS_PERCENTAGE));
+  const [aptitudePassMark, setAptitudePassMark] = usePersistentState(
+    `${KEY}aptitudePassMark`,
+    String(DEFAULT_PASS_PERCENTAGE)
+  );
+  const [codingPassMark, setCodingPassMark] = usePersistentState(
+    `${KEY}codingPassMark`,
+    String(DEFAULT_PASS_PERCENTAGE)
+  );
+  // Derived from the paper itself, so they come back with the cached file.
   const [aptitudeCount, setAptitudeCount] = useState<number | null>(null);
   const [codingCount, setCodingCount] = useState<number | null>(null);
-  const [aptitudeCountManual, setAptitudeCountManual] = useState('');
-  const [codingCountManual, setCodingCountManual] = useState('');
+  const [aptitudeCountManual, setAptitudeCountManual] = usePersistentState(
+    `${KEY}aptitudeCountManual`,
+    ''
+  );
+  const [codingCountManual, setCodingCountManual] = usePersistentState(
+    `${KEY}codingCountManual`,
+    ''
+  );
   /** Paper being exported, with the heading its document should carry. */
   const [exporting, setExporting] = useState<{ file: File; title: string } | null>(null);
 
@@ -202,7 +289,7 @@ export function AssignAssessmentPage() {
       pendingEmailsRef.current = navState.emails ?? null;
       setSelectedPrefix(navState.jobPrefix);
     }
-  }, [location.state]);
+  }, [location.state, setSelectedPrefix]);
 
   useEffect(() => {
     if (selectedPrefix) {
@@ -210,8 +297,14 @@ export function AssignAssessmentPage() {
     } else {
       setCandidates([]);
     }
-    setSelectedEmails(new Set());
-  }, [selectedPrefix]);
+    // Only on a real job change. On mount this effect also runs, and clearing
+    // there would throw away the very selection that was just restored from the
+    // last visit — the bug this screen is being fixed for.
+    if (mountedPrefixRef.current) {
+      setSelectedEmailList([]);
+    }
+    mountedPrefixRef.current = true;
+  }, [selectedPrefix, setSelectedEmailList]);
 
   /**
    * Prompt types configured for a job, upper-cased.
@@ -290,9 +383,9 @@ export function AssignAssessmentPage() {
         toSelect.add(c.email);
       }
     });
-    if (toSelect.size > 0) setSelectedEmails(toSelect);
+    if (toSelect.size > 0) setSelectedEmailList(Array.from(toSelect));
     pendingEmailsRef.current = null;
-  }, [candidates]);
+  }, [candidates, setSelectedEmailList]);
 
   // Clear file when checkbox unchecked
   useEffect(() => {
@@ -354,6 +447,12 @@ export function AssignAssessmentPage() {
       const res = await jobApplicationService.getByPrefix(selectedPrefix);
       const eligible = (res.data ?? []).filter((c) => ASSIGNABLE_STATUSES.has(c.status));
       setCandidates(eligible);
+      // A selection restored from an earlier visit can name someone who has
+      // since been assigned and dropped off this list. They would be invisible
+      // on screen and still go out in the payload, so keep only who the fresh
+      // list still offers.
+      const offered = new Set(eligible.map((c) => c.email));
+      setSelectedEmailList((prev) => prev.filter((email) => offered.has(email)));
     } catch {
       // Error toast auto-handled by interceptor
     } finally {
@@ -362,19 +461,16 @@ export function AssignAssessmentPage() {
   }
 
   function toggleEmail(email: string) {
-    setSelectedEmails((prev) => {
-      const next = new Set(prev);
-      if (next.has(email)) next.delete(email);
-      else next.add(email);
-      return next;
-    });
+    setSelectedEmailList((prev) =>
+      prev.includes(email) ? prev.filter((e) => e !== email) : [...prev, email]
+    );
   }
 
   function toggleAll() {
     if (selectedEmails.size === candidates.length) {
-      setSelectedEmails(new Set());
+      setSelectedEmailList([]);
     } else {
-      setSelectedEmails(new Set(candidates.map((c) => c.email)));
+      setSelectedEmailList(candidates.map((c) => c.email));
     }
   }
 
@@ -560,8 +656,10 @@ export function AssignAssessmentPage() {
       await assessmentService.assignMultipart(formData);
       showToast(MESSAGES.admin.assign.assigned, 'success');
 
-      // Reset form
-      setSelectedEmails(new Set());
+      // Reset form — including everything retained for the trip to another
+      // module, so the next assign does not open pre-filled with the last one.
+      clearPaperCache();
+      setSelectedEmailList([]);
       setStartTime('');
       setDeadline('');
       setAptitudeChecked(false);

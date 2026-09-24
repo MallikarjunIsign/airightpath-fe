@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Avatar } from '@/components/ui/Avatar';
 import { UserRoleBadges } from './UserRoleBadges';
-import { formatDateTime } from '@/utils/format.utils';
+import { formatServerDateTime } from '@/utils/format.utils';
 import type { UsersDto } from '@/types/user.types';
 
 /**
@@ -81,8 +81,8 @@ export function UserDetailsPanel({
 
       {(user.createdAt || user.updatedAt || user.id !== undefined) && (
         <Section title="Account">
-          {user.createdAt && <Row label="Registered" value={formatDateTime(user.createdAt)} />}
-          {user.updatedAt && <Row label="Last updated" value={formatDateTime(user.updatedAt)} />}
+          {user.createdAt && <Row label="Registered" value={formatServerDateTime(user.createdAt)} />}
+          {user.updatedAt && <Row label="Last updated" value={formatServerDateTime(user.updatedAt)} />}
           {user.id !== undefined && <Row label="User ID" value={String(user.id)} />}
         </Section>
       )}
