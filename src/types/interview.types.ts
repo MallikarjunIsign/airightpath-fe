@@ -18,11 +18,21 @@ export interface InterviewReviewRequest {
   /** Required whenever a result is imposed. */
   overrideReason?: string;
 }
+/**
+ * The five verdicts the grader can return.
+ *
+ * The "lean" pair was missing and `STRONG_NO_HIRE` was invented — the server
+ * has never emitted it. That mattered: `LEAN_HIRE` is a pass on the server
+ * (`PASS_RECOMMENDATIONS`) but fell through the badge's colour check to red,
+ * so a candidate the AI recommended hiring was shown in the same colour as one
+ * it rejected.
+ */
 export type Recommendation =
   | "STRONG_HIRE"
   | "HIRE"
-  | "NO_HIRE"
-  | "STRONG_NO_HIRE";
+  | "LEAN_HIRE"
+  | "LEAN_NO_HIRE"
+  | "NO_HIRE";
 export type CompletionReason =
   | "NATURAL_COMPLETION"
   | "EARLY_TERMINATION_POOR_PERFORMANCE"
@@ -149,11 +159,22 @@ export interface InterviewSchedule {
   summaryReferences?: string;
   assignedAt: string;
   deadlineTime: string;
-  evaluation?: InterviewEvaluation;
+  /**
+   * The graded result, parsed by the server.
+   *
+   * Typed as the shape actually stored — `VoiceEvaluationResult`, not
+   * `InterviewEvaluation`, which describes the candidate-facing summary and
+   * carries fields (`overallFeedback`) that no stored evaluation has.
+   */
+  evaluation?: VoiceEvaluationResult;
   proctoringWarnings?: number;
   warningCount?: number;
   startedAt?: string;
   endedAt?: string;
+  /**
+   * The raw stored JSON. Kept for anything that wants the original text;
+   * prefer `evaluation`, which is the same thing already parsed.
+   */
   evaluationJson?: string;
   completionReason?: CompletionReason;
   /**

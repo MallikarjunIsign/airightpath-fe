@@ -127,9 +127,21 @@ function getCompletionReasonVariant(reason?: CompletionReason): 'success' | 'war
   }
 }
 
+/**
+ * Colour for a recommendation badge.
+ *
+ * Grouped the way the server groups them: STRONG_HIRE, HIRE and LEAN_HIRE are
+ * all passes, the other two are not. LEAN_HIRE previously fell past every
+ * branch to the red default, so a candidate the AI recommended hiring was shown
+ * in the same colour as one it rejected — and the "lean" verdicts are exactly
+ * the ones a reviewer is meant to look at closely, so getting them backwards
+ * was worse than showing nothing.
+ */
 function getRecommendationVariant(recommendation: string): 'success' | 'warning' | 'error' {
   if (recommendation === 'STRONG_HIRE' || recommendation === 'HIRE') return 'success';
-  if (recommendation === 'NO_HIRE') return 'warning';
+  // Both "lean" verdicts are borderline; amber says "read this one" without
+  // pre-judging which way it went.
+  if (recommendation === 'LEAN_HIRE' || recommendation === 'LEAN_NO_HIRE') return 'warning';
   return 'error';
 }
 
