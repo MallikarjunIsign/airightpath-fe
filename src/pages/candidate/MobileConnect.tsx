@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { PROCTORING_CONFIG } from '@/config/proctoring.config';
 import { interviewWsService } from '@/services/interview-ws.service';
 
 export default function MobileConnect() {
@@ -121,8 +122,18 @@ export default function MobileConnect() {
 
     const startStreaming = async () => {
         try {
+            // Audio only on the streaming capture, never on the preview above:
+            // the preview is attached to a video element on this same phone, and
+            // an unmuted one would feed the microphone straight back into it.
+            //
+            // The desktop decides whether to record from this track — it arrives
+            // as an offer, not an instruction — so sending it costs nothing when
+            // the candidate keeps using their laptop microphone.
             const mediaStream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: facingMode }
+                video: { facingMode: facingMode },
+                audio: PROCTORING_CONFIG.mobileCompanion.audio
+                    ? { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+                    : false,
             });
             if (videoRef.current) videoRef.current.srcObject = mediaStream;
             const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });

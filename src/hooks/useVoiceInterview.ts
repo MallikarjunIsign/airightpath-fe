@@ -19,6 +19,29 @@ import type {
   WordTimestamp,
 } from "@/types/interview.types";
 
+/**
+ * The restored transcript, ending on the question now being asked.
+ *
+ * The server's history already ends with that question in the ordinary case —
+ * the candidate was cut off while thinking — so it is replaced rather than
+ * appended to, or the candidate sees it twice. Where the reload landed after an
+ * answer but before the reply reached them, the history ends on their answer
+ * and the new question genuinely belongs on the end.
+ *
+ * `currentTurn` is preferred over the stored copy because it carries the coding
+ * flag and is the exact text being spoken aloud.
+ */
+function withCurrentTurn(
+  history: ConversationEntry[] | null,
+  currentTurn: ConversationEntry,
+): ConversationEntry[] {
+  if (!history?.length) return [currentTurn];
+  const lastWasQuestion = history[history.length - 1].role === "interviewer";
+  return lastWasQuestion
+    ? [...history.slice(0, -1), currentTurn]
+    : [...history, currentTurn];
+}
+
 export function useVoiceInterview() {
   // State
   const [state, setState] = useState<VoiceInterviewState>("pre-start");
@@ -374,6 +397,32 @@ export function useVoiceInterview() {
   );
 
   // Start interview
+  /**
+   * The transcript the server has for this interview, or null if it cannot be
+   * read.
+   *
+   * <p>Null rather than throwing: a resumed interview with no history on screen
+   * is a poor experience, but an interview that refuses to restart because a
+   * history fetch failed is a lost one. The candidate carries on either way.</p>
+   */
+  const loadConversationHistory = useCallback(
+    async (id: number): Promise<ConversationEntry[] | null> => {
+      try {
+        const { data } = await aiService.resumeVoiceInterview(id);
+        if (!data?.hasActiveSession || !data.conversationHistory?.length) return null;
+        return data.conversationHistory.map((entry) => ({
+          role: entry.role === "candidate" ? "candidate" : "interviewer",
+          content: detectAndCleanCodingTag(entry.content).cleanText,
+          timestamp: entry.timestamp,
+        }));
+      } catch (err) {
+        console.warn("Could not load the earlier transcript", err);
+        return null;
+      }
+    },
+    [detectAndCleanCodingTag],
+  );
+
   const startInterview = useCallback(
     async (request: StartInterviewRequest) => {
       try {
@@ -401,15 +450,26 @@ export function useVoiceInterview() {
           setLastQuestionAudio(response.firstQuestionAudio);
         }
 
-        // Add first question to conversation
-        setConversation([
-          {
-            role: "interviewer",
-            content: firstQuestion,
-            timestamp: new Date().toISOString(),
-            isCodingQuestion: isCoding,
-          },
-        ]);
+        // The turn they are being asked now — the tail of the transcript on a
+        // resume, the whole of it on a fresh start.
+        const currentTurn: ConversationEntry = {
+          role: "interviewer",
+          content: firstQuestion,
+          timestamp: new Date().toISOString(),
+          isCodingQuestion: isCoding,
+        };
+
+        if (response.resumed) {
+          // Everything said before the interruption, put back on screen. The
+          // server kept it all along; only this browser had lost it, and a
+          // candidate coming back to a blank screen has no way to know that.
+          const history = await loadConversationHistory(response.scheduleId);
+          setConversation(withCurrentTurn(history, currentTurn));
+          setQuestionsAsked(response.questionsAsked ?? 0);
+        } else {
+          setConversation([currentTurn]);
+          setQuestionsAsked(0);
+        }
 
         interviewWsService.disconnect();
         // Connect WebSocket with both scheduleId and JWT token
@@ -450,6 +510,9 @@ export function useVoiceInterview() {
         }
 
         setState("active");
+        // Returned rather than exposed as state: the caller is already awaiting
+        // this, and a flag it has to watch for separately is a flag it can miss.
+        return { resumed: !!response.resumed };
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
         console.error("Failed to start interview:", err);
@@ -459,9 +522,10 @@ export function useVoiceInterview() {
             "Failed to start interview",
         );
         setState("error");
+        return null;
       }
     },
-    [setupSubscriptions],
+    [setupSubscriptions, loadConversationHistory, detectAndCleanCodingTag],
   );
 
   // Start answering (recording)
@@ -747,6 +811,12 @@ export function useVoiceInterview() {
     isPlaying: audioPlayback.isPlaying,
     amplitude: audioPlayback.amplitude,
     audioLevel: audioStreaming.audioLevel,
+    /**
+     * Record the next answer from this stream rather than the device
+     * microphone. Pass null to go back to the device. Takes effect on the next
+     * answer, never mid-recording.
+     */
+    setExternalAudioSource: audioStreaming.setExternalAudioSource,
 
     // Actions
     startInterview,

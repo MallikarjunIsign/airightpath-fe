@@ -1,5 +1,23 @@
 export type AttemptStatus = "NOT_ATTEMPTED" | "IN_PROGRESS" | "COMPLETED";
 export type InterviewResult = "PENDING" | "PASSED" | "FAILED";
+
+/** A person's decision on a finished interview. */
+export interface InterviewReviewDTO {
+  reviewerEmail?: string;
+  notes?: string;
+  /** The result they imposed, or absent where the AI's stands. */
+  overriddenResult?: InterviewResult;
+  overrideReason?: string;
+  reviewedAt?: string;
+}
+
+export interface InterviewReviewRequest {
+  notes?: string;
+  /** Null leaves the AI's result standing. */
+  overriddenResult: InterviewResult | null;
+  /** Required whenever a result is imposed. */
+  overrideReason?: string;
+}
 export type Recommendation =
   | "STRONG_HIRE"
   | "HIRE"
@@ -65,6 +83,44 @@ export const INTERVIEW_ROUND_LABELS: Record<InterviewRound, string> = {
   L3_BEHAVIORAL: 'L3 — Behavioural',
 };
 
+/** How hard a round is pitched before the candidate has answered anything. */
+export type InterviewDifficulty = 'FOUNDATIONAL' | 'STANDARD' | 'ADVANCED';
+
+export const INTERVIEW_DIFFICULTY_LABELS: Record<InterviewDifficulty, string> = {
+  FOUNDATIONAL: 'Foundational',
+  STANDARD: 'Standard',
+  ADVANCED: 'Advanced',
+};
+
+export const INTERVIEW_DIFFICULTY_HINTS: Record<InterviewDifficulty, string> = {
+  FOUNDATIONAL: 'Core concepts and everyday usage. Assumes little commercial experience.',
+  STANDARD: 'Competent working level — what and why, and the common pitfalls.',
+  ADVANCED: 'Depth, trade-offs and scale. No time spent on definitions.',
+};
+
+/**
+ * What a round's interview actually runs on, once the job's template has been
+ * laid over the platform defaults.
+ */
+export interface EffectiveInterviewTemplate {
+  minQuestions: number;
+  maxQuestions: number;
+  baselineDifficulty: InterviewDifficulty;
+  adaptiveDifficulty: boolean;
+  /** False when none of this was set by the job and it is all platform defaults. */
+  configured: boolean;
+}
+
+export interface InterviewTemplateRequest {
+  jobPrefix: string;
+  round: InterviewRound;
+  /** Null clears the override and goes back to the platform default. */
+  minQuestions: number | null;
+  maxQuestions: number | null;
+  baselineDifficulty: InterviewDifficulty;
+  adaptiveDifficulty: boolean;
+}
+
 export interface BulkInterviewAssignRequest {
   jobPrefix: string;
   emails: string[];
@@ -108,6 +164,12 @@ export interface InterviewSchedule {
   round?: InterviewRound;
   /** Server-rendered label for `round`; prefer it over mapping the enum. */
   roundLabel?: string;
+  /** Whether the AI's verdict was flagged for a person to look at. */
+  needsHumanReview?: boolean;
+  /** The result a reviewer imposed, or absent where the AI's stands. */
+  overriddenResult?: InterviewResult;
+  /** Who overturned it. */
+  overriddenBy?: string;
 }
 
 export interface StartInterviewRequest {
@@ -175,6 +237,17 @@ export interface VoiceStartResponse {
   firstQuestion: string;
   interviewerName: string;
   firstQuestionAudio: string | null; // base64 mp3
+  /**
+   * True when the server picked up an interview already under way.
+   *
+   * The server always resumed correctly — it keeps the transcript and the
+   * question count — but the browser could not tell a resume from a fresh
+   * start, so it rebuilt the screen empty and the candidate saw an interview
+   * that had apparently lost everything they had said.
+   */
+  resumed?: boolean;
+  /** Turns taken so far, so a resumed screen shows the real position. */
+  questionsAsked?: number;
 }
 
 export interface VoiceSessionStatus {
@@ -241,6 +314,18 @@ export interface VoiceEvaluationResult {
   summary: string;
   strengths: string[];
   areasForImprovement: string[];
+  /**
+   * How sure the grader was of its own verdict, 0.0 to 1.0.
+   *
+   * Not `speechAnalysis.confidenceScore`, which is how confident the
+   * *candidate* sounded. The two being named alike is a trap: one is evidence
+   * about the person, the other is a caveat on the machine's reading of them.
+   */
+  confidence?: number;
+  /** Whether a person should look at this before it is acted on. */
+  needsHumanReview?: boolean;
+  /** Why it was flagged. Empty when it was not. */
+  reviewReasons?: string[];
 }
 
 export interface VoiceCategoryScore {

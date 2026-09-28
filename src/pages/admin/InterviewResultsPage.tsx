@@ -167,6 +167,41 @@ function WarningsCell({ interview }: Readonly<{ interview: InterviewSchedule }>)
   );
 }
 
+/**
+ * The result that stands, and whether a person put it there.
+ *
+ * A screen showing only the final answer cannot say the machine was overruled,
+ * which is the part someone opening this next actually needs to know — so the
+ * AI's own verdict stays visible beside it rather than being replaced.
+ */
+function ResultCell({ interview }: Readonly<{ interview: InterviewSchedule }>) {
+  const overridden = interview.overriddenResult;
+  if (!overridden) {
+    return (
+      <Badge variant={getResultVariant(interview.interviewResult)} size="sm">
+        {interview.interviewResult}
+      </Badge>
+    );
+  }
+  return (
+    <span className="flex items-center gap-1.5">
+      <Badge variant={getResultVariant(overridden)} size="sm">
+        {overridden}
+      </Badge>
+      <span
+        className="text-[10px] uppercase tracking-wider text-[var(--textTertiary)]"
+        title={
+          interview.overriddenBy
+            ? `Overridden by ${interview.overriddenBy}. The AI concluded ${interview.interviewResult.toLowerCase()}.`
+            : `Overridden. The AI concluded ${interview.interviewResult.toLowerCase()}.`
+        }
+      >
+        overridden
+      </span>
+    </span>
+  );
+}
+
 function CompletionCell({ interview }: Readonly<{ interview: InterviewSchedule }>) {
   if (!interview.completionReason) {
     return <span className="text-sm text-[var(--textTertiary)]">--</span>;
@@ -520,10 +555,11 @@ export function InterviewResultsPage() {
                         <Badge variant={getStatusVariant(interview.attemptStatus)} size="sm">
                           {interview.attemptStatus.replace(/_/g, ' ')}
                         </Badge>
-                        <Badge variant={getResultVariant(interview.interviewResult)} size="sm">
-                          {interview.interviewResult}
-                        </Badge>
+                        <ResultCell interview={interview} />
                         <CompletionCell interview={interview} />
+                        {interview.needsHumanReview && !interview.overriddenResult && (
+                          <Badge variant="warning" size="sm">Needs review</Badge>
+                        )}
                       </div>
 
                       <dl className="grid grid-cols-3 gap-x-3 gap-y-2">

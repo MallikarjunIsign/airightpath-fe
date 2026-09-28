@@ -83,6 +83,17 @@ export function InterviewPage() {
   const mobileVideoRef = useRef<HTMLVideoElement>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+  /** Whether the paired phone is offering its microphone as well as its camera. */
+  const [mobileAudioAvailable, setMobileAudioAvailable] = useState(false);
+  /**
+   * Which microphone answers are recorded from.
+   *
+   * Starts on this device and stays there unless the candidate says otherwise.
+   * The phone is often on a stand across the room for the second camera angle,
+   * where it is the worse microphone, not the better one — so switching to it
+   * automatically would quietly degrade the interview it is meant to improve.
+   */
+  const [micSource, setMicSource] = useState<'device' | 'phone'>('device');
 
   // Question timer
   const questionTimer = useQuestionTimer({
@@ -620,10 +631,17 @@ export function InterviewPage() {
     peerConnectionRef.current = pc;
 
     pc.ontrack = (event) => {
-      console.log('Mobile track received', event.streams[0]);
+      console.log('Mobile track received', event.track.kind, event.streams[0]);
       if (event.streams[0]) {
         setRemoteStream(event.streams[0]);
         setMobileConnected(true);
+      }
+      // Tracked separately because the stream object is the same one on both
+      // the video and the audio track's arrival — React sees no change, so
+      // reading getAudioTracks() off it during render would never update.
+      if (event.track.kind === 'audio') {
+        setMobileAudioAvailable(true);
+        event.track.addEventListener('ended', () => setMobileAudioAvailable(false));
       }
     };
 
@@ -706,6 +724,19 @@ export function InterviewPage() {
     };
   }, [mobileToken, wsConnected, voiceInterview.isWsConnected]);
 
+  /**
+   * Point the recorder at whichever microphone the candidate picked.
+   *
+   * Also the recovery path: if the phone drops mid-interview,
+   * `mobileAudioAvailable` goes false and this hands the recorder back to the
+   * device microphone before the next answer, rather than letting them speak
+   * into a track that has ended.
+   */
+  useEffect(() => {
+    const usePhone = micSource === 'phone' && mobileAudioAvailable && remoteStream;
+    voiceInterview.setExternalAudioSource(usePhone ? remoteStream : null);
+  }, [micSource, mobileAudioAvailable, remoteStream, voiceInterview.setExternalAudioSource]);
+
   // Effect to attach mobile stream when connected and video ref is available
   useEffect(() => {
     if (remoteStream && mobileVideoRef.current) {
@@ -761,7 +792,7 @@ export function InterviewPage() {
       // The models are a multi-megabyte download; fetching them for a check
       // that is switched off spends the candidate's bandwidth on nothing.
       if (PROCTORING_CONFIG.eyeDetection.enabled) await loadModels();
-      await voiceInterview.startInterview({
+      const started = await voiceInterview.startInterview({
         email: user.email,
         jobPrefix: interview.jobPrefix,
         // The interview this screen is showing. Without it the server picked
@@ -770,6 +801,13 @@ export function InterviewPage() {
         scheduleId: interview.id,
         mobileToken: mobileToken || undefined,
       });
+      // Said out loud, because the candidate's own read on a reload is that
+      // they have lost the interview. The transcript reappearing behind the
+      // toast is the proof, but the reassurance should not depend on them
+      // noticing it.
+      if (started?.resumed) {
+        showToast(MESSAGES.interview.resumed, 'info');
+      }
       startGlobalTimer();
       // The camera is opened when anything wants it: the recording, the face
       // check, or the plain requirement that it be on. Where nothing does, the
@@ -1049,8 +1087,8 @@ export function InterviewPage() {
                   <div className="flex justify-between"><span>DevTools</span><span className="font-mono">{devToolsCount}</span></div>
                 </div>
                 <p className="mt-2 text-[11px] text-[var(--textSecondary)] border-t border-[var(--border)] pt-2">
-                  {APP_CONFIG.INTERVIEW_MAX_PROCTORING_WARNINGS} warnings end the interview. Do not
-                  reload this page — the interview cannot be resumed.
+                  {APP_CONFIG.INTERVIEW_MAX_PROCTORING_WARNINGS} warnings end the interview. Avoid
+                  reloading — if you do, reopen the interview and it picks up where you left off.
                 </p>
               </div>
             </div>
@@ -1374,6 +1412,36 @@ export function InterviewPage() {
               <div className="mt-2 flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                 <span className="text-[10px] text-emerald-500 font-semibold">SECURE CONNECTION ACTIVE</span>
+              </div>
+            )}
+
+            {/* Offered only once the phone's microphone has actually arrived —
+                a control for a source that is not there yet is a control that
+                does nothing when pressed. Disabled mid-answer because the swap
+                lands on the next recording, and a switch that silently takes
+                effect later reads as a switch that failed. */}
+            {mobileAudioAvailable && (
+              <div className="mt-2 flex items-center justify-between gap-2 rounded-lg bg-[var(--surface1)] px-2 py-1.5">
+                <span className="text-[10px] font-medium text-[var(--textSecondary)]">
+                  Microphone
+                </span>
+                <div className="flex items-center gap-1">
+                  {(['device', 'phone'] as const).map((source) => (
+                    <button
+                      key={source}
+                      type="button"
+                      disabled={voiceInterview.isRecording}
+                      onClick={() => setMicSource(source)}
+                      className={`rounded-md px-2 py-0.5 text-[10px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                        micSource === source
+                          ? 'bg-[var(--primary)] text-white'
+                          : 'text-[var(--textSecondary)] hover:bg-[var(--surface2)]'
+                      }`}
+                    >
+                      {source === 'device' ? 'This device' : 'Phone'}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>

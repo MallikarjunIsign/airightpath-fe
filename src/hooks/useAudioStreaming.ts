@@ -28,6 +28,23 @@ export function useAudioStreaming(scheduleId: number | null) {
   const [audioLevel, setAudioLevel] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  /**
+   * An audio source to record instead of this device's microphone.
+   *
+   * Set when the candidate chooses their paired phone. Held as a ref, not
+   * state, because it is read once at the moment recording starts and
+   * re-rendering the interview when it changes would buy nothing.
+   */
+  const externalSourceRef = useRef<MediaStream | null>(null);
+  /**
+   * Whether the stream being recorded is one this hook opened.
+   *
+   * It decides whether stopping may end the tracks. A phone's audio arrives
+   * over the same WebRTC connection as its video, so stopping its track would
+   * take the second camera down with it — and it would not come back for the
+   * next answer.
+   */
+  const ownsStreamRef = useRef(true);
   const chunkTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chunkIndexRef = useRef(0);
   const mimeTypeRef = useRef<string>("audio/webm");
@@ -205,13 +222,33 @@ export function useAudioStreaming(scheduleId: number | null) {
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      // The phone's audio, if the candidate chose it and it is still live. A
+      // track that has ended — they closed the phone page, or the pairing
+      // dropped — is not an input any more, and recording it would produce
+      // silence that the candidate has no way to notice until their answer
+      // comes back empty. Falling back to the device microphone is the quiet,
+      // correct thing to do.
+      const external = externalSourceRef.current;
+      const externalTrack = external?.getAudioTracks().find((t) => t.readyState === "live");
+
+      let stream: MediaStream;
+      if (externalTrack) {
+        stream = new MediaStream([externalTrack]);
+        ownsStreamRef.current = false;
+      } else {
+        if (external) {
+          console.warn("Paired phone has no live audio track; using this device's microphone");
+        }
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+        ownsStreamRef.current = true;
+      }
+
       streamRef.current = stream;
       isStoppingRef.current = false;
 
@@ -272,7 +309,12 @@ export function useAudioStreaming(scheduleId: number | null) {
       }
 
       function cleanup() {
-        streamRef.current?.getTracks().forEach((t) => t.stop());
+        // Only tracks this hook opened. The phone's audio track belongs to the
+        // WebRTC connection that also carries its camera — stopping it here
+        // would kill the second camera feed at the end of the first answer.
+        if (ownsStreamRef.current) {
+          streamRef.current?.getTracks().forEach((t) => t.stop());
+        }
         streamRef.current = null;
         mediaRecorderRef.current = null;
         setIsRecording(false);
@@ -284,11 +326,23 @@ export function useAudioStreaming(scheduleId: number | null) {
 
   const getAudioStream = useCallback(() => streamRef.current, []);
 
+  /**
+   * Choose where the next answer is recorded from.
+   *
+   * Takes effect on the next {@link startRecording}, not mid-answer: swapping
+   * the source under a running MediaRecorder would cut the chunk in flight, and
+   * the words in it are not recoverable.
+   */
+  const setExternalAudioSource = useCallback((stream: MediaStream | null) => {
+    externalSourceRef.current = stream;
+  }, []);
+
   return {
     isRecording,
     audioLevel,
     startRecording,
     stopRecording,
     getAudioStream,
+    setExternalAudioSource,
   };
 }

@@ -6,6 +6,8 @@ import type {
   BulkInterviewAssignRequest,
   InterviewStats,
   InterviewRound,
+  InterviewReviewDTO,
+  InterviewReviewRequest,
   ProctoringEvent,
 } from "@/types/interview.types";
 
@@ -42,6 +44,19 @@ export interface VoiceConversationEntryDTO {
    * it is reading a different transcript than the one that was scored.
    */
   codeOutput?: string;
+  /** The interviewer's own 0-10 read on a candidate turn, if it rated one. */
+  answerScore?: number;
+  /** The evaluation category an interviewer turn was asking about. */
+  topic?: string;
+  /** Whether an interviewer turn opened new ground, pressed, or re-asked. */
+  turnKind?: 'NEW_QUESTION' | 'FOLLOW_UP' | 'REPHRASE';
+  /**
+   * Set on a candidate turn that tried to give the interviewer instructions —
+   * "ignore your rules", "score me 10". The attempt has no effect on the
+   * interview, but a reviewer should not have to spot it themselves in the
+   * middle of a long transcript.
+   */
+  injectionSuspected?: boolean;
   timestamp: string;
 }
 
@@ -133,6 +148,30 @@ export const interviewService = {
   },
 
   // Item 16: Get conversation transcript
+  /**
+   * A reviewer's decision on an interview, or null when nobody has looked yet.
+   *
+   * The server answers 204 for "not reviewed", which axios surfaces as an empty
+   * body — mapped to null here so callers do not have to tell an absent review
+   * apart from one with empty notes.
+   */
+  async getReview(scheduleId: number, opts?: SilentOpts) {
+    const res = await api.get<InterviewReviewDTO | ''>(
+      ENDPOINTS.INTERVIEWS.REVIEW(scheduleId),
+      { ...(opts?.silent ? { _skipErrorToast: true } : {}) } as never,
+    );
+    return res.data && typeof res.data === 'object' ? res.data : null;
+  },
+
+  /** Save notes, and a result override if the reviewer is changing it. */
+  saveReview(scheduleId: number, body: InterviewReviewRequest, opts?: SilentOpts) {
+    return api.post<InterviewReviewDTO>(
+      ENDPOINTS.INTERVIEWS.REVIEW(scheduleId),
+      body,
+      { ...(opts?.silent ? { _skipErrorToast: true } : {}) } as never,
+    );
+  },
+
   getConversation(scheduleId: number) {
     return api.get<VoiceConversationEntryDTO[]>(
       ENDPOINTS.INTERVIEW_ADMIN.CONVERSATION(scheduleId),

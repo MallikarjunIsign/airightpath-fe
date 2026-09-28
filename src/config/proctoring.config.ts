@@ -171,6 +171,21 @@ export const PROCTORING_CONFIG = {
    */
   mobileCompanion: {
     required: parseBool(env.VITE_PROCTORING_MOBILE_REQUIRED, false),
+    /**
+     * Whether the paired phone also offers its microphone as an input.
+     *
+     * A laptop's built-in microphone is often the worst part of an interview:
+     * far from the candidate, close to the fan, and pointing at the screen. The
+     * phone is already paired, already in the room and has a much better one.
+     * With this on, the phone sends an audio track alongside its video and the
+     * candidate can answer through it instead.
+     *
+     * Off by default, and never automatic even when on. The phone may be across
+     * the room on a stand, where switching to it silently would make every
+     * answer distant and unintelligible — with the candidate given no reason
+     * why. They choose, and the device microphone stays the default.
+     */
+    audio: parseBool(env.VITE_PROCTORING_MOBILE_AUDIO_ENABLED, false),
   },
 } as const;
 

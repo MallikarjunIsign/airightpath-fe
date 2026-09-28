@@ -15,6 +15,7 @@ import { extractApiError } from '@/services/api.service';
 import { MESSAGES } from '@/config/messages';
 import type { JobPostDTO } from '@/types/job.types';
 import type { EvaluationCategory } from '@/types/interview.types';
+import { InterviewRoundSettingsPanel } from '@/components/admin/InterviewRoundSettingsPanel';
 
 function promptTypeLabels(prompts: { promptType: string }[]): string[] {
   const labels = new Set<string>();
@@ -314,7 +315,7 @@ export function JobPromptPage() {
       setEvaluationInstructions(summaryMatch?.prompt ?? '');
 
       try {
-        const catRes = await promptService.getEvaluationCategories(sourcePrefix, { silent: true });
+        const catRes = await promptService.getEvaluationCategories(sourcePrefix, undefined, { silent: true });
         const cats = catRes.data ?? [];
         if (cats.length > 0) {
           setCategories(cats.map(({ categoryName, weight, description }) => ({ categoryName, weight, description })));
@@ -791,6 +792,8 @@ export function JobPromptPage() {
                   <p className="text-sm text-[var(--textSecondary)]">
                     Define the categories and weights used to evaluate candidates.
                     These are injected via <code className="px-1 py-0.5 rounded bg-[var(--surface2)] text-xs font-mono">{'{{categories}}'}</code> into both the interview and evaluation prompts.
+                    {' '}This is the list <em>both</em> rounds use; a round can be scored
+                    differently under &ldquo;Interview setup by round&rdquo; below.
                   </p>
 
                   {/* Category rows */}
@@ -882,6 +885,11 @@ export function JobPromptPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* Budget, pitch and per-round scoring. Below the prompts because it is
+          the less-often-changed half: a recruiter iterates on wording far more
+          than on how many questions the interview asks. */}
+      {selectedPrefix && <InterviewRoundSettingsPanel jobPrefix={selectedPrefix} />}
       </>
       )}
     </div>

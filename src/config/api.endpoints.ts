@@ -110,6 +110,8 @@ export const ENDPOINTS = {
     GET_ACTIVE: "/api/interview/active",
     GET_RESULTS: "/api/interview/results",
     GET_RESULT_DETAIL: (id: number) => `/api/interview/results/${id}`,
+    /** A reviewer's notes and override on one interview. */
+    REVIEW: (id: number) => `/api/interview/${id}/review`,
     // A signed, playable link to a stored recording. The schedule holds an
     // `s3://` reference, which no browser can open.
     RECORDING_LINK: (id: number) => `/api/interview/${id}/recording`,
@@ -154,6 +156,11 @@ export const ENDPOINTS = {
     GET_EVALUATION_CATEGORIES: (prefix: string) =>
       `/api/prompts/evaluation-categories/${prefix}`,
     SAVE_EVALUATION_CATEGORIES: "/api/prompts/evaluation-categories",
+    /** What a round is actually scored on — stored list, or the defaults behind it. */
+    GET_EFFECTIVE_EVALUATION_CATEGORIES: (prefix: string) =>
+      `/api/prompts/evaluation-categories/${prefix}/effective`,
+    GET_INTERVIEW_TEMPLATE: (prefix: string) => `/api/prompts/interview-template/${prefix}`,
+    SAVE_INTERVIEW_TEMPLATE: "/api/prompts/interview-template",
   },
   COMPILE: "/api/compile",
 } as const;

@@ -104,7 +104,11 @@ export function buildProctoringRules(): ProctoringRule[] {
   });
   rules.push({
     icon: <RotateCcw size={18} />,
-    text: 'Do not reload, close, or navigate away from this page once the interview begins. It cannot be resumed from where you left off.',
+    // Still discouraged — leaving is a proctoring event, the clock keeps
+    // running and the camera checks stop — but no longer fatal, so the rule no
+    // longer says it is. Telling a candidate their interview is unrecoverable
+    // when it is not turns a recoverable blip into a panic.
+    text: 'Do not reload, close, or navigate away once the interview begins. If your connection drops or the page reloads, reopen the interview and it picks up where you left off — but leaving is recorded, and the clock keeps running.',
   });
   rules.push({
     icon: <Wifi size={18} />,

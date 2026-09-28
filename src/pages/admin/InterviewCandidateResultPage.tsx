@@ -9,6 +9,7 @@ import {
   Loader2,
   MessageSquare,
   Shield,
+  ShieldAlert,
   Users,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
@@ -19,6 +20,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { RadialScore, SummaryStat, SkillBar } from '@/components/admin/result/ResultPrimitives';
 import { ProctoringCaptures } from '@/components/admin/result/ProctoringCaptures';
 import { CodeBlock } from '@/components/interview/CodeBlock';
+import { InterviewReviewPanel } from '@/components/admin/InterviewReviewPanel';
 import { ROUTES } from '@/config/routes';
 import type { NavOrigin } from '@/components/ui/BackLink';
 import { interviewService, type VoiceConversationEntryDTO } from '@/services/interview.service';
@@ -773,6 +775,14 @@ function RoundDetailPanel({ round }: Readonly<{ round: RoundDetail }>) {
         </CardContent>
       </Card>
 
+      {/* Last, because it is what the reviewer does after reading everything
+          above rather than before. The flags that brought them here are
+          repeated inside it, so the reason is in front of them as they decide. */}
+      <InterviewReviewPanel
+        scheduleId={schedule.id}
+        aiResult={schedule.interviewResult}
+        reviewReasons={resolved?.reviewReasons}
+      />
     </div>
   );
 }
@@ -799,8 +809,16 @@ function BulletList({
   );
 }
 
+/** How a probe turn is labelled. A new question needs no label — it is the norm. */
+const TURN_KIND_LABELS: Partial<Record<NonNullable<VoiceConversationEntryDTO['turnKind']>, string>> =
+  {
+    FOLLOW_UP: 'Follow-up',
+    REPHRASE: 'Rephrased',
+  };
+
 function TranscriptTurn({ entry }: Readonly<{ entry: VoiceConversationEntryDTO }>) {
   const isCandidate = entry.role === 'CANDIDATE';
+  const probeLabel = entry.turnKind ? TURN_KIND_LABELS[entry.turnKind] : undefined;
   return (
     <div className={`flex ${isCandidate ? 'justify-end' : 'justify-start'}`}>
       <div
@@ -810,6 +828,36 @@ function TranscriptTurn({ entry }: Readonly<{ entry: VoiceConversationEntryDTO }
             : 'bg-[var(--surface1)] text-[var(--text)]'
         }`}
       >
+        {/* Why the interview doubled back, and onto what. Without these a
+            reviewer reads three questions on hash maps and cannot tell a
+            deliberate probe from the model losing the thread. */}
+        {!isCandidate && (probeLabel || entry.topic) && (
+          <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+            {probeLabel && (
+              <span className="rounded-full bg-[var(--surface2)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--textSecondary)]">
+                {probeLabel}
+              </span>
+            )}
+            {entry.topic && (
+              <span className="text-[10px] uppercase tracking-wider text-[var(--textTertiary)]">
+                {entry.topic}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* The attempt changed nothing — it was fenced off before it reached
+            the model — but it is evidence about the candidate, and nobody
+            should have to spot it by reading the whole transcript. */}
+        {isCandidate && entry.injectionSuspected && (
+          <div className="mb-1.5 flex items-center gap-1.5 rounded-lg bg-black/25 px-2 py-1">
+            <ShieldAlert size={13} className="flex-shrink-0 text-white/90" />
+            <span className="text-[11px] font-medium text-white/90">
+              Tried to instruct the interviewer — ignored
+            </span>
+          </div>
+        )}
+
         <p className="whitespace-pre-wrap text-sm">{entry.content}</p>
 
         {isCandidate && entry.codeContent && (
@@ -841,6 +889,12 @@ function TranscriptTurn({ entry }: Readonly<{ entry: VoiceConversationEntryDTO }
             <span className="text-xs text-white/60">
               {Math.round(entry.confidenceScore)}% confidence
             </span>
+          )}
+          {/* The interviewer's read on this answer, and the one number here
+              that is about whether it was right rather than how it sounded.
+              It is what the next question's difficulty was set from. */}
+          {isCandidate && entry.answerScore != null && (
+            <span className="text-xs font-medium text-white/80">{entry.answerScore}/10</span>
           )}
         </div>
       </div>

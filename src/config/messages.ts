@@ -115,6 +115,7 @@ export const MESSAGES = {
     endingConsecutiveUnanswered: 'Interview ending due to consecutive unanswered questions.',
     timeUp: 'Interview time is up. Ending interview.',
     screenShareStopped: 'Screen sharing stopped. This has been logged.',
+    resumed: 'Picking up where you left off — your earlier answers are saved.',
     fullscreenExit: (count: number) =>
       `Fullscreen exit detected (${count}). Please return to fullscreen.`,
     faceNotDetected: 'Face not detected. Please stay in front of the camera.',
