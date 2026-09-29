@@ -1,3 +1,19 @@
+/**
+ * One path segment, encoded.
+ *
+ * <p>Job prefixes and emails go into the path on a dozen endpoints, and they
+ * were interpolated raw. A job created with the prefix `DEV-2026/29` produced
+ * the code `DEV-2026/29-055`, whose slash split one segment into two: the
+ * route stopped matching and every lookup for that job answered 404 with
+ * nothing on screen to say why.</p>
+ *
+ * <p>Encoding is the client's half. A slash specifically also needs the data
+ * fixed — Tomcat rejects `%2F` in a path by default — which is why the prefix
+ * is now validated at creation. This stops everything else: spaces, `#`, `?`,
+ * `+` in an email.</p>
+ */
+const seg = (value: string): string => encodeURIComponent(value);
+
 export const ENDPOINTS = {
   AUTH: {
     LOGIN: "/api/login",
@@ -36,14 +52,14 @@ export const ENDPOINTS = {
   JOB_APPLICATIONS: {
     APPLY: "/api/job-applications/apply",
     UPDATE: "/api/job-applications/update",
-    GET_BY_EMAIL: (email: string) => `/api/job-applications/${email}`,
+    GET_BY_EMAIL: (email: string) => `/api/job-applications/${seg(email)}`,
     GET_BY_PREFIX: (prefix: string) =>
-      `/api/job-applications/byJobPrefix/${prefix}`,
+      `/api/job-applications/byJobPrefix/${seg(prefix)}`,
     GET_BY_PREFIX_AND_EMAIL: (prefix: string, email: string) =>
-      `/api/job-applications/byJobPrefixAndEmail/${prefix}/${email}`,
+      `/api/job-applications/byJobPrefixAndEmail/${seg(prefix)}/${seg(email)}`,
     /** @deprecated Screens the whole job on every GET — use SCREEN instead. */
     FILTER_BY_PREFIX: (prefix: string) =>
-      `/api/job-applications/filterByPrefix/${prefix}`,
+      `/api/job-applications/filterByPrefix/${seg(prefix)}`,
     // Screening run: whole job, or only the emails passed in.
     SCREEN: "/api/job-applications/screen",
     SEND_ACK_MAIL: "/api/job-applications/send-ack-mail",
@@ -151,15 +167,15 @@ export const ENDPOINTS = {
     SCREEN_BATCH: "/api/upload-multiple-resumes",
   },
   PROMPTS: {
-    GET_BY_JOB: (prefix: string) => `/api/prompts/${prefix}`,
+    GET_BY_JOB: (prefix: string) => `/api/prompts/${seg(prefix)}`,
     SAVE: "/api/prompts",
     GET_EVALUATION_CATEGORIES: (prefix: string) =>
-      `/api/prompts/evaluation-categories/${prefix}`,
+      `/api/prompts/evaluation-categories/${seg(prefix)}`,
     SAVE_EVALUATION_CATEGORIES: "/api/prompts/evaluation-categories",
     /** What a round is actually scored on — stored list, or the defaults behind it. */
     GET_EFFECTIVE_EVALUATION_CATEGORIES: (prefix: string) =>
-      `/api/prompts/evaluation-categories/${prefix}/effective`,
-    GET_INTERVIEW_TEMPLATE: (prefix: string) => `/api/prompts/interview-template/${prefix}`,
+      `/api/prompts/evaluation-categories/${seg(prefix)}/effective`,
+    GET_INTERVIEW_TEMPLATE: (prefix: string) => `/api/prompts/interview-template/${seg(prefix)}`,
     SAVE_INTERVIEW_TEMPLATE: "/api/prompts/interview-template",
   },
   COMPILE: "/api/compile",
