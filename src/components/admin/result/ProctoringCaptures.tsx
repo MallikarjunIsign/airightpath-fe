@@ -8,6 +8,8 @@ import {
   AlertTriangle,
   RefreshCw,
   Info,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -144,7 +146,15 @@ export function ProctoringCaptures({
   const [items, setItems] = useState<LoadedCapture[]>([]);
   /** Captures on file for this candidate that belong to a different attempt. */
   const [elsewhere, setElsewhere] = useState(0);
-  const [preview, setPreview] = useState<LoadedCapture | null>(null);
+  /**
+   * What the viewer is showing: the set being browsed, and the position in it.
+   *
+   * <p>The whole set rather than one image. A room scan is twelve frames of
+   * one sweep, and a viewer that opened a single frame meant closing and
+   * reopening it eleven times to see the room — which is not how anyone looks
+   * at a sequence.</p>
+   */
+  const [preview, setPreview] = useState<{ items: LoadedCapture[]; index: number } | null>(null);
   /** Bumped to re-run the load after a failure. */
   const [attempt, setAttempt] = useState(0);
 
@@ -334,7 +344,11 @@ export function ProctoringCaptures({
               </p>
               {photo ? (
                 <div className="flex items-start gap-4 flex-wrap">
-                  <CaptureThumb item={photo} size="lg" onOpen={setPreview} />
+                  <CaptureThumb
+                    item={photo}
+                    size="lg"
+                    onOpen={() => setPreview({ items: [photo], index: 0 })}
+                  />
                   <div className="text-xs text-[var(--textSecondary)] space-y-1">
                     <p>
                       Taken on the instructions screen, with a single face verified in frame before
@@ -361,8 +375,13 @@ export function ProctoringCaptures({
               </p>
               {frames.length > 0 ? (
                 <div className="flex gap-2.5 overflow-x-auto pb-1">
-                  {frames.map((frame) => (
-                    <CaptureThumb key={frame.capture.id} item={frame} size="sm" onOpen={setPreview} />
+                  {frames.map((frame, index) => (
+                    <CaptureThumb
+                      key={frame.capture.id}
+                      item={frame}
+                      size="sm"
+                      onOpen={() => setPreview({ items: frames, index })}
+                    />
                   ))}
                 </div>
               ) : (
@@ -376,7 +395,11 @@ export function ProctoringCaptures({
         )}
       </CardContent>
 
-      <CapturePreviewModal item={preview} onClose={() => setPreview(null)} />
+      <CaptureGalleryModal
+        state={preview}
+        onNavigate={(index) => setPreview((prev) => (prev ? { ...prev, index } : prev))}
+        onClose={() => setPreview(null)}
+      />
     </Card>
   );
 }
@@ -401,7 +424,7 @@ function CaptureThumb({
 }: Readonly<{
   item: LoadedCapture;
   size: 'sm' | 'lg';
-  onOpen: (item: LoadedCapture) => void;
+  onOpen: () => void;
 }>) {
   const box = size === 'lg' ? 'w-40 h-40' : 'w-24 h-20';
   const isPhoto = item.capture.captureType === 'IDENTITY_PHOTO';
@@ -425,7 +448,7 @@ function CaptureThumb({
   return (
     <button
       type="button"
-      onClick={() => onOpen(item)}
+      onClick={onOpen}
       className={`${box} rounded-xl overflow-hidden border border-[var(--border)] flex-shrink-0 transition-transform hover:scale-[1.02] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]`}
       title="Open full size"
     >
@@ -434,15 +457,54 @@ function CaptureThumb({
   );
 }
 
-/** Full-size view with a download, for attaching to a review. */
-function CapturePreviewModal({
-  item,
+/**
+ * Full-size viewer for a set of captures, with a download.
+ *
+ * <p>A gallery rather than a single image. The room scan is a twelve-frame
+ * sweep of one room, and it was opened one frame at a time — so seeing the
+ * room meant opening and closing the dialog twelve times, and comparing two
+ * frames meant remembering the first. Arrows, arrow keys and a strip of
+ * thumbnails let a reviewer move through the sequence the way it was
+ * recorded.</p>
+ *
+ * <p>Position is clamped rather than wrapped. A sweep is a circle so wrapping
+ * would be defensible, but disabled arrows say where you are in the set
+ * without the reviewer having to watch the counter.</p>
+ */
+function CaptureGalleryModal({
+  state,
+  onNavigate,
   onClose,
-}: Readonly<{ item: LoadedCapture | null; onClose: () => void }>) {
-  if (!item?.url) return null;
+}: Readonly<{
+  state: { items: LoadedCapture[]; index: number } | null;
+  onNavigate: (index: number) => void;
+  onClose: () => void;
+}>) {
+  const items = state?.items ?? [];
+  const index = state?.index ?? 0;
+  const item = items[index];
+
+  const atStart = index <= 0;
+  const atEnd = index >= items.length - 1;
+
+  // Arrow keys, because a keyboard is how anyone steps through a sequence of
+  // twelve. Bound while the dialog is open and released when it closes, so it
+  // never intercepts arrows meant for the page behind it.
+  useEffect(() => {
+    if (!state) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowLeft' && index > 0) onNavigate(index - 1);
+      if (event.key === 'ArrowRight' && index < items.length - 1) onNavigate(index + 1);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [state, index, items.length, onNavigate]);
+
+  if (!state || !item?.url) return null;
 
   const isPhoto = item.capture.captureType === 'IDENTITY_PHOTO';
   const title = isPhoto ? 'Candidate photo' : `Room scan — frame ${item.capture.frameIndex + 1}`;
+  const isSequence = items.length > 1;
 
   async function handleDownload() {
     if (!item?.url) return;
@@ -453,13 +515,63 @@ function CapturePreviewModal({
   }
 
   return (
-    <Modal isOpen onClose={onClose} title={title} size="lg">
+    <Modal
+      isOpen
+      onClose={onClose}
+      title={isSequence ? `${title}  ·  ${index + 1} of ${items.length}` : title}
+      size="lg"
+    >
       <div className="space-y-3">
-        <img
-          src={item.url}
-          alt={title}
-          className="w-full rounded-xl border border-[var(--border)]"
-        />
+        <div className="relative">
+          <img
+            src={item.url}
+            alt={title}
+            className="w-full rounded-xl border border-[var(--border)]"
+          />
+          {isSequence && (
+            <>
+              <GalleryArrow
+                side="left"
+                disabled={atStart}
+                onClick={() => onNavigate(index - 1)}
+              />
+              <GalleryArrow side="right" disabled={atEnd} onClick={() => onNavigate(index + 1)} />
+            </>
+          )}
+        </div>
+
+        {/* Jump straight to a frame. With twelve of them, stepping one at a
+            time to reach the last is slower than the problem deserves. */}
+        {isSequence && (
+          <div className="flex gap-1.5 overflow-x-auto pb-1">
+            {items.map((thumb, i) => (
+              <button
+                key={thumb.capture.id}
+                type="button"
+                onClick={() => onNavigate(i)}
+                title={`Frame ${thumb.capture.frameIndex + 1}`}
+                className={`h-12 w-16 flex-shrink-0 overflow-hidden rounded-lg border-2 transition-opacity ${
+                  i === index
+                    ? 'border-[var(--primary)]'
+                    : 'border-transparent opacity-60 hover:opacity-100'
+                }`}
+              >
+                {thumb.url ? (
+                  <img
+                    src={thumb.url}
+                    alt={`Frame ${thumb.capture.frameIndex + 1}`}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <span className="flex h-full w-full items-center justify-center bg-[var(--surface2)]">
+                    <ImageOff size={13} className="text-[var(--textTertiary)]" />
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="flex items-center justify-between gap-3 text-xs text-[var(--textSecondary)]">
           <span>
             {item.capture.capturedAt
@@ -477,5 +589,27 @@ function CapturePreviewModal({
         </div>
       </div>
     </Modal>
+  );
+}
+
+/** Overlay step control, placed on the image rather than under it. */
+function GalleryArrow({
+  side,
+  disabled,
+  onClick,
+}: Readonly<{ side: 'left' | 'right'; disabled: boolean; onClick: () => void }>) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={side === 'left' ? 'Previous frame' : 'Next frame'}
+      className={`absolute top-1/2 -translate-y-1/2 ${side === 'left' ? 'left-2' : 'right-2'}
+        rounded-full bg-black/55 p-2 text-white transition-opacity
+        hover:bg-black/75 disabled:pointer-events-none disabled:opacity-0
+        focus:outline-none focus-visible:ring-2 focus-visible:ring-white`}
+    >
+      {side === 'left' ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
+    </button>
   );
 }
