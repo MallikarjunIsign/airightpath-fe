@@ -18,6 +18,8 @@
 //   VITE_PROCTORING_MOBILE_REQUIRED      "true" | "false"   (default false)
 //   VITE_PROCTORING_CAMERA_RECORDING_REQUIRED "true" | "false" (default true)
 //   VITE_PROCTORING_SCREEN_RECORDING_REQUIRED "true" | "false" (default true)
+//   VITE_PROCTORING_ROOM_WATCH_ENABLED   "true" | "false"   (default false)
+//   VITE_PROCTORING_ROOM_WATCH_INTERVAL_MS integer ms       (default 8000)
 //
 // For the count values, 0 means "warn only, never auto-submit".
 
@@ -186,6 +188,30 @@ export const PROCTORING_CONFIG = {
      * why. They choose, and the device microphone stays the default.
      */
     audio: parseBool(env.VITE_PROCTORING_MOBILE_AUDIO_ENABLED, false),
+    /**
+     * Watch the phone's room angle for a second person.
+     *
+     * <p>Face detection has only ever looked at the laptop camera, which sees
+     * the candidate's face and little else. The phone is the wide shot — it is
+     * pointed at the room precisely so somebody off to the side is visible —
+     * and nothing was watching it. Someone sitting just outside the laptop's
+     * frame was invisible to every check the interview ran.</p>
+     *
+     * <p>Records and warns; never ends the interview. A room angle picks up
+     * far more innocent movement than a face-on camera — someone walking past
+     * an open door, a reflection, a poster — and ending a real interview on
+     * that would be worse than the cheating it is meant to catch. The event
+     * lands on the reviewer's transcript to judge in context.</p>
+     */
+    roomWatch: {
+      enabled: parseBool(env.VITE_PROCTORING_ROOM_WATCH_ENABLED, false),
+      /**
+       * Slower than the face check on purpose. This is looking for a person in
+       * the room, which does not appear and vanish between frames, and the
+       * detection runs on the candidate's machine alongside a live voice call.
+       */
+      checkIntervalMs: parseCount(env.VITE_PROCTORING_ROOM_WATCH_INTERVAL_MS, 8000),
+    },
   },
 } as const;
 

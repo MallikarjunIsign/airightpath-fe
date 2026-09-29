@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
-  AlertTriangle,
   ArrowLeft,
   BarChart3,
   ChevronDown,
@@ -21,13 +20,14 @@ import { RadialScore, SummaryStat, SkillBar } from '@/components/admin/result/Re
 import { ProctoringCaptures } from '@/components/admin/result/ProctoringCaptures';
 import { CodeBlock } from '@/components/interview/CodeBlock';
 import { InterviewReviewPanel } from '@/components/admin/InterviewReviewPanel';
+import { InterviewSubmissionInfo } from '@/components/admin/result/InterviewSubmissionInfo';
+import { interviewCompletionLabel } from '@/utils/interview-submission.utils';
 import { ROUTES } from '@/config/routes';
 import type { NavOrigin } from '@/components/ui/BackLink';
 import { interviewService, type VoiceConversationEntryDTO } from '@/services/interview.service';
 import { aiService } from '@/services/ai.service';
 import { INTERVIEW_ROUND_LABELS } from '@/types/interview.types';
 import type {
-  CompletionReason,
   InterviewRound,
   InterviewSchedule,
   ProctoringEvent,
@@ -100,18 +100,6 @@ function recommendationVariant(recommendation: string): 'success' | 'warning' | 
   if (recommendation === 'STRONG_HIRE' || recommendation === 'HIRE') return 'success';
   if (recommendation === 'NO_HIRE') return 'warning';
   return 'error';
-}
-
-function completionLabel(reason?: CompletionReason): string {
-  switch (reason) {
-    case 'NATURAL_COMPLETION': return 'Completed';
-    case 'EARLY_TERMINATION_POOR_PERFORMANCE': return 'Ended early';
-    case 'CANDIDATE_ENDED': return 'Candidate ended';
-    case 'PROCTORING_VIOLATION': return 'Proctoring violation';
-    case 'TIMEOUT': return 'Timed out';
-    case 'MAX_SKIPS': return 'Too many skips';
-    default: return '--';
-  }
 }
 
 function durationLabel(schedule: InterviewSchedule): string {
@@ -619,7 +607,7 @@ function AttemptSection({
           <Badge variant={resultVariant(schedule.interviewResult)} size="sm">
             {schedule.interviewResult}
           </Badge>
-          <Badge variant="info" size="sm">{completionLabel(schedule.completionReason)}</Badge>
+          <Badge variant="info" size="sm">{interviewCompletionLabel(schedule.completionReason)}</Badge>
           {/* Two separate recordings: the candidate's camera and the screen
               they shared. For a coding round the screen is the only evidence of
               how the answer was reached, so it gets its own button rather than
@@ -648,15 +636,15 @@ function RoundDetailPanel({ round }: Readonly<{ round: RoundDetail }>) {
 
   return (
     <div className="space-y-6">
-      {schedule.completionReason === 'EARLY_TERMINATION_POOR_PERFORMANCE' && (
-        <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
-          <AlertTriangle size={16} className="mt-0.5 flex-shrink-0 text-red-600 dark:text-red-400" />
-          <p className="text-sm text-red-800 dark:text-red-200">
-            This round was ended early after consistently poor performance — frequent skips, very
-            short answers, or low confidence. Read the scores with that in mind.
-          </p>
-        </div>
-      )}
+      {/* How it ended, first, because it changes how everything below reads.
+          This replaces a red banner that fired for one of the six completion
+          reasons — the other five ended an interview just as consequentially
+          and said nothing at all. */}
+      <Card>
+        <CardContent className="pt-5">
+          <InterviewSubmissionInfo schedule={schedule} />
+        </CardContent>
+      </Card>
 
       {/* ── Who sat it, and where ───────────────────────────────────── */}
       <ProctoringCaptures

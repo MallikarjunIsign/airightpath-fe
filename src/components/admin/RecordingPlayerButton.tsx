@@ -25,6 +25,34 @@ import { extractApiError } from '@/services/api.service';
  * <p>Shared between the results table and the candidate result page so a
  * recording behaves the same wherever it is reached from.</p>
  */
+/**
+ * What actually went wrong, in the reviewer's terms and the developer's.
+ *
+ * <p>A `<video>` reports one of four causes, and they point at completely
+ * different problems: a truncated object in the bucket, a proxy refusing a
+ * range request, and a codec the browser cannot open all present identically
+ * as "the video stopped". Naming the cause is the difference between a
+ * reviewer knowing whether to retry and an engineer knowing where to look.</p>
+ */
+function describePlaybackError(video: HTMLVideoElement | null): string {
+  const code = video?.error?.code;
+  const detail = video?.error?.message;
+  const suffix = detail ? ` (${detail})` : '';
+
+  switch (code) {
+    case MediaError.MEDIA_ERR_NETWORK:
+      return `Playback stopped: the connection to the recording failed part way through. The file is there, but something between the browser and storage refused to serve the rest of it.${suffix}`;
+    case MediaError.MEDIA_ERR_DECODE:
+      return `Playback stopped: the recording is damaged or was only partly uploaded, so the browser cannot read past this point.${suffix}`;
+    case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+      return `This recording cannot be played here — the file is missing, or its format is one this browser does not support.${suffix}`;
+    case MediaError.MEDIA_ERR_ABORTED:
+      return 'Playback was stopped before it finished loading.';
+    default:
+      return `Playback stopped for an unknown reason.${suffix}`;
+  }
+}
+
 export function RecordingPlayerButton({
   scheduleId,
   kind,
@@ -158,14 +186,13 @@ export function RecordingPlayerButton({
                   autoPlay
                   playsInline
                   className="max-h-[70vh] w-full"
-                  // A signed link can expire mid-watch, and S3 can refuse one.
                   // Without this the player simply stalls, which reads as a
-                  // recording that was never saved.
-                  onError={() =>
-                    setError(
-                      'Playback stopped. The link may have expired — try again to get a fresh one.',
-                    )
-                  }
+                  // recording that was never saved. The message names what the
+                  // browser actually reported rather than guessing at expiry —
+                  // the link lasts two hours, so a failure seconds in is never
+                  // that, and saying so sent at least one investigation the
+                  // wrong way.
+                  onError={() => setError(describePlaybackError(videoRef.current))}
                 />
               )}
             </div>

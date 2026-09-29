@@ -22,8 +22,12 @@ import { usePersistentState } from '@/hooks/usePersistentState';
 import { useNavigate } from 'react-router-dom';
 import { ROUTES } from '@/config/routes';
 import type { JobPostDTO } from '@/types/job.types';
-import type { InterviewSchedule, InterviewStats, CompletionReason, InterviewRound } from '@/types/interview.types';
+import type { InterviewSchedule, InterviewStats, InterviewRound } from '@/types/interview.types';
 import { INTERVIEW_ROUND_LABELS } from '@/types/interview.types';
+import {
+  interviewCompletionLabel,
+  interviewCompletionTone,
+} from '@/utils/interview-submission.utils';
 
 /**
  * Widths for the fixed-layout table, in two sets.
@@ -103,29 +107,6 @@ function getResultVariant(result: string): 'warning' | 'success' | 'error' {
   }
 }
 
-function getCompletionReasonLabel(reason?: CompletionReason): string {
-  switch (reason) {
-    case 'NATURAL_COMPLETION': return 'Completed';
-    case 'EARLY_TERMINATION_POOR_PERFORMANCE': return 'Early Termination';
-    case 'CANDIDATE_ENDED': return 'Candidate Ended';
-    case 'PROCTORING_VIOLATION': return 'Proctoring Violation';
-    case 'TIMEOUT': return 'Timed Out';
-    case 'MAX_SKIPS': return 'Max Skips';
-    default: return '--';
-  }
-}
-
-function getCompletionReasonVariant(reason?: CompletionReason): 'success' | 'warning' | 'error' | 'info' {
-  switch (reason) {
-    case 'NATURAL_COMPLETION': return 'success';
-    case 'EARLY_TERMINATION_POOR_PERFORMANCE': return 'error';
-    case 'CANDIDATE_ENDED': return 'info';
-    case 'PROCTORING_VIOLATION': return 'error';
-    case 'TIMEOUT': return 'warning';
-    case 'MAX_SKIPS': return 'warning';
-    default: return 'info';
-  }
-}
 
 /**
  * Colour for a recommendation badge.
@@ -219,8 +200,8 @@ function CompletionCell({ interview }: Readonly<{ interview: InterviewSchedule }
     return <span className="text-sm text-[var(--textTertiary)]">--</span>;
   }
   return (
-    <Badge variant={getCompletionReasonVariant(interview.completionReason)} size="sm">
-      {getCompletionReasonLabel(interview.completionReason)}
+    <Badge variant={interviewCompletionTone(interview.completionReason)} size="sm">
+      {interviewCompletionLabel(interview.completionReason)}
     </Badge>
   );
 }
@@ -378,7 +359,7 @@ export function InterviewResultsPage() {
       roundLabelOf(i),
       i.attemptStatus,
       i.interviewResult,
-      getCompletionReasonLabel(i.completionReason),
+      interviewCompletionLabel(i.completionReason),
       i.evaluation?.overallScore?.toFixed(1) ?? '',
       i.warningCount ?? i.proctoringWarnings ?? 0,
       formatDuration(i.startedAt, i.endedAt),

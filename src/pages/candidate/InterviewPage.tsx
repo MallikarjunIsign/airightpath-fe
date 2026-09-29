@@ -244,6 +244,67 @@ export function InterviewPage() {
     },
   });
 
+  /**
+   * A second watcher on the paired phone's wide shot.
+   *
+   * <p>Its own instance rather than re-pointing the one above: both cameras
+   * need watching at the same time, and they are looking for different things.
+   * face-api caches its models and the dynamic import is module-scoped, so the
+   * second instance costs a detection loop, not a second model download.</p>
+   *
+   * <p>Only {@code onMultipleFaces} is wired. "No face" and "looking away" are
+   * meaningless on a room angle — the phone is often side-on and may not see
+   * the candidate's face at all — and firing them would bury the one signal
+   * that matters in noise the candidate cannot act on.</p>
+   *
+   * <p>{@code maxWarnings} is effectively infinite, so this can never end an
+   * interview. That is by construction rather than by configuration: a room
+   * angle picks up far more innocent movement than a face-on camera, and the
+   * decision about what it saw belongs to a reviewer.</p>
+   */
+  const roomWatch = useFaceDetection({
+    maxWarnings: Number.MAX_SAFE_INTEGER,
+    checkIntervalMs: PROCTORING_CONFIG.mobileCompanion.roomWatch.checkIntervalMs,
+    multipleFacesConsecutiveFrames: 2,
+    onMultipleFaces: (count) => {
+      showToast(MESSAGES.interview.roomSecondPerson(count), 'warning');
+      // A distinct type from the laptop camera's `multiple_faces`: a reviewer
+      // reading the log needs to know which camera saw it, because a second
+      // person in the wide shot and one leaning into the laptop frame are
+      // different situations.
+      voiceInterview.sendProctoringEvent(
+        'room_multiple_faces',
+        `${count} people visible on the phone camera`
+      );
+    },
+  });
+
+  /**
+   * Start watching the room once the phone is streaming and the interview is
+   * under way, and stop when either goes away.
+   *
+   * <p>Keyed on the stream rather than started alongside the laptop camera:
+   * the phone can pair before or after the interview begins, and a detector
+   * pointed at a video element with no source silently does nothing.</p>
+   */
+  useEffect(() => {
+    if (!PROCTORING_CONFIG.mobileCompanion.roomWatch.enabled) return;
+    if (voiceInterview.state !== 'active' && voiceInterview.state !== 'answering') return;
+    if (!remoteStream || !mobileVideoRef.current) return;
+
+    let cancelled = false;
+    const element = mobileVideoRef.current;
+    roomWatch.loadModels().then(() => {
+      if (!cancelled) roomWatch.startDetection(element);
+    });
+
+    return () => {
+      cancelled = true;
+      roomWatch.stopDetection();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remoteStream, voiceInterview.state]);
+
   // DevTools detection
   const { detectionCount: devToolsCount } = useDevToolsDetection();
   const prevDevToolsRef = useRef<number>(0);
