@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { PROCTORING_CONFIG } from '@/config/proctoring.config';
 import { interviewWsService } from '@/services/interview-ws.service';
@@ -12,6 +12,19 @@ export default function MobileConnect() {
     const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
 
     const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+    /** What the room check said, so the candidate knows what to change. */
+    const [checkMessage, setCheckMessage] = useState<string | null>(null);
+    const [checking, setChecking] = useState(false);
+    /** Set once the interview is over, or the candidate exits deliberately. */
+    const [finished, setFinished] = useState<null | 'ended' | 'exited'>(null);
+    /**
+     * The live capture, held so it can actually be stopped.
+     *
+     * It was a local inside startStreaming, so nothing could release it: the
+     * camera stayed on after the interview finished, with the phone warm and
+     * its indicator lit, until the candidate thought to close the tab.
+     */
+    const streamRef = useRef<MediaStream | null>(null);
 
     useEffect(() => {
         if (!token) return;
@@ -81,16 +94,35 @@ export default function MobileConnect() {
     };
 
     const takePhoto = async () => {
-        if (!videoRef.current) return;
+        const video = videoRef.current;
+        if (!video || checking) return;
+
+        // A phone fires this the moment the button is tapped, which on a slow
+        // camera is before the first frame exists. videoWidth is 0 then, the
+        // canvas is 0x0, and the blank JPEG that follows came back as "no
+        // person visible" — a verification failure the candidate could not
+        // fix by repositioning anything.
+        if (video.readyState < 2 || video.videoWidth === 0) {
+            setCheckMessage('The camera is still starting. Wait for the picture to appear, then try again.');
+            return;
+        }
+
+        setChecking(true);
+        setCheckMessage(null);
+
         const canvas = document.createElement('canvas');
-        canvas.width = videoRef.current.videoWidth;
-        canvas.height = videoRef.current.videoHeight;
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
         const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        ctx.drawImage(videoRef.current, 0, 0);
+        if (!ctx) {
+            setChecking(false);
+            return;
+        }
+        ctx.drawImage(video, 0, 0);
         canvas.toBlob(async (blob) => {
             if (!blob) {
-                alert('Failed to capture photo');
+                setChecking(false);
+                setCheckMessage('The photo could not be taken. Please try again.');
                 return;
             }
             const formData = new FormData();
@@ -108,16 +140,28 @@ export default function MobileConnect() {
                 const data = await res.json();
                 if (data.valid) {
                     setVerified(true);
+                    setCheckMessage(null);
                     interviewWsService.send('/app/mobile/verified/' + token, { status: 'verified' });
                     startStreaming();
                 } else {
-                    alert('Verification failed. Please reposition the phone.');
+                    // The server's own words. "Reposition the phone" told the
+                    // candidate nothing about what was wrong; "your screen is
+                    // not visible" tells them exactly what to move.
+                    setCheckMessage(data.reason || 'The room check did not pass. Please try again.');
                 }
             } catch (err) {
                 console.error('Verification fetch error:', err);
-                alert('Verification error: ' + (err instanceof Error ? err.message : String(err)));
+                setCheckMessage('Could not reach the room check. Check your connection and try again.');
+            } finally {
+                setChecking(false);
             }
         }, 'image/jpeg');
+    };
+
+    /** Leave deliberately: release the camera rather than abandoning the tab. */
+    const exitProctoring = () => {
+        shutDown();
+        setFinished('exited');
     };
 
     const startStreaming = async () => {
@@ -135,6 +179,7 @@ export default function MobileConnect() {
                     ? { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
                     : false,
             });
+            streamRef.current = mediaStream;
             if (videoRef.current) videoRef.current.srcObject = mediaStream;
             const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
             peerConnectionRef.current = pc;
@@ -194,17 +239,90 @@ export default function MobileConnect() {
         };
     }, [streaming, token]);
 
+    /**
+     * Release the camera and the connection, once.
+     *
+     * Safe to call twice — the candidate may hit Exit at the same moment the
+     * desktop says the interview is over, and neither path should depend on
+     * the other not having run.
+     */
+    const shutDown = useCallback(() => {
+        streamRef.current?.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+        if (videoRef.current) videoRef.current.srcObject = null;
+        peerConnectionRef.current?.close();
+        peerConnectionRef.current = null;
+        setStreaming(false);
+    }, []);
+
+    /**
+     * The desktop telling this phone the interview has finished.
+     *
+     * Subscribed separately from the signalling above because it has to stay
+     * live for the whole session — the phone otherwise kept filming into an
+     * interview that had already ended.
+     */
+    useEffect(() => {
+        if (!token) return;
+        const onEnded = () => {
+            shutDown();
+            setFinished('ended');
+        };
+        interviewWsService.subscribe('/user/queue/mobile/ended', onEnded);
+        return () => interviewWsService.unsubscribe('/user/queue/mobile/ended');
+    }, [token, shutDown]);
+
     useEffect(() => {
         return () => {
-            if (peerConnectionRef.current) {
-                peerConnectionRef.current.close();
-            }
+            shutDown();
         };
-    }, []);
+    }, [shutDown]);
+
+    // Once it is over the phone has no job left, and leaving the live UI on
+    // screen invites the candidate to keep holding it up at nothing.
+    if (finished) {
+        const ended = finished === 'ended';
+        return (
+            <div className="min-h-screen bg-gray-50 p-4 flex flex-col items-center justify-center">
+                <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-8 text-center shadow-xl">
+                    <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
+                        <svg className="h-8 w-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                        </svg>
+                    </div>
+                    <h1 className="text-xl font-bold text-gray-800">
+                        {ended ? 'Interview complete' : 'Proctoring stopped'}
+                    </h1>
+                    <p className="mt-2 text-sm text-gray-600">
+                        {ended
+                            ? 'Your camera has been switched off and the feed has ended. You can close this page.'
+                            : 'Your camera has been switched off. Reopen the QR code on your computer if you need to pair again.'}
+                    </p>
+                    <p className="mt-4 text-xs text-gray-400">It is safe to close this tab.</p>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen p-4 bg-gray-50 flex flex-col items-center">
-            <h1 className="text-2xl font-bold mb-6 text-gray-800">Mobile Proctoring</h1>
+            <div className="mb-6 flex w-full max-w-md items-center justify-between">
+                <h1 className="text-2xl font-bold text-gray-800">Mobile Proctoring</h1>
+                {/* Leaving deliberately releases the camera. Closing the tab
+                    does too, eventually, but a candidate who has finished
+                    should not have to guess that. */}
+                <button
+                    onClick={exitProctoring}
+                    title="Stop proctoring and switch off the camera"
+                    aria-label="Exit proctoring"
+                    className="flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-600 active:scale-95"
+                >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                    Exit
+                </button>
+            </div>
 
             <div className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-200">
                 <div className="relative aspect-video bg-black">
@@ -235,12 +353,22 @@ export default function MobileConnect() {
                                     Position the phone to show both you and the computer screen.
                                 </p>
                             </div>
+                            {/* The server's reason, where the alert used to be. An
+                                alert on a phone covers the camera preview — the
+                                one thing the candidate needs to see to fix the
+                                problem it is describing. */}
+                            {checkMessage && (
+                                <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+                                    <p className="text-sm text-amber-900">{checkMessage}</p>
+                                </div>
+                            )}
                             <div className="flex flex-col gap-3">
                                 <button
                                     onClick={takePhoto}
-                                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl transition-all shadow-lg active:scale-95"
+                                    disabled={checking}
+                                    className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-bold py-3 rounded-xl transition-all shadow-lg active:scale-95"
                                 >
-                                    Verify My Room
+                                    {checking ? 'Checking…' : 'Verify My Room'}
                                 </button>
                                 <button
                                     onClick={bypassVerification}

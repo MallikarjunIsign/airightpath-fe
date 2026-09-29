@@ -528,6 +528,19 @@ export function InterviewPage() {
           console.error('Camera recording upload failed:', err);
           reportRecordingOutcome('camera', 0, recordingFailureReason(err));
         }
+        // Tell the paired phone to switch its camera off. Without this it
+        // kept filming an interview that had finished, and the candidate was
+        // left holding a page that still said "Live Proctoring".
+        if (mobileToken) {
+          try {
+            interviewWsService.send(`/app/mobile/ended/${mobileToken}`, { status: 'ended' });
+          } catch {
+            // The socket may already be closing. The phone releases the camera
+            // when the page closes anyway; this is the tidy path, not the only
+            // one.
+          }
+        }
+
         setPostCompletionStep('done');
         setTimeout(() => {
           navigate(ROUTES.CANDIDATE.INTERVIEWS);
@@ -544,6 +557,7 @@ export function InterviewPage() {
       stopDetection,
       navigate,
       reportRecordingOutcome,
+      mobileToken,
     ]
   );
 
