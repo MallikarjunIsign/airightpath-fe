@@ -8,6 +8,7 @@ import {
   TrendingUp,
   Clock,
   Award,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Select } from '@/components/ui/Select';
@@ -19,6 +20,12 @@ import { RecordingPlayerButton } from '@/components/admin/RecordingPlayerButton'
 import { jobService } from '@/services/job.service';
 import { interviewService } from '@/services/interview.service';
 import { usePersistentState } from '@/hooks/usePersistentState';
+import { useToast } from '@/components/ui/Toast';
+import { downloadBlob } from '@/utils/question-paper.utils';
+import {
+  buildInterviewWorkbook,
+  interviewWorkbookFileName,
+} from '@/utils/interview-export.utils';
 import { useNavigate } from 'react-router-dom';
 import { ROUTES } from '@/config/routes';
 import type { JobPostDTO } from '@/types/job.types';
@@ -167,9 +174,39 @@ function WarningsCell({ interview }: Readonly<{ interview: InterviewSchedule }>)
  * which is the part someone opening this next actually needs to know — so the
  * AI's own verdict stays visible beside it rather than being replaced.
  */
+/**
+ * Whether an interview was graded and found to have nothing to grade.
+ *
+ * <p>A finished interview the candidate never answered is deliberately left
+ * PENDING — the grader refuses to invent a score, and whether silence means a
+ * no-show, a broken microphone or a withdrawal is not something it can know.
+ * But "PENDING" on a completed row reads as "the scoring has not run yet",
+ * which is the one thing it does not mean. The evaluation is there; it says
+ * there was nothing to assess.</p>
+ */
+function isNotAssessable(interview: InterviewSchedule): boolean {
+  return (
+    interview.attemptStatus === 'COMPLETED' &&
+    interview.interviewResult === 'PENDING' &&
+    !!interview.evaluation &&
+    !interview.evaluation.recommendation
+  );
+}
+
 function ResultCell({ interview }: Readonly<{ interview: InterviewSchedule }>) {
   const overridden = interview.overriddenResult;
   if (!overridden) {
+    if (isNotAssessable(interview)) {
+      return (
+        <Badge
+          variant="warning"
+          size="sm"
+          title="The interview finished but the candidate did not answer, so there is nothing to score."
+        >
+          NOT ASSESSABLE
+        </Badge>
+      );
+    }
     return (
       <Badge variant={getResultVariant(interview.interviewResult)} size="sm">
         {interview.interviewResult}
@@ -260,6 +297,7 @@ function formatDuration(startedAt?: string, endedAt?: string): string {
 
 export function InterviewResultsPage() {
   const navigate = useNavigate();
+  const { showToast } = useToast();
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
   const [selectedPrefix, setSelectedPrefix] = usePersistentState('interviewResults:selectedPrefix', '');
   // Deliberately not persisted, unlike the job. A filter that survives a reload
@@ -270,6 +308,7 @@ export function InterviewResultsPage() {
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [loadingResults, setLoadingResults] = useState(false);
   const [stats, setStats] = useState<InterviewStats | null>(null);
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   useEffect(() => {
     fetchJobs();
@@ -377,6 +416,35 @@ export function InterviewResultsPage() {
     link.click();
     URL.revokeObjectURL(url);
   }, [interviews, selectedPrefix, roundFilter]);
+
+  /**
+   * The same rows the table is showing, as a workbook.
+   *
+   * <p>Built from `interviews` — the filtered set — with the filter written
+   * into the Summary sheet, so a partial export can never be read later as
+   * the whole cohort.</p>
+   */
+  const handleExportExcel = useCallback(async () => {
+    if (exportingExcel || interviews.length === 0) return;
+    setExportingExcel(true);
+    try {
+      const input = {
+        jobTitle: jobs.find((j) => j.jobPrefix === selectedPrefix)?.jobTitle ?? selectedPrefix,
+        jobPrefix: selectedPrefix,
+        rows: interviews,
+        totalCandidates: interviews.length,
+        filters: {
+          round: roundFilter === 'ALL' ? 'All rounds' : INTERVIEW_ROUND_LABELS[roundFilter],
+        },
+        generatedAt: new Date(),
+      };
+      downloadBlob(await buildInterviewWorkbook(input), interviewWorkbookFileName(input));
+    } catch {
+      showToast('Could not build the Excel report. Please try again.', 'error');
+    } finally {
+      setExportingExcel(false);
+    }
+  }, [exportingExcel, interviews, jobs, selectedPrefix, roundFilter, showToast]);
 
   const jobOptions = [
     { value: '', label: 'Select a job' },
@@ -496,10 +564,36 @@ export function InterviewResultsPage() {
                   </Badge>
                 )}
               </div>
+              {/* Two formats, offered separately. CSV is what feeds another
+                  system; the workbook is what a person reads — typed numbers
+                  and dates, the filter recorded, and the same branding as the
+                  exam export. Neither substitutes for the other. */}
               {interviews.length > 0 && (
-                <Button variant="outline" size="sm" leftIcon={<Download size={14} />} onClick={handleExportCSV}>
-                  Export CSV
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    leftIcon={
+                      exportingExcel ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <FileSpreadsheet size={14} />
+                      )
+                    }
+                    onClick={handleExportExcel}
+                    disabled={exportingExcel}
+                  >
+                    Export Excel
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    leftIcon={<Download size={14} />}
+                    onClick={handleExportCSV}
+                  >
+                    Export CSV
+                  </Button>
+                </div>
               )}
             </div>
           </CardHeader>

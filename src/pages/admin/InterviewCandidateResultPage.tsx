@@ -10,6 +10,8 @@ import {
   Shield,
   ShieldAlert,
   Users,
+  VideoOff,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -22,6 +24,12 @@ import { CodeBlock } from '@/components/interview/CodeBlock';
 import { InterviewReviewPanel } from '@/components/admin/InterviewReviewPanel';
 import { InterviewSubmissionInfo } from '@/components/admin/result/InterviewSubmissionInfo';
 import { interviewCompletionLabel } from '@/utils/interview-submission.utils';
+import { useToast } from '@/components/ui/Toast';
+import { downloadBlob } from '@/utils/question-paper.utils';
+import {
+  buildInterviewWorkbook,
+  interviewWorkbookFileName,
+} from '@/utils/interview-export.utils';
 import { ROUTES } from '@/config/routes';
 import type { NavOrigin } from '@/components/ui/BackLink';
 import { interviewService, type VoiceConversationEntryDTO } from '@/services/interview.service';
@@ -568,9 +576,39 @@ function AttemptSection({
   attempt,
   defaultOpen,
 }: Readonly<{ attempt: RoundAttempt; defaultOpen: boolean }>) {
+  const { showToast } = useToast();
   const [open, setOpen] = useState(defaultOpen);
+  const [exporting, setExporting] = useState(false);
   const { schedule, attemptNumber, attemptCount } = attempt;
   const date = attemptDateLabel(schedule);
+
+  /**
+   * This sitting as a workbook: the scored row, plus the transcript.
+   *
+   * <p>Per attempt rather than per candidate. A round sat twice produces two
+   * different interviews with two different scores, and a file merging them
+   * would be answering a question nobody asked.</p>
+   */
+  async function exportAttempt() {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const input = {
+        jobTitle: schedule.jobPrefix,
+        jobPrefix: schedule.jobPrefix,
+        rows: [schedule],
+        totalCandidates: 1,
+        filters: { round: schedule.roundLabel ?? schedule.round ?? 'Interview' },
+        generatedAt: new Date(),
+        transcript: attempt.transcript,
+      };
+      downloadBlob(await buildInterviewWorkbook(input), interviewWorkbookFileName(input));
+    } catch {
+      showToast('Could not build the download. Please try again.', 'error');
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
     <section className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface1)]">
@@ -612,11 +650,31 @@ function AttemptSection({
               they shared. For a coding round the screen is the only evidence of
               how the answer was reached, so it gets its own button rather than
               being folded into "Recording". */}
-          {schedule.recordReferences && (
+          {/* This one interview as a workbook — the same file the list
+              exports, narrowed to this candidate and with the transcript
+              alongside it. The exam side has had a per-candidate download for
+              a while; an interview reviewer had to go back to the list and
+              export the whole cohort to get anything. */}
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={
+              exporting ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />
+            }
+            onClick={exportAttempt}
+            disabled={exporting}
+          >
+            Download
+          </Button>
+          {schedule.recordReferences ? (
             <RecordingPlayerButton scheduleId={schedule.id} kind="camera" label="Camera" />
+          ) : (
+            <MissingRecording label="Camera" />
           )}
-          {schedule.screenRecordReferences && (
+          {schedule.screenRecordReferences ? (
             <RecordingPlayerButton scheduleId={schedule.id} kind="screen" label="Shared screen" />
+          ) : (
+            <MissingRecording label="Shared screen" />
           )}
         </div>
       </div>
@@ -772,6 +830,27 @@ function RoundDetailPanel({ round }: Readonly<{ round: RoundDetail }>) {
         reviewReasons={resolved?.reviewReasons}
       />
     </div>
+  );
+}
+
+/**
+ * Says a recording is absent, rather than showing nothing.
+ *
+ * <p>A missing button is ambiguous: it looks the same whether the candidate
+ * was never asked to share their screen or the upload failed on the way to
+ * storage. Only one of those is a problem to chase, and the reviewer could not
+ * tell which. Why it failed, where the client managed to report it, is in the
+ * proctoring log beneath as a `recording_upload_failed` event.</p>
+ */
+function MissingRecording({ label }: Readonly<{ label: string }>) {
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-[var(--borderMuted)] px-2 py-1 text-xs text-[var(--textTertiary)]"
+      title="Either it was not recorded, or the upload did not reach storage. Check the proctoring log below."
+    >
+      <VideoOff size={13} />
+      {label}: not saved
+    </span>
   );
 }
 

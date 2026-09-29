@@ -18,6 +18,7 @@ import { useFaceDetection } from '@/hooks/useFaceDetection';
 import { useDevToolsDetection } from '@/hooks/useDevToolsDetection';
 import { useSpeechSynthesis } from '@/hooks/useSpeechSynthesis';
 import { aiService } from '@/services/ai.service';
+import { extractApiError } from '@/services/api.service';
 import { interviewWsService } from '@/services/interview-ws.service';
 import { AIAvatar } from '@/components/interview/AIAvatar';
 import { CodingEditor } from '@/components/interview/CodingEditor';
@@ -36,6 +37,18 @@ import { interviewService } from '@/services/interview.service';
 import type { InterviewSchedule } from '@/types/interview.types';
 
 type PostCompletionStep = 'ending' | 'uploading-screen' | 'done' | null;
+
+/**
+ * Why an upload failed, in one line a reviewer can act on.
+ *
+ * <p>The server message where there is one — a 413 from a proxy refusing the
+ * file size says far more than "upload failed" — falling back to the client
+ * message when the request never reached the server at all.</p>
+ */
+function recordingFailureReason(err: unknown): string {
+  const api = extractApiError(err);
+  return api.serverMessage || api.message || 'The upload did not complete.';
+}
 
 export function InterviewPage() {
   const location = useLocation();
@@ -426,6 +439,41 @@ export function InterviewPage() {
     PROCTORING_CONFIG.eyeDetection.enabled ||
     PROCTORING_CONFIG.camera.required;
 
+  /**
+   * Record whether a recording actually reached storage, and why not.
+   *
+   * <p>Sent over the interview socket, which is still open at this point —
+   * ending an interview stops the audio and calls the end endpoint, it does
+   * not disconnect. Best effort by design: a candidate whose upload just
+   * failed must not then be held up by a failure report.</p>
+   *
+   * <p>Worth recording even on success. "No recording" and "a recording that
+   * did not survive the upload" look identical on the reviewer's screen
+   * otherwise, and only one of them is the candidate's doing.</p>
+   */
+  const reportRecordingOutcome = useCallback(
+    (kind: 'camera' | 'screen', bytes: number, failureReason?: string) => {
+      try {
+        if (failureReason) {
+          voiceInterview.sendProctoringEvent(
+            'recording_upload_failed',
+            `${kind} recording was not saved: ${failureReason}`,
+          );
+        } else {
+          voiceInterview.sendProctoringEvent(
+            'recording_uploaded',
+            `${kind} recording saved (${Math.round(bytes / 1024)} KB)`,
+          );
+        }
+      } catch {
+        // The socket may already be gone. Nothing here is worth a second
+        // failure on top of the one being reported.
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   // Post-completion flow
   const runPostCompletionFlow = useCallback(
     async (skipEndCall: boolean) => {
@@ -444,9 +492,17 @@ export function InterviewPage() {
             const screenBlob = await stopScreenAndGetBlob();
             if (screenBlob && voiceInterview.scheduleId) {
               await aiService.uploadScreenRecording(voiceInterview.scheduleId, screenBlob);
+              reportRecordingOutcome('screen', screenBlob.size);
+            } else {
+              reportRecordingOutcome('screen', 0, 'Nothing was captured to upload.');
             }
           } catch (err) {
+            // Recorded against the interview, not just the console. A failed
+            // upload used to leave no trace anywhere the reviewer could see:
+            // the recording button simply never appeared, which is
+            // indistinguishable from a candidate who was never asked to share.
             console.error('Screen recording upload failed:', err);
+            reportRecordingOutcome('screen', 0, recordingFailureReason(err));
           }
         }
 
@@ -464,9 +520,13 @@ export function InterviewPage() {
           const videoBlob = await stopVideoAndGetBlob();
           if (videoBlob && voiceInterview.scheduleId) {
             await aiService.uploadInterviewVideo(voiceInterview.scheduleId, videoBlob);
+            reportRecordingOutcome('camera', videoBlob.size);
+          } else if (PROCTORING_CONFIG.recording.camera.required) {
+            reportRecordingOutcome('camera', 0, 'Nothing was captured to upload.');
           }
         } catch (err) {
           console.error('Camera recording upload failed:', err);
+          reportRecordingOutcome('camera', 0, recordingFailureReason(err));
         }
         setPostCompletionStep('done');
         setTimeout(() => {
@@ -477,7 +537,14 @@ export function InterviewPage() {
         navigate(ROUTES.CANDIDATE.INTERVIEWS);
       }
     },
-    [voiceInterview, stopScreenAndGetBlob, stopVideoAndGetBlob, stopDetection, navigate]
+    [
+      voiceInterview,
+      stopScreenAndGetBlob,
+      stopVideoAndGetBlob,
+      stopDetection,
+      navigate,
+      reportRecordingOutcome,
+    ]
   );
 
   useEffect(() => {

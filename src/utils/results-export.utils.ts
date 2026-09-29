@@ -309,7 +309,7 @@ export function resultsWorkbookFileName(input: ResultsExportInput): string {
  * `.Workbook` off the wrong one throws "not a constructor" at the moment the
  * admin clicks download, so take whichever object actually has it.
  */
-async function loadExcelJs(): Promise<typeof import('exceljs')> {
+export async function loadExcelJs(): Promise<typeof import('exceljs')> {
   type ExcelJsModule = typeof import('exceljs');
   const imported = (await import('exceljs')) as ExcelJsModule & { default?: ExcelJsModule };
   return imported.Workbook ? imported : (imported.default as ExcelJsModule);
@@ -354,7 +354,7 @@ type Worksheet = import('exceljs').Worksheet;
  * A missing canvas costs the background and nothing else; the print marks are
  * plain strings and always apply.
  */
-function brandWorkbook(workbook: Workbook): void {
+export function brandWorkbook(workbook: Workbook): void {
   const tile = watermarkTilePng();
   const imageId = tile ? workbook.addImage({ base64: tile, extension: 'png' }) : null;
 
@@ -371,7 +371,7 @@ function brandWorkbook(workbook: Workbook): void {
 }
 
 /** Bold reversed header, frozen so it stays put on a long candidate list. */
-function styleHeader(sheet: Worksheet, columnCount: number): void {
+export function styleHeader(sheet: Worksheet, columnCount: number): void {
   const header = sheet.getRow(1);
   header.font = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
   header.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: HEADER_FILL } };
