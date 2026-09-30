@@ -152,6 +152,24 @@ export const PROCTORING_CONFIG = {
      */
     camera: {
       required: parseBool(env.VITE_PROCTORING_CAMERA_RECORDING_REQUIRED, true),
+      /**
+       * How heavy the camera recording is allowed to be.
+       *
+       * <p>No bitrate was set, so the browser picked its own — about 2.5 Mbps.
+       * Seventy minutes of that is over a gigabyte, which exceeded the
+       * server's own 500MB limit before anything in front of it got a say, and
+       * took longer to send than the upload timeout allowed. The camera
+       * recording had never once been stored on any interview.</p>
+       *
+       * <p>500 kbps is ample for what this is: evidence that a particular
+       * person sat the interview, not footage anyone will watch for detail. It
+       * puts a seventy-minute recording around 280MB. vp8 rather than vp9
+       * because the encode runs on the candidate's machine alongside a live
+       * voice call and face detection.</p>
+       */
+      mimeType: 'video/webm;codecs=vp8,opus',
+      videoBitsPerSecond: parseCount(env.VITE_PROCTORING_CAMERA_VIDEO_BITRATE, 500_000),
+      audioBitsPerSecond: parseCount(env.VITE_PROCTORING_CAMERA_AUDIO_BITRATE, 48_000),
     },
     /**
      * The candidate's screen, via the browser's display-capture prompt. False

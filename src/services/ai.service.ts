@@ -46,7 +46,14 @@ export const aiService = {
     return api.post<string>(ENDPOINTS.AI.UPLOAD_VIDEO(scheduleId), formData, {
       headers: { "Content-Type": "multipart/form-data" },
       timeout: 300000, // 5 min for large uploads
-    });
+      // No global error toast. This runs after the interview has finished, and
+      // a failed upload is the platform's problem, not the candidate's — they
+      // were told their interview was complete and then shown "Unable to
+      // connect. Please check your internet connection", which reads as though
+      // their answers had been lost. The failure is recorded against the
+      // interview instead, where a reviewer will see it.
+      _skipErrorToast: true,
+    } as never);
   },
 
   uploadScreenRecording(scheduleId: number, screenBlob: Blob) {
@@ -58,7 +65,9 @@ export const aiService = {
       {
         headers: { "Content-Type": "multipart/form-data" },
         timeout: 300000, // 5 min for large uploads
-      },
+        // Silent for the same reason as the camera upload above.
+        _skipErrorToast: true,
+      } as never,
     );
   },
 

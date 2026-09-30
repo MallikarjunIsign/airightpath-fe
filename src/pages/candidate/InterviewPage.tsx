@@ -5,6 +5,7 @@ import {
   Clock, Mic, User, Bot, Loader2, Video, AlertTriangle, Maximize, Shield,
   Wifi, WifiOff, Square, LogOut, CheckCircle2, Circle, Volume2,
   EyeOff, Users, Timer, Monitor, MonitorUp, Play, Send, Smartphone, BookOpen,
+  AlertCircle,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/Toast';
@@ -39,12 +40,52 @@ import type { InterviewSchedule } from '@/types/interview.types';
 type PostCompletionStep = 'ending' | 'uploading-screen' | 'done' | null;
 
 /**
+ * Where one recording's upload has got to.
+ *
+ * <p>Tracked per stream because they succeed and fail independently, and the
+ * candidate was shown one line about the screen and nothing at all about the
+ * camera — which is the one that has actually been failing.</p>
+ */
+type UploadStatus = 'waiting' | 'uploading' | 'saved' | 'failed' | 'skipped';
+
+/**
  * Why an upload failed, in one line a reviewer can act on.
  *
  * <p>The server message where there is one — a 413 from a proxy refusing the
  * file size says far more than "upload failed" — falling back to the client
  * message when the request never reached the server at all.</p>
  */
+/** One recording's upload state, in the candidate's terms. */
+function UploadRow({ label, status }: Readonly<{ label: string; status: UploadStatus }>) {
+  if (status === 'skipped') return null;
+
+  const icon = {
+    waiting: <Circle size={16} className="text-gray-400" />,
+    uploading: <Loader2 size={16} className="animate-spin text-blue-500" />,
+    saved: <CheckCircle2 size={16} className="text-emerald-500" />,
+    failed: <AlertCircle size={16} className="text-amber-500" />,
+    skipped: null,
+  }[status];
+
+  const text = {
+    waiting: 'Waiting',
+    uploading: 'Uploading…',
+    saved: 'Saved',
+    failed: 'Not saved',
+    skipped: '',
+  }[status];
+
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="flex items-center gap-2 text-sm text-[var(--text)]">
+        {icon}
+        {label}
+      </span>
+      <span className="text-xs text-[var(--textSecondary)]">{text}</span>
+    </div>
+  );
+}
+
 function recordingFailureReason(err: unknown): string {
   const api = extractApiError(err);
   return api.serverMessage || api.message || 'The upload did not complete.';
@@ -134,6 +175,10 @@ export function InterviewPage() {
    */
   const [showRules, setShowRules] = useState(false);
   const [postCompletionStep, setPostCompletionStep] = useState<PostCompletionStep>(null);
+  const [uploadStatus, setUploadStatus] = useState<{ screen: UploadStatus; camera: UploadStatus }>({
+    screen: 'waiting',
+    camera: 'waiting',
+  });
   const postCompletionStartedRef = useRef(false);
 
   // Permissions
@@ -489,12 +534,15 @@ export function InterviewPage() {
         setPostCompletionStep('uploading-screen');
         if (PROCTORING_CONFIG.recording.screen.required) {
           try {
+            setUploadStatus((prev) => ({ ...prev, screen: 'uploading' }));
             const screenBlob = await stopScreenAndGetBlob();
             if (screenBlob && voiceInterview.scheduleId) {
               await aiService.uploadScreenRecording(voiceInterview.scheduleId, screenBlob);
               reportRecordingOutcome('screen', screenBlob.size);
+              setUploadStatus((prev) => ({ ...prev, screen: 'saved' }));
             } else {
               reportRecordingOutcome('screen', 0, 'Nothing was captured to upload.');
+              setUploadStatus((prev) => ({ ...prev, screen: 'failed' }));
             }
           } catch (err) {
             // Recorded against the interview, not just the console. A failed
@@ -503,7 +551,10 @@ export function InterviewPage() {
             // indistinguishable from a candidate who was never asked to share.
             console.error('Screen recording upload failed:', err);
             reportRecordingOutcome('screen', 0, recordingFailureReason(err));
+            setUploadStatus((prev) => ({ ...prev, screen: 'failed' }));
           }
+        } else {
+          setUploadStatus((prev) => ({ ...prev, screen: 'skipped' }));
         }
 
         // The candidate's camera, which was being recorded and then discarded.
@@ -515,18 +566,25 @@ export function InterviewPage() {
         // runs while the candidate waits on the "finishing" overlay, and a
         // failed upload must not cost them a completed interview.
         try {
+          setUploadStatus((prev) => ({
+            ...prev,
+            camera: PROCTORING_CONFIG.recording.camera.required ? 'uploading' : 'skipped',
+          }));
           // stopVideoAndGetBlob is called either way — it is what releases the
           // camera. In stream-only mode it resolves null and nothing is sent.
           const videoBlob = await stopVideoAndGetBlob();
           if (videoBlob && voiceInterview.scheduleId) {
             await aiService.uploadInterviewVideo(voiceInterview.scheduleId, videoBlob);
             reportRecordingOutcome('camera', videoBlob.size);
+            setUploadStatus((prev) => ({ ...prev, camera: 'saved' }));
           } else if (PROCTORING_CONFIG.recording.camera.required) {
             reportRecordingOutcome('camera', 0, 'Nothing was captured to upload.');
+            setUploadStatus((prev) => ({ ...prev, camera: 'failed' }));
           }
         } catch (err) {
           console.error('Camera recording upload failed:', err);
           reportRecordingOutcome('camera', 0, recordingFailureReason(err));
+          setUploadStatus((prev) => ({ ...prev, camera: 'failed' }));
         }
         // Tell the paired phone to switch its camera off. Without this it
         // kept filming an interview that had finished, and the candidate was
@@ -1034,6 +1092,7 @@ export function InterviewPage() {
         mobileConnected={mobileConnected}
         mobileVerified={mobileVerified}
         mobileConnectUrl={`${getMobileBaseUrl()}/mobile-connect?token=${mobileToken}`}
+        mobileStream={remoteStream}
         isSpeaking={isSpeaking}
         isAudioMuted={isAudioMuted}
         onToggleAudio={toggleInstructionAudio}
@@ -1129,23 +1188,48 @@ export function InterviewPage() {
       {/* Post-completion overlay */}
       {postCompletionStep && (
         <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center backdrop-blur-sm p-4">
-          <div className="bg-[var(--cardBg)] rounded-2xl p-6 sm:p-8 max-w-md w-full text-center space-y-6 shadow-2xl">
-            <h2 className="text-xl font-bold text-[var(--text)]">Finishing Interview...</h2>
-            <div className="space-y-4 text-left">
-              <div className="flex items-center gap-3">
-                {getStepStatus('ending') === 'done' ? <CheckCircle2 size={20} className="text-emerald-500" /> :
-                  getStepStatus('ending') === 'active' ? <Loader2 size={20} className="text-blue-500 animate-spin" /> :
-                    <Circle size={20} className="text-gray-400" />}
-                <span className="text-sm">Ending interview</span>
-              </div>
-              <div className="flex items-center gap-3">
-                {getStepStatus('uploading-screen') === 'done' ? <CheckCircle2 size={20} className="text-emerald-500" /> :
-                  getStepStatus('uploading-screen') === 'active' ? <Loader2 size={20} className="text-blue-500 animate-spin" /> :
-                    <Circle size={20} className="text-gray-400" />}
-                <span className="text-sm">Uploading screen recording</span>
-              </div>
+          <div className="bg-[var(--cardBg)] rounded-2xl p-6 sm:p-8 max-w-md w-full space-y-5 shadow-2xl">
+            {/* The submission, stated first and on its own. It is complete the
+                moment the interview ends and does not depend on anything
+                below — a candidate watching an upload bar had no way to know
+                their answers were already safely in, and a failed upload read
+                as a failed interview. */}
+            <div className="text-center">
+              {getStepStatus('ending') === 'done' ? (
+                <>
+                  <CheckCircle2 size={36} className="mx-auto mb-2 text-emerald-500" />
+                  <h2 className="text-xl font-bold text-[var(--text)]">Interview submitted</h2>
+                  <p className="mt-1 text-sm text-[var(--textSecondary)]">
+                    Your answers are saved. Nothing below can change that.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Loader2 size={36} className="mx-auto mb-2 animate-spin text-blue-500" />
+                  <h2 className="text-xl font-bold text-[var(--text)]">Submitting your interview…</h2>
+                </>
+              )}
             </div>
-            {postCompletionStep === 'done' && <p className="text-sm text-emerald-500 font-medium">All done! Redirecting...</p>}
+
+            <div className="space-y-2 rounded-xl bg-[var(--surface1)] p-3 text-left">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--textTertiary)]">
+                Saving recordings
+              </p>
+              <UploadRow label="Shared screen" status={uploadStatus.screen} />
+              <UploadRow label="Camera" status={uploadStatus.camera} />
+              {(uploadStatus.screen === 'failed' || uploadStatus.camera === 'failed') && (
+                // Said plainly rather than as an error. It is not the
+                // candidate's failure and there is nothing for them to do.
+                <p className="pt-1 text-xs text-[var(--textSecondary)]">
+                  A recording did not upload. This has been noted for the reviewer and does not
+                  affect your interview or your result.
+                </p>
+              )}
+            </div>
+
+            {postCompletionStep === 'done' && (
+              <p className="text-center text-sm font-medium text-emerald-500">Taking you back…</p>
+            )}
           </div>
         </div>
       )}

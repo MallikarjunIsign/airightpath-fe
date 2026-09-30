@@ -1,3 +1,4 @@
+import { PROCTORING_CONFIG } from '@/config/proctoring.config';
 import { useState, useRef, useCallback } from 'react';
 
 interface UseMediaRecorderOptions {
@@ -38,9 +39,24 @@ export function useMediaRecorder(options?: UseMediaRecorderOptions) {
         return stream;
       }
 
-      const mimeType = options?.mimeType || 'video/webm;codecs=vp9,opus';
+      // vp8 and a capped bitrate, matching the screen recorder.
+      //
+      // This set no bitrate at all, so the browser chose its own — around
+      // 2.5 Mbps for a camera stream. Over a seventy-minute interview that is
+      // well past a gigabyte, and a camera image never compresses down the way
+      // a mostly-static screen does. It exceeded the server's own 500MB limit,
+      // let alone anything in front of it, and took longer than the upload
+      // timeout however good the connection: the camera recording has never
+      // once been stored, on any interview, while screen recordings of the
+      // same interviews sometimes were.
+      //
+      // This is proctoring evidence of a face, not cinematography. The numbers
+      // are config so they can be tuned without a redeploy.
+      const mimeType = options?.mimeType || PROCTORING_CONFIG.recording.camera.mimeType;
       const recorder = new MediaRecorder(stream, {
         mimeType: MediaRecorder.isTypeSupported(mimeType) ? mimeType : undefined,
+        videoBitsPerSecond: PROCTORING_CONFIG.recording.camera.videoBitsPerSecond,
+        audioBitsPerSecond: PROCTORING_CONFIG.recording.camera.audioBitsPerSecond,
       });
 
       recorder.ondataavailable = (e) => {
