@@ -164,7 +164,34 @@ export default function MobileConnect() {
         setFinished('exited');
     };
 
+    /**
+     * Whether a start is already in flight.
+     *
+     * <p>`ready` can now arrive more than once — the backend sends one the
+     * moment both sides are registered, and the interview page sends another
+     * a second later as a retry. Two overlapping starts would open the camera
+     * twice and send two offers, and the desktop would answer the one that
+     * lost.</p>
+     */
+    const startingRef = useRef(false);
+
     const startStreaming = async () => {
+        // An established connection does not need rebuilding. A dead one does
+        // — the desktop reloading is exactly when the phone must renegotiate
+        // rather than sit on a peer connection nothing is listening to.
+        const existing = peerConnectionRef.current;
+        if (existing) {
+            const state = existing.connectionState;
+            if (state === 'new' || state === 'connecting' || state === 'connected') {
+                console.log('Ignoring ready signal: already paired', state);
+                return;
+            }
+            existing.close();
+            peerConnectionRef.current = null;
+        }
+        if (startingRef.current) return;
+        startingRef.current = true;
+
         try {
             // Audio only on the streaming capture, never on the preview above:
             // the preview is attached to a video element on this same phone, and
@@ -201,6 +228,10 @@ export default function MobileConnect() {
         } catch (err) {
             console.error('Streaming start error:', err);
             alert('Could not start video stream. Please check camera permissions.');
+        } finally {
+            // Cleared either way: a start that failed on a denied camera must
+            // not lock out the retry the candidate gets after allowing it.
+            startingRef.current = false;
         }
     };
 
