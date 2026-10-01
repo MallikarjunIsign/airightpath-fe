@@ -504,8 +504,10 @@ function RoundSummaryCard({
   onOpen,
 }: Readonly<{ attempt: RoundAttempt; onOpen: () => void }>) {
   const { schedule, evaluation, attemptNumber, attemptCount } = attempt;
-  const score = evaluation?.overallScore ?? schedule.evaluation?.overallScore;
-  const recommendation = evaluation?.recommendation ?? schedule.evaluation?.recommendation;
+  const resolved = evaluation ?? schedule.evaluation ?? null;
+  const score = resolved?.overallScore;
+  const recommendation = resolved?.recommendation;
+  const counts = transcriptCounts(attempt.transcript);
 
   return (
     <Card>
@@ -560,12 +562,87 @@ function RoundSummaryCard({
           </div>
         </div>
 
+        {/* The same substance the aptitude and coding overview carries. This
+            showed a dial, two numbers and a button — a reviewer could not tell
+            from it how much was actually asked, what it covered, or how the
+            interview ended, and had to open the round to learn anything. */}
+        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <SummaryStat value={counts.asked} label="Questions" tone="info" />
+          <SummaryStat value={counts.answered} label="Answered" tone="success" />
+          <SummaryStat value={counts.skipped} label="Skipped" tone="warning" />
+          <SummaryStat
+            value={counts.averageScore == null ? '--' : counts.averageScore.toFixed(1)}
+            label="Avg answer"
+            tone="primary"
+            hint="Mean of the interviewer's per-answer scores"
+          />
+        </div>
+
+        {resolved?.categoryScores?.length ? (
+          <div className="mt-4 space-y-2">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--textTertiary)]">
+              Scores by area
+            </p>
+            {resolved.categoryScores.map((category) => (
+              <SkillBar
+                key={category.category}
+                label={category.category}
+                // Category scores are 0-10; SkillBar draws a percentage.
+                percentage={Math.round((category.score ?? 0) * 10)}
+                detail={`${category.score}/10`}
+              />
+            ))}
+          </div>
+        ) : null}
+
+        <InterviewSubmissionInfo schedule={schedule} className="mt-4" />
+
+        {resolved?.areasForImprovement?.length ? (
+          <div className="mt-4 flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--textTertiary)]">
+              Areas to improve
+            </span>
+            {resolved.areasForImprovement.map((area) => (
+              <Badge key={area} variant="error" size="sm">
+                {area}
+              </Badge>
+            ))}
+          </div>
+        ) : null}
+
         <Button variant="outline" size="sm" className="mt-4 w-full" onClick={onOpen}>
           Transcript and scores
         </Button>
       </CardContent>
     </Card>
   );
+}
+
+/**
+ * What the transcript says about how much was actually asked and answered.
+ *
+ * <p>Counted here rather than read off the schedule: {@code totalQuestionsAsked}
+ * counts every interviewer turn including follow-ups and rephrases, which is
+ * the right number for enforcing a budget and the wrong one for telling a
+ * reviewer how much ground was covered.</p>
+ */
+function transcriptCounts(transcript: VoiceConversationEntryDTO[]) {
+  const SKIPPED = '[NO RESPONSE - SKIPPED]';
+  const asked = transcript.filter((e) => e.role === 'INTERVIEWER').length;
+  const candidateTurns = transcript.filter((e) => e.role === 'CANDIDATE');
+  const skipped = candidateTurns.filter((e) => e.content?.trim() === SKIPPED).length;
+  const scores = candidateTurns
+    .map((e) => e.answerScore)
+    .filter((score): score is number => score != null);
+
+  return {
+    asked,
+    answered: candidateTurns.length - skipped,
+    skipped,
+    averageScore: scores.length
+      ? scores.reduce((sum, score) => sum + score, 0) / scores.length
+      : null,
+  };
 }
 
 // ── One attempt in full ───────────────────────────────────────────────
