@@ -1014,7 +1014,19 @@ export function InterviewPage() {
       // candidate is not prompted for it at all.
       if (cameraStreamWanted) {
         try {
-          const mediaStream = await startVideoRecording({ audio: true, video: true });
+          // Asked for explicitly rather than left to the browser, which
+          // picks up to 720p30 — a resolution nothing here needs and every
+          // byte of which has to be uploaded over a candidate's own
+          // connection. `ideal` rather than `exact`: a webcam that cannot
+          // offer this should still record at whatever it has, not refuse.
+          const mediaStream = await startVideoRecording({
+            audio: true,
+            video: {
+              width: { ideal: PROCTORING_CONFIG.recording.camera.width },
+              height: { ideal: PROCTORING_CONFIG.recording.camera.height },
+              frameRate: { ideal: PROCTORING_CONFIG.recording.camera.frameRate },
+            },
+          });
           if (videoRef.current && mediaStream) {
             videoRef.current.srcObject = mediaStream;
             if (PROCTORING_CONFIG.eyeDetection.enabled) startDetection(videoRef.current);

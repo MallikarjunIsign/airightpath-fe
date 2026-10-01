@@ -168,8 +168,27 @@ export const PROCTORING_CONFIG = {
        * voice call and face detection.</p>
        */
       mimeType: 'video/webm;codecs=vp8,opus',
-      videoBitsPerSecond: parseCount(env.VITE_PROCTORING_CAMERA_VIDEO_BITRATE, 500_000),
-      audioBitsPerSecond: parseCount(env.VITE_PROCTORING_CAMERA_AUDIO_BITRATE, 48_000),
+      videoBitsPerSecond: parseCount(env.VITE_PROCTORING_CAMERA_VIDEO_BITRATE, 300_000),
+      audioBitsPerSecond: parseCount(env.VITE_PROCTORING_CAMERA_AUDIO_BITRATE, 32_000),
+      /**
+       * What the camera is asked to capture, as opposed to how hard it is
+       * compressed afterwards.
+       *
+       * <p>The stream was requested as a bare {@code video: true}, so the
+       * browser chose — often 720p at 30fps. Capping the bitrate alone makes
+       * a high-resolution capture look worse rather than cost less, because
+       * the encoder spends the same budget on more pixels. Asking for less in
+       * the first place is what actually improves the picture per byte.</p>
+       *
+       * <p>640x360 at 15fps is a video call. It is unambiguous evidence of who
+       * sat the interview, which is the entire job here — nobody is going to
+       * study the footage frame by frame. Together with the bitrate above, a
+       * seventy-minute recording lands near 175MB rather than the gigabyte-plus
+       * it was.</p>
+       */
+      width: parseCount(env.VITE_PROCTORING_CAMERA_WIDTH, 640),
+      height: parseCount(env.VITE_PROCTORING_CAMERA_HEIGHT, 360),
+      frameRate: parseCount(env.VITE_PROCTORING_CAMERA_FRAMERATE, 15),
     },
     /**
      * The candidate's screen, via the browser's display-capture prompt. False

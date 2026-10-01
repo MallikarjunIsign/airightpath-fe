@@ -541,7 +541,7 @@ export async function buildAnswerSheetPdf(data: AnswerSheetData) {
  * would otherwise apply to everything drawn afterwards, turning the footer —
  * and on a reused page, the body text — translucent too.
  */
-function stampBrand(doc: JsPdfDoc, GState: JsPdfGState): void {
+export function stampBrand(doc: JsPdfDoc, GState: JsPdfGState): void {
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const centreX = pageWidth / 2;
@@ -580,8 +580,8 @@ function stampBrand(doc: JsPdfDoc, GState: JsPdfGState): void {
   }
 }
 
-type JsPdfDoc = InstanceType<typeof import('jspdf').jsPDF>;
-type JsPdfGState = typeof import('jspdf').GState;
+export type JsPdfDoc = InstanceType<typeof import('jspdf').jsPDF>;
+export type JsPdfGState = typeof import('jspdf').GState;
 
 /** Filename stem shared by every format, e.g. `FE-DEV-006-jane-answers`. */
 export function answerSheetFileName(data: AnswerSheetData): string {

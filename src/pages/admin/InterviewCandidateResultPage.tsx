@@ -12,6 +12,8 @@ import {
   Users,
   VideoOff,
   FileSpreadsheet,
+  FileText,
+  Download,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -30,6 +32,10 @@ import {
   buildInterviewWorkbook,
   interviewWorkbookFileName,
 } from '@/utils/interview-export.utils';
+import {
+  buildInterviewReportPdf,
+  interviewReportFileName,
+} from '@/utils/interview-report.utils';
 import { ROUTES } from '@/config/routes';
 import type { NavOrigin } from '@/components/ui/BackLink';
 import { interviewService, type VoiceConversationEntryDTO } from '@/services/interview.service';
@@ -579,6 +585,7 @@ function AttemptSection({
   const { showToast } = useToast();
   const [open, setOpen] = useState(defaultOpen);
   const [exporting, setExporting] = useState(false);
+  const [formatOpen, setFormatOpen] = useState(false);
   const { schedule, attemptNumber, attemptCount } = attempt;
   const date = attemptDateLabel(schedule);
 
@@ -589,20 +596,44 @@ function AttemptSection({
    * different interviews with two different scores, and a file merging them
    * would be answering a question nobody asked.</p>
    */
-  async function exportAttempt() {
+  /**
+   * This sitting as a file, in whichever format the reviewer needs.
+   *
+   * <p>Two, because they are not substitutes. The PDF is watermarked and
+   * reads like a document — it goes to a hiring manager or onto the file. The
+   * workbook has typed numbers and a transcript sheet, which is what you want
+   * when comparing or filtering. Only the workbook existed, so attaching one
+   * candidate's interview to an email meant sending a spreadsheet.</p>
+   *
+   * <p>Per attempt rather than per candidate: a round sat twice is two
+   * interviews with two scores, and merging them answers no question.</p>
+   */
+  async function exportAttempt(format: 'pdf' | 'excel') {
     if (exporting) return;
     setExporting(true);
+    setFormatOpen(false);
     try {
-      const input = {
-        jobTitle: schedule.jobPrefix,
-        jobPrefix: schedule.jobPrefix,
-        rows: [schedule],
-        totalCandidates: 1,
-        filters: { round: schedule.roundLabel ?? schedule.round ?? 'Interview' },
-        generatedAt: new Date(),
-        transcript: attempt.transcript,
-      };
-      downloadBlob(await buildInterviewWorkbook(input), interviewWorkbookFileName(input));
+      if (format === 'pdf') {
+        const blob = await buildInterviewReportPdf({
+          schedule,
+          evaluation: attempt.evaluation,
+          transcript: attempt.transcript,
+          reviewReasons: attempt.evaluation?.reviewReasons,
+          generatedAt: new Date(),
+        });
+        downloadBlob(blob, interviewReportFileName(schedule));
+      } else {
+        const input = {
+          jobTitle: schedule.jobPrefix,
+          jobPrefix: schedule.jobPrefix,
+          rows: [schedule],
+          totalCandidates: 1,
+          filters: { round: schedule.roundLabel ?? schedule.round ?? 'Interview' },
+          generatedAt: new Date(),
+          transcript: attempt.transcript,
+        };
+        downloadBlob(await buildInterviewWorkbook(input), interviewWorkbookFileName(input));
+      }
     } catch {
       showToast('Could not build the download. Please try again.', 'error');
     } finally {
@@ -655,17 +686,35 @@ function AttemptSection({
               alongside it. The exam side has had a per-candidate download for
               a while; an interview reviewer had to go back to the list and
               export the whole cohort to get anything. */}
-          <Button
-            variant="ghost"
-            size="sm"
-            leftIcon={
-              exporting ? <Loader2 size={14} className="animate-spin" /> : <FileSpreadsheet size={14} />
-            }
-            onClick={exportAttempt}
-            disabled={exporting}
-          >
-            Download
-          </Button>
+          <div className="relative">
+            <Button
+              variant="ghost"
+              size="sm"
+              leftIcon={
+                exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />
+              }
+              onClick={() => setFormatOpen((open) => !open)}
+              disabled={exporting}
+            >
+              Download
+            </Button>
+            {formatOpen && !exporting && (
+              <div className="absolute right-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--cardBg)] shadow-lg">
+                <FormatOption
+                  icon={<FileText size={15} />}
+                  title="PDF"
+                  hint="Watermarked — ready to share"
+                  onClick={() => exportAttempt('pdf')}
+                />
+                <FormatOption
+                  icon={<FileSpreadsheet size={15} />}
+                  title="Excel"
+                  hint="Scores and transcript, as data"
+                  onClick={() => exportAttempt('excel')}
+                />
+              </div>
+            )}
+          </div>
           {schedule.recordReferences ? (
             <RecordingPlayerButton scheduleId={schedule.id} kind="camera" label="Camera" />
           ) : (
@@ -842,6 +891,28 @@ function RoundDetailPanel({ round }: Readonly<{ round: RoundDetail }>) {
  * tell which. Why it failed, where the client managed to report it, is in the
  * proctoring log beneath as a `recording_upload_failed` event.</p>
  */
+/** One row of the download format menu. */
+function FormatOption({
+  icon,
+  title,
+  hint,
+  onClick,
+}: Readonly<{ icon: React.ReactNode; title: string; hint: string; onClick: () => void }>) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-[var(--surface1)]"
+    >
+      <span className="mt-0.5 text-[var(--primary)]">{icon}</span>
+      <span className="min-w-0">
+        <span className="block text-sm font-medium text-[var(--text)]">{title}</span>
+        <span className="block text-xs text-[var(--textSecondary)]">{hint}</span>
+      </span>
+    </button>
+  );
+}
+
 function MissingRecording({ label }: Readonly<{ label: string }>) {
   return (
     <span
