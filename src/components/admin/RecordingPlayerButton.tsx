@@ -71,6 +71,17 @@ export function RecordingPlayerButton({
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  /**
+   * Which part is open, and how many there are.
+   *
+   * <p>A screen recording is one file per share. The candidate can stop
+   * sharing part way through an interview and start again, and each share is
+   * stored separately because concatenated WebM plays only as far as the
+   * first boundary. Before this the player fetched part 0 and the reviewer
+   * had no way to know, or reach, the rest.</p>
+   */
+  const [part, setPart] = useState(0);
+  const [parts, setParts] = useState(1);
 
   /**
    * Stop the media, rather than trusting the element's removal to do it.
@@ -102,15 +113,20 @@ export function RecordingPlayerButton({
     stopPlayback();
     setUrl(null);
     setError(null);
+    setPart(0);
+    setParts(1);
   }, [stopPlayback]);
 
-  const play = useCallback(async () => {
+  const play = useCallback(async (which = 0) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await interviewService.getRecordingLink(scheduleId, kind);
+      const res = await interviewService.getRecordingLink(scheduleId, kind, 'inline', which);
       if (!res.data?.url) throw new Error('The server returned no link for this recording.');
+      stopPlayback();
       setUrl(res.data.url);
+      setPart(res.data.part ?? which);
+      setParts(res.data.parts ?? 1);
     } catch (err) {
       // The server distinguishes "never recorded" from a failure to sign a
       // link, and only it can say which — so its wording is preferred over a
@@ -120,14 +136,14 @@ export function RecordingPlayerButton({
     } finally {
       setLoading(false);
     }
-  }, [scheduleId, kind]);
+  }, [scheduleId, kind, stopPlayback]);
 
   async function download() {
     setDownloading(true);
     try {
       // A second link. The disposition is signed into the URL, so one cannot
       // both play inline and save — the person has to say which they want.
-      const res = await interviewService.getRecordingLink(scheduleId, kind, 'attachment');
+      const res = await interviewService.getRecordingLink(scheduleId, kind, 'attachment', part);
       if (!res.data?.url) throw new Error('no url');
       // A detached anchor, so an attachment response does not interrupt the
       // video playing behind it.
@@ -152,13 +168,18 @@ export function RecordingPlayerButton({
         size="sm"
         className="px-2"
         leftIcon={loading ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
-        onClick={play}
+        onClick={() => play(0)}
         disabled={loading}
       >
         {label}
       </Button>
 
-      <Modal isOpen={!!url || !!error} onClose={close} title={`${label} recording`} size="lg">
+      <Modal
+        isOpen={!!url || !!error}
+        onClose={close}
+        title={parts > 1 ? `${label} recording — part ${part + 1} of ${parts}` : `${label} recording`}
+        size="lg"
+      >
         {error ? (
           <div className="space-y-4 py-6 text-center">
             <AlertTriangle size={28} className="mx-auto text-[var(--warning,orange)]" />
@@ -167,7 +188,7 @@ export function RecordingPlayerButton({
               variant="outline"
               size="sm"
               leftIcon={<RotateCcw size={14} />}
-              onClick={play}
+              onClick={() => play(part)}
               disabled={loading}
             >
               Try again
@@ -175,6 +196,37 @@ export function RecordingPlayerButton({
           </div>
         ) : (
           <div className="space-y-3">
+            {/* The parts bar. Shown only when there is more than one, because
+                on a single-part recording it is noise — but when there is, a
+                reviewer has to be told: the gap between two parts is time
+                nothing was recorded, and that is exactly what they are
+                looking for. */}
+            {parts > 1 && (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-2 dark:border-amber-700/60 dark:bg-amber-900/20">
+                <AlertTriangle size={14} className="shrink-0 text-amber-500" />
+                <span className="text-xs text-amber-800 dark:text-amber-200">
+                  Recorded in {parts} parts — sharing stopped and restarted during the interview.
+                  Nothing was captured between them.
+                </span>
+                <div className="ml-auto flex flex-wrap gap-1">
+                  {Array.from({ length: parts }, (_, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => play(i)}
+                      disabled={loading}
+                      className={`rounded px-2 py-1 text-xs font-semibold transition-colors disabled:opacity-60 ${
+                        i === part
+                          ? 'bg-amber-500 text-white'
+                          : 'bg-white text-amber-700 hover:bg-amber-100 dark:bg-amber-900/40 dark:text-amber-200 dark:hover:bg-amber-900/70'
+                      }`}
+                    >
+                      Part {i + 1}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {/* Black behind the video so letterboxing on a portrait recording
                 does not read as a broken player. */}
             <div className="overflow-hidden rounded-lg bg-black">

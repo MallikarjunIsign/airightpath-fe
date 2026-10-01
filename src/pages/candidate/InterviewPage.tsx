@@ -201,6 +201,9 @@ export function InterviewPage() {
   const answerTimerRef = useRef<number | null>(null);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  /** The scrolling left column, and the coding block inside it. */
+  const columnRef = useRef<HTMLDivElement>(null);
+  const codingSectionRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const screenPreviewRef = useRef<HTMLVideoElement>(null);
 
@@ -253,8 +256,11 @@ export function InterviewPage() {
 
   // Screen recording
   const [screenPermission, setScreenPermission] = useState<'granted' | 'denied' | 'prompt'>('prompt');
-  const { start: startScreenRecording, stop: stopScreenRecording, stopAndGetBlob: stopScreenAndGetBlob, isRecording: isScreenRecording, screenStream } = useScreenRecorder({
+  const { start: startScreenRecording, stop: stopScreenRecording, resume: resumeScreenRecording, stopAndGetSegments: stopScreenAndGetSegments, isRecording: isScreenRecording, stoppedEarly: screenShareStoppedEarly, screenStream } = useScreenRecorder({
     timeslice: APP_CONFIG.VIDEO_CHUNK_SECONDS * 1000,
+    // Read at record time, not now: the audio graph is built when the first
+    // question is spoken, which is after the recording has already started.
+    getInterviewerAudio: () => voiceInterview.getInterviewerAudioStream(),
     onScreenStop: () => {
       // Nothing was asked for, so nothing can have been stopped. Without this
       // guard a deployment with screen recording switched off could still fire
@@ -265,6 +271,39 @@ export function InterviewPage() {
       voiceInterview.sendProctoringEvent('screen_share_stopped', 'Candidate stopped screen sharing');
     },
   });
+
+  /**
+   * Pick screen sharing back up after it stopped.
+   *
+   * <p>There was no way to do this: a candidate who closed the shared window
+   * by accident, or hit Chrome's own "Stop sharing" bar, spent the rest of the
+   * interview with nothing being captured and a panel that told them it could
+   * not be restarted. It can — the footage recorded before the stop is kept
+   * and the new share is saved as a second part, so only the gap is lost.</p>
+   *
+   * <p>Dismissing the browser's picker is not a failure worth logging. It
+   * leaves the prompt on screen, which is the whole message.</p>
+   */
+  const [resharingScreen, setResharingScreen] = useState(false);
+  const handleReshareScreen = useCallback(async () => {
+    setResharingScreen(true);
+    try {
+      await resumeScreenRecording();
+      setScreenPermission('granted');
+      showToast('Screen sharing resumed — recording has continued.', 'success');
+      voiceInterview.sendProctoringEvent(
+        'screen_share_resumed',
+        'Candidate resumed screen sharing',
+      );
+    } catch {
+      showToast('Nothing was shared. Choose a screen to carry on recording.', 'warning');
+    } finally {
+      setResharingScreen(false);
+    }
+    // voiceInterview is a fresh object every render; only the send method is
+    // used here and it is stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumeScreenRecording, showToast]);
 
   // Fullscreen
   const { isFullscreen, enterFullscreen, fullscreenExitCount } = useFullscreen({
@@ -497,7 +536,7 @@ export function InterviewPage() {
    * otherwise, and only one of them is the candidate's doing.</p>
    */
   const reportRecordingOutcome = useCallback(
-    (kind: 'camera' | 'screen', bytes: number, failureReason?: string) => {
+    (kind: 'camera' | 'screen', bytes: number, failureReason?: string, parts?: number) => {
       try {
         if (failureReason) {
           voiceInterview.sendProctoringEvent(
@@ -505,9 +544,14 @@ export function InterviewPage() {
             `${kind} recording was not saved: ${failureReason}`,
           );
         } else {
+          // The part count goes in the event because it is the only place a
+          // reviewer learns the share was interrupted — two parts means the
+          // candidate stopped sharing partway and started again, and the gap
+          // between them is not on any recording.
+          const partNote = parts && parts > 1 ? `, ${parts} parts` : '';
           voiceInterview.sendProctoringEvent(
             'recording_uploaded',
-            `${kind} recording saved (${Math.round(bytes / 1024)} KB)`,
+            `${kind} recording saved (${Math.round(bytes / 1024)} KB${partNote})`,
           );
         }
       } catch {
@@ -535,10 +579,23 @@ export function InterviewPage() {
         if (PROCTORING_CONFIG.recording.screen.required) {
           try {
             setUploadStatus((prev) => ({ ...prev, screen: 'uploading' }));
-            const screenBlob = await stopScreenAndGetBlob();
-            if (screenBlob && voiceInterview.scheduleId) {
-              await aiService.uploadScreenRecording(voiceInterview.scheduleId, screenBlob);
-              reportRecordingOutcome('screen', screenBlob.size);
+            // Segments, not one blob: a candidate who stopped sharing and
+            // picked it back up has more than one. They go up in order and the
+            // backend keeps them as parts — joining two WebM files into one
+            // would leave a recording that plays only as far as the first
+            // boundary, which is worse than two files that both play.
+            const screenSegments = await stopScreenAndGetSegments();
+            const totalBytes = screenSegments.reduce((sum, blob) => sum + blob.size, 0);
+            if (screenSegments.length > 0 && voiceInterview.scheduleId) {
+              for (const segment of screenSegments) {
+                await aiService.uploadScreenRecording(voiceInterview.scheduleId, segment);
+              }
+              reportRecordingOutcome(
+                'screen',
+                totalBytes,
+                undefined,
+                screenSegments.length > 1 ? screenSegments.length : undefined,
+              );
               setUploadStatus((prev) => ({ ...prev, screen: 'saved' }));
             } else {
               reportRecordingOutcome('screen', 0, 'Nothing was captured to upload.');
@@ -610,7 +667,7 @@ export function InterviewPage() {
     },
     [
       voiceInterview,
-      stopScreenAndGetBlob,
+      stopScreenAndGetSegments,
       stopVideoAndGetBlob,
       stopDetection,
       navigate,
@@ -764,12 +821,49 @@ export function InterviewPage() {
     };
   }, []);
 
-  // Auto-scroll chat
+  /**
+   * Keep the newest turn in view.
+   *
+   * <p>Scrolling the chat box alone was not enough. Once the code editor is
+   * open the chat is squeezed to a few lines and the column around it is what
+   * actually scrolls, so a new question arrived below the fold of the column
+   * and the candidate was looking at an editor for a question they could not
+   * read. With the editor open the column is scrolled to the question pinned
+   * above it rather than to the bottom — the bottom is the Compile and Submit
+   * row, which puts the question off-screen again.</p>
+   */
   useEffect(() => {
-    if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    const chat = chatContainerRef.current;
+    if (chat) chat.scrollTop = chat.scrollHeight;
+
+    const column = columnRef.current;
+    if (!column) return;
+    const coding = codingSectionRef.current;
+    if (coding) {
+      column.scrollTo({ top: Math.max(0, coding.offsetTop - 8), behavior: 'smooth' });
+    } else {
+      column.scrollTop = column.scrollHeight;
     }
   }, [voiceInterview.conversation, voiceInterview.streamingText]);
+
+  /**
+   * Bring the editor into view the moment a coding task opens it.
+   *
+   * <p>It is appended under the transcript, below the fold on every screen
+   * short of a desktop: the interviewer said "write a function" and nothing
+   * visible changed.</p>
+   */
+  useEffect(() => {
+    if (!voiceInterview.isCodingQuestion) return;
+    const id = window.setTimeout(() => {
+      const column = columnRef.current;
+      const coding = codingSectionRef.current;
+      if (column && coding) {
+        column.scrollTo({ top: Math.max(0, coding.offsetTop - 8), behavior: 'smooth' });
+      }
+    }, 150);
+    return () => window.clearTimeout(id);
+  }, [voiceInterview.isCodingQuestion]);
 
   // Natural completion detection
   useEffect(() => {
@@ -1356,7 +1450,7 @@ export function InterviewPage() {
             bottom with no way to scroll to them. Now anything that does not
             fit scrolls, and the two things that must always be reachable —
             who is speaking, and the mic — are pinned to the top and bottom. */}
-        <div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-y-auto">
+        <div ref={columnRef} className="relative flex-1 flex flex-col min-h-0 min-w-0 overflow-y-auto">
           {/* Presence strip. Compact and horizontal: the old centred avatar
               block cost ~10rem of height that the editor needed. */}
           <div className="sticky top-0 z-10 flex flex-shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] bg-[var(--background)]/90 px-4 py-2.5 backdrop-blur-md">
@@ -1410,7 +1504,7 @@ export function InterviewPage() {
               at 55vh only meant a tall editor squeezed the transcript to
               nothing and pushed the controls off-screen. */}
           {voiceInterview.isCodingQuestion && voiceInterview.state !== 'completed' && !postCompletionStep && (
-            <div className="flex-shrink-0 border-t border-[var(--border)] px-3 sm:px-4 py-3 space-y-2">
+            <div ref={codingSectionRef} className="flex-shrink-0 min-w-0 border-t border-[var(--border)] px-2 sm:px-4 py-2 sm:py-3 space-y-2">
               {/* The question, pinned above the editor. The chat scrolls, and
                   once the editor and its output are open the question that was
                   asked is usually off the top of it — leaving the candidate
@@ -1422,7 +1516,7 @@ export function InterviewPage() {
                   <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wider text-[var(--textSecondary)]">
                     The question
                   </summary>
-                  <p className="max-h-48 overflow-y-auto whitespace-pre-wrap px-3 pb-3 text-sm text-[var(--text)]">
+                  <p className="max-h-24 sm:max-h-48 overflow-y-auto whitespace-pre-wrap px-3 pb-3 text-sm text-[var(--text)]">
                     {currentQuestion}
                   </p>
                 </details>
@@ -1449,8 +1543,12 @@ export function InterviewPage() {
                 </Button>
               </div>
               {compileOutput && (
-                <div className="mt-2 p-3 rounded-lg bg-[#1e1e1e] text-gray-200 font-mono text-sm overflow-auto max-h-48">
-                  <pre className="whitespace-pre-wrap">{compileOutput}</pre>
+                <div className="mt-2 min-w-0 p-3 rounded-lg bg-[#1e1e1e] text-gray-200 font-mono text-xs sm:text-sm overflow-auto max-h-32 sm:max-h-48">
+                  {/* break-words as well as wrap: a stack trace or a long
+                      compiler path has no spaces to wrap at, and without it
+                      the panel stretches the whole column wider than the
+                      phone and the page scrolls sideways. */}
+                  <pre className="whitespace-pre-wrap break-words">{compileOutput}</pre>
                 </div>
               )}
             </div>
@@ -1506,52 +1604,95 @@ export function InterviewPage() {
                   {questionTimer.consecutiveSkips > 0 && <span className="text-xs text-amber-500 font-medium">Skipped: {questionTimer.consecutiveSkips}/{APP_CONFIG.INTERVIEW_MAX_CONSECUTIVE_SKIPS}</span>}
                 </div>
               )}
-              <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4">
-                {voiceInterview.state === 'active' && (
-                  <>
+              {/* The control bar.
+                  The mic was an unlabelled circle and the replay control a
+                  44px grey one beside it, with the only explanation in 12px
+                  tertiary text underneath and the rest in a title attribute no
+                  touch device shows. A candidate mid-interview should not have
+                  to work out which circle talks. Everything here is labelled,
+                  big enough to hit, and sits on its own surface so it reads as
+                  the place you act rather than more page. */}
+              <div className="mx-auto w-full max-w-xl rounded-2xl border border-white/10 bg-slate-900 p-3 shadow-xl sm:p-4 dark:bg-slate-950">
+                {voiceInterview.state === 'active' && !voiceInterview.isPlaying && (
+                  <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-center">
                     <button
                       onClick={() => { if (!voiceInterview.isWsConnected) showToast(MESSAGES.interview.stillConnecting, 'info'); else voiceInterview.startAnswering(); }}
-                      disabled={!voiceInterview.isWsConnected || voiceInterview.isPlaying}
-                      title="Start answering"
-                      className="group flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 text-white shadow-lg ring-4 ring-emerald-500/15 transition-all hover:scale-105 hover:shadow-emerald-500/30 hover:shadow-xl disabled:cursor-not-allowed disabled:from-gray-400 disabled:to-gray-500 disabled:ring-0 disabled:hover:scale-100"
+                      disabled={!voiceInterview.isWsConnected}
+                      className="flex flex-1 items-center justify-center gap-3 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 px-6 py-4 text-white shadow-lg ring-2 ring-emerald-500/20 transition-all hover:shadow-emerald-500/30 hover:shadow-xl active:scale-[0.98] disabled:cursor-not-allowed disabled:from-gray-400 disabled:to-gray-500 disabled:ring-0"
                     >
-                      <Mic size={26} />
+                      <Mic size={24} className="shrink-0" />
+                      <span className="truncate text-sm font-semibold sm:text-base">
+                        {voiceInterview.isWsConnected ? 'Start answering' : 'Connecting…'}
+                      </span>
                     </button>
                     <button
                       onClick={voiceInterview.repeatQuestion}
-                      title="Play the question again"
-                      className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--surface1)] text-[var(--textSecondary)] transition-colors hover:bg-[var(--surface2)] hover:text-[var(--text)]"
+                      className="flex shrink-0 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/10 px-4 py-4 text-white transition-colors hover:bg-white/20 active:scale-[0.98] sm:px-5"
                     >
-                      <Volume2 size={18} />
+                      <Volume2 size={20} className="shrink-0" />
+                      <span className="whitespace-nowrap text-sm font-medium">Hear it again</span>
                     </button>
-                  </>
+                  </div>
                 )}
+
+                {voiceInterview.state === 'active' && voiceInterview.isPlaying && (
+                  <div className="flex items-center justify-center gap-3 py-3">
+                    <span className="flex gap-1">
+                      <span className="h-4 w-1 animate-pulse rounded-full bg-emerald-400" />
+                      <span className="h-4 w-1 animate-pulse rounded-full bg-emerald-400 [animation-delay:150ms]" />
+                      <span className="h-4 w-1 animate-pulse rounded-full bg-emerald-400 [animation-delay:300ms]" />
+                    </span>
+                    <span className="text-base font-medium text-white">
+                      The interviewer is speaking
+                    </span>
+                  </div>
+                )}
+
                 {voiceInterview.state === 'answering' && (
-                  <>
-                    <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-red-500 animate-pulse" /><span className="text-sm text-red-400 font-medium">Recording...</span></div>
-                    <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-mono text-sm font-semibold ${answerSecondsLeft <= 30 ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' : answerSecondsLeft <= 60 ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400' : 'bg-[var(--surface1)] text-[var(--text)]'}`}>
-                      <Timer size={14} className={answerSecondsLeft <= 30 ? 'animate-pulse' : ''} />
-                      {Math.floor(answerSecondsLeft / 60)}:{String(answerSecondsLeft % 60).padStart(2, '0')}
-                    </div>
+                  <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-center">
                     <button
                       onClick={() => voiceInterview.submitAnswer()}
-                      title="Stop and submit"
-                      className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-rose-400 to-rose-600 text-white shadow-lg ring-4 ring-rose-500/20 transition-all hover:scale-105 hover:shadow-rose-500/30 hover:shadow-xl"
+                      className="flex flex-1 items-center justify-center gap-3 rounded-xl bg-gradient-to-br from-rose-500 to-rose-600 px-6 py-4 text-white shadow-lg ring-2 ring-rose-500/20 transition-all hover:shadow-rose-500/30 hover:shadow-xl active:scale-[0.98]"
                     >
-                      <Square size={22} />
+                      <Square size={22} className="shrink-0" />
+                      <span className="truncate text-sm font-semibold sm:text-base">Stop &amp; submit</span>
                     </button>
-                  </>
+                    <div className="flex shrink-0 items-center justify-center gap-3 px-1">
+                      <span className="flex items-center gap-2">
+                        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-red-400" />
+                        <span className="text-sm font-medium text-red-300">Recording</span>
+                      </span>
+                      <span
+                        className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 font-mono text-sm font-semibold ${answerSecondsLeft <= 30 ? 'bg-red-500/25 text-red-200' : answerSecondsLeft <= 60 ? 'bg-amber-500/25 text-amber-200' : 'bg-white/10 text-white'}`}
+                      >
+                        <Timer size={14} className={answerSecondsLeft <= 30 ? 'animate-pulse' : ''} />
+                        {Math.floor(answerSecondsLeft / 60)}:{String(answerSecondsLeft % 60).padStart(2, '0')}
+                      </span>
+                    </div>
+                  </div>
                 )}
+
                 {voiceInterview.state === 'processing' && (
-                  <div className="flex items-center gap-2 text-[var(--textSecondary)]"><Loader2 className="w-5 h-5 animate-spin" /><span className="text-sm">AI is responding...</span></div>
+                  <div className="flex items-center justify-center gap-2 py-3 text-slate-300">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <span className="text-base">The interviewer is thinking…</span>
+                  </div>
                 )}
-              </div>
-              <div className="text-center mt-2">
-                {voiceInterview.state === 'active' && !voiceInterview.isPlaying && (
-                  <p className="text-xs text-[var(--textTertiary)]">{voiceInterview.isCodingQuestion ? 'Write code above. Click mic to add explanation, then stop to submit both.' : 'Click the mic to start answering before time runs out'}</p>
-                )}
-                {voiceInterview.state === 'active' && voiceInterview.isPlaying && <p className="text-xs text-[var(--textTertiary)]">Interviewer is speaking... wait for them to finish</p>}
-                {voiceInterview.state === 'answering' && <p className="text-xs text-[var(--textTertiary)]">{voiceInterview.isCodingQuestion ? 'Speaking explanation... Click stop when done.' : 'Speak clearly. Click stop when done.'}</p>}
+
+                {/* Readable rather than a 12px aside. This is the instruction
+                    that tells a candidate what to do next. */}
+                <p className="mt-3 text-center text-xs text-slate-300 sm:text-sm">
+                  {voiceInterview.state === 'active' && !voiceInterview.isPlaying &&
+                    (voiceInterview.isCodingQuestion
+                      ? 'Write your code above, then tap the mic to talk through it. Stop when you are done — both are submitted together.'
+                      : 'Tap the mic when you are ready to answer.')}
+                  {voiceInterview.state === 'active' && voiceInterview.isPlaying &&
+                    'Listen to the question — the mic unlocks when they finish.'}
+                  {voiceInterview.state === 'answering' &&
+                    (voiceInterview.isCodingQuestion
+                      ? 'Explaining your code. Tap stop when you have finished.'
+                      : 'Speak clearly, then tap stop when you have finished.')}
+                </p>
               </div>
             </div>
           )}
@@ -1595,11 +1736,49 @@ export function InterviewPage() {
                 </div>
               )}
             </div>
-            <p className="mt-2 text-[10px] text-[var(--textTertiary)]">
-              {screenStream
-                ? 'This is what is being recorded and sent with your interview.'
-                : 'Your screen recording stopped. Reload only if asked to — it cannot be restarted mid-interview.'}
-            </p>
+            {/* A stopped share used to be one grey line of text saying it
+                could not be restarted. It is the single most consequential
+                thing that can go wrong in the sidebar — from that moment on
+                nothing is being captured — so it reads as an alert, says why
+                it most likely happened, and offers the fix. */}
+            {screenStream ? (
+              <p className="mt-2 text-[10px] text-[var(--textTertiary)]">
+                This is what is being recorded and sent with your interview.
+              </p>
+            ) : (
+              <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-2 dark:border-amber-700/60 dark:bg-amber-900/25">
+                <div className="flex items-start gap-1.5">
+                  <AlertTriangle size={12} className="mt-0.5 shrink-0 text-amber-500" />
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold text-amber-800 dark:text-amber-200">
+                      Screen sharing stopped
+                    </p>
+                    <p className="mt-0.5 text-[10px] leading-snug text-amber-700 dark:text-amber-300">
+                      {screenShareStoppedEarly
+                        ? 'You pressed Stop sharing, or the window you picked was closed. Nothing is being recorded until you share again.'
+                        : 'Your screen is not being recorded. Share it to carry on.'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleReshareScreen}
+                  disabled={resharingScreen}
+                  className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md bg-amber-500 px-2 py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-amber-600 disabled:opacity-60"
+                >
+                  {resharingScreen ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <MonitorUp size={12} />
+                  )}
+                  {resharingScreen ? 'Waiting for your choice…' : 'Share my screen again'}
+                </button>
+                <p className="mt-1 text-[9px] leading-snug text-amber-700/80 dark:text-amber-300/80">
+                  What you shared before this is already saved. Pick the same screen to keep the
+                  recording consistent.
+                </p>
+              </div>
+            )}
           </div>
           )}
 

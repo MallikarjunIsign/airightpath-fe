@@ -16,12 +16,19 @@ import { getAccessToken } from "@/services/api.service";
  * Level, on the same 0-100 scale as `audioLevel`, below which a chunk is
  * treated as holding no speech.
  *
- * Set at near-digital-silence rather than at "quiet". Dropping a chunk is
- * unrecoverable — the words are gone and the interview moves on without them —
- * while a hallucinated fragment is now much less likely anyway, since Whisper
- * is called with a pinned language and zero temperature.
+ * Was set at near-digital-silence, on the reasoning that dropping a chunk is
+ * unrecoverable while a hallucination is unlikely. In a real room it is the
+ * other way round: a fan, a keyboard, traffic through a window all clear
+ * digital silence easily, and Whisper does not return an empty string for
+ * them — it returns fluent invention, which lands in the transcript as
+ * something the candidate said and is then scored.
+ *
+ * Six is still well below speech. A candidate talking at any audible level
+ * clears it without trying; a quiet room with a fan in it does not. Tunable
+ * with VITE_TRANSCRIPTION_SILENCE_FLOOR, because what counts as background
+ * depends on the room and the microphone.
  */
-const SILENCE_FLOOR = 2;
+const SILENCE_FLOOR = parseFloat(import.meta.env.VITE_TRANSCRIPTION_SILENCE_FLOOR ?? '') || 6;
 
 export function useAudioStreaming(scheduleId: number | null) {
   const [isRecording, setIsRecording] = useState(false);

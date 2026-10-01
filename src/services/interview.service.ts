@@ -18,10 +18,11 @@ import type {
  * as a 400, and `round=` is unrecognised — so an "all rounds" view has to omit
  * the parameter, not send it blank.
  */
-function buildResultsParams(jobPrefix?: string, round?: InterviewRound) {
+function buildResultsParams(jobPrefix?: string, round?: InterviewRound, includeDeleted?: boolean) {
   const params: Record<string, string> = {};
   if (jobPrefix) params.jobPrefix = jobPrefix;
   if (round) params.round = round;
+  if (includeDeleted) params.includeDeleted = 'true';
   return Object.keys(params).length > 0 ? params : undefined;
 }
 
@@ -98,12 +99,34 @@ export const interviewService = {
     } as never);
   },
 
-  /** `round` omitted returns every round. */
-  getResults(jobPrefix?: string, round?: InterviewRound, opts?: SilentOpts) {
+  /** `round` omitted returns every round. Removed results are left out unless asked for. */
+  getResults(
+    jobPrefix?: string,
+    round?: InterviewRound,
+    opts?: SilentOpts & { includeDeleted?: boolean },
+  ) {
     return api.get<InterviewSchedule[]>(ENDPOINTS.INTERVIEWS.GET_RESULTS, {
-      params: buildResultsParams(jobPrefix, round),
+      params: buildResultsParams(jobPrefix, round, opts?.includeDeleted),
       ...(opts?.silent ? { _skipErrorToast: true } : {}),
     } as never);
+  },
+
+  /**
+   * Takes a result off the results list, with a reason.
+   *
+   * <p>Soft: nothing about the interview is destroyed. The reason is required
+   * by the server, and goes back out on the row so anyone looking at removed
+   * results can see why.</p>
+   */
+  deleteResult(id: number, reason: string) {
+    return api.delete<InterviewSchedule>(ENDPOINTS.INTERVIEWS.DELETE_RESULT(id), {
+      data: { reason },
+    });
+  },
+
+  /** Puts a removed result back on the list. */
+  restoreResult(id: number) {
+    return api.post<InterviewSchedule>(ENDPOINTS.INTERVIEWS.RESTORE_RESULT(id));
   },
 
   getResultDetail(id: number) {
@@ -134,10 +157,15 @@ export const interviewService = {
     scheduleId: number,
     kind: 'camera' | 'screen',
     disposition: 'inline' | 'attachment' = 'inline',
+    part = 0,
   ) {
-    return api.get<{ url: string; expiresInSeconds: number }>(
+    // `parts` comes back because a screen recording may be several files: the
+    // candidate can stop sharing mid-interview and pick it back up, and each
+    // share is stored on its own. One file was being played and the rest were
+    // invisible, which made an interrupted recording look like a short one.
+    return api.get<{ url: string; expiresInSeconds: number; part: number; parts: number }>(
       ENDPOINTS.INTERVIEWS.RECORDING_LINK(scheduleId),
-      { params: { kind, disposition } },
+      { params: { kind, disposition, part } },
     );
   },
 

@@ -19,6 +19,10 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { RecordingPlayerButton } from '@/components/admin/RecordingPlayerButton';
+import {
+  InterviewRemovalNotice,
+  InterviewResultRemoveButton,
+} from '@/components/admin/InterviewResultRemoval';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { RadialScore, SummaryStat, SkillBar } from '@/components/admin/result/ResultPrimitives';
 import { ProctoringCaptures } from '@/components/admin/result/ProctoringCaptures';
@@ -476,6 +480,10 @@ export function InterviewCandidateResultPage() {
                 // earlier ones stay folded rather than burying it under a
                 // transcript that has already been superseded.
                 defaultOpen={index === 0}
+                // A full reload rather than patching the row: removing a
+                // sitting changes the candidate's overall average and which
+                // attempt is the current one, and both are derived here.
+                onRemoved={load}
               />
             ),
           )}
@@ -658,7 +666,8 @@ function transcriptCounts(transcript: VoiceConversationEntryDTO[]) {
 function AttemptSection({
   attempt,
   defaultOpen,
-}: Readonly<{ attempt: RoundAttempt; defaultOpen: boolean }>) {
+  onRemoved,
+}: Readonly<{ attempt: RoundAttempt; defaultOpen: boolean; onRemoved: () => void }>) {
   const { showToast } = useToast();
   const [open, setOpen] = useState(defaultOpen);
   const [exporting, setExporting] = useState(false);
@@ -802,8 +811,17 @@ function AttemptSection({
           ) : (
             <MissingRecording label="Shared screen" />
           )}
+          {/* Here as well as on the list, because this is where a reviewer
+              works out that a sitting is a duplicate or a test run — having
+              to go back to the list to act on it is how they end up not
+              acting on it. Soft and audited either way. */}
+          {!schedule.deletedAt && (
+            <InterviewResultRemoveButton interview={schedule} onRemoved={onRemoved} />
+          )}
         </div>
       </div>
+
+      <InterviewRemovalNotice interview={schedule} className="mx-2 mb-2" />
 
       {open && (
         <div className="border-t border-[var(--border)] p-3 sm:p-4">

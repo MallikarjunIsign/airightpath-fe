@@ -168,8 +168,8 @@ export const PROCTORING_CONFIG = {
        * voice call and face detection.</p>
        */
       mimeType: 'video/webm;codecs=vp8,opus',
-      videoBitsPerSecond: parseCount(env.VITE_PROCTORING_CAMERA_VIDEO_BITRATE, 300_000),
-      audioBitsPerSecond: parseCount(env.VITE_PROCTORING_CAMERA_AUDIO_BITRATE, 32_000),
+      videoBitsPerSecond: parseCount(env.VITE_PROCTORING_CAMERA_VIDEO_BITRATE, 700_000),
+      audioBitsPerSecond: parseCount(env.VITE_PROCTORING_CAMERA_AUDIO_BITRATE, 48_000),
       /**
        * What the camera is asked to capture, as opposed to how hard it is
        * compressed afterwards.

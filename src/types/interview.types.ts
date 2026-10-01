@@ -191,6 +191,16 @@ export interface InterviewSchedule {
   overriddenResult?: InterviewResult;
   /** Who overturned it. */
   overriddenBy?: string;
+  /**
+   * The removal audit, set only on results an admin has taken off the list.
+   *
+   * Removal is soft: the transcript, proctoring events, recordings and
+   * evaluation all survive, and these three say who removed the result, when
+   * and why. Absent on every result that still stands.
+   */
+  deletedAt?: string;
+  deletedBy?: string;
+  deleteReason?: string;
 }
 
 export interface StartInterviewRequest {

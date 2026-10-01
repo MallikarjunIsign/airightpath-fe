@@ -126,6 +126,9 @@ export const ENDPOINTS = {
     GET_ACTIVE: "/api/interview/active",
     GET_RESULTS: "/api/interview/results",
     GET_RESULT_DETAIL: (id: number) => `/api/interview/results/${id}`,
+    /** Soft-remove a result from the list, with a reason, and put it back. */
+    DELETE_RESULT: (id: number) => `/api/interview/results/${id}`,
+    RESTORE_RESULT: (id: number) => `/api/interview/results/${id}/restore`,
     /** A reviewer's notes and override on one interview. */
     REVIEW: (id: number) => `/api/interview/${id}/review`,
     // A signed, playable link to a stored recording. The schedule holds an

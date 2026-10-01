@@ -9,6 +9,7 @@ import {
   Clock,
   Award,
   FileSpreadsheet,
+  Trash2,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Select } from '@/components/ui/Select';
@@ -17,6 +18,11 @@ import { Button } from '@/components/ui/Button';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { RecordingPlayerButton } from '@/components/admin/RecordingPlayerButton';
+import {
+  InterviewRemovalNotice,
+  InterviewResultRemoveButton,
+  InterviewResultRestoreButton,
+} from '@/components/admin/InterviewResultRemoval';
 import { jobService } from '@/services/job.service';
 import { interviewService } from '@/services/interview.service';
 import { usePersistentState } from '@/hooks/usePersistentState';
@@ -256,7 +262,12 @@ function RecommendationCell({ interview }: Readonly<{ interview: InterviewSchedu
 function InterviewActions({
   interview,
   onViewDetail,
-}: Readonly<{ interview: InterviewSchedule; onViewDetail: (i: InterviewSchedule) => void }>) {
+  onChanged,
+}: Readonly<{
+  interview: InterviewSchedule;
+  onViewDetail: (i: InterviewSchedule) => void;
+  onChanged: (updated: InterviewSchedule) => void;
+}>) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       {/* Offered whatever the status. This was gated on COMPLETED, so a row
@@ -281,6 +292,14 @@ function InterviewActions({
       )}
       {interview.screenRecordReferences && (
         <RecordingPlayerButton scheduleId={interview.id} kind="screen" label="Screen" />
+      )}
+      {/* Removal is soft and reversible, so both directions live here rather
+          than behind separate screens. A removed row is only on this list at
+          all because someone turned "Show removed" on. */}
+      {interview.deletedAt ? (
+        <InterviewResultRestoreButton interview={interview} onRestored={onChanged} />
+      ) : (
+        <InterviewResultRemoveButton interview={interview} onRemoved={onChanged} />
       )}
     </div>
   );
@@ -309,6 +328,14 @@ export function InterviewResultsPage() {
   const [loadingResults, setLoadingResults] = useState(false);
   const [stats, setStats] = useState<InterviewStats | null>(null);
   const [exportingExcel, setExportingExcel] = useState(false);
+  /**
+   * Whether removed results are listed alongside live ones.
+   *
+   * Off by default and not persisted: a removed result is removed because
+   * somebody wanted it off this screen, and a toggle that survives a reload
+   * would quietly undo that for everyone who shares the browser.
+   */
+  const [showRemoved, setShowRemoved] = useState(false);
 
   useEffect(() => {
     fetchJobs();
@@ -322,7 +349,7 @@ export function InterviewResultsPage() {
       setInterviews([]);
       setStats(null);
     }
-  }, [selectedPrefix, roundFilter]);
+  }, [selectedPrefix, roundFilter, showRemoved]);
 
   async function fetchJobs() {
     setLoadingJobs(true);
@@ -346,7 +373,9 @@ export function InterviewResultsPage() {
     if (!selectedPrefix) return;
     setLoadingResults(true);
     try {
-      const res = await interviewService.getResults(selectedPrefix, roundOrUndefined);
+      const res = await interviewService.getResults(selectedPrefix, roundOrUndefined, {
+        includeDeleted: showRemoved,
+      });
       setInterviews(res.data ?? []);
     } catch {
       // Error toast auto-handled by interceptor
@@ -383,6 +412,24 @@ export function InterviewResultsPage() {
    */
   function openCandidateResult(email: string) {
     navigate(ROUTES.ADMIN.interviewResultDetail(selectedPrefix, email));
+  }
+
+  /**
+   * Fold a just-removed or just-restored row back into the table.
+   *
+   * <p>Patched in place rather than refetched: the server returns the row it
+   * saved, and a refetch would cost a round trip and scroll the table back to
+   * the top under whoever just clicked. A row that no longer belongs on the
+   * current view — removed while "Show removed" is off — drops out here. The
+   * figures above come from the server's own filter, so they are refetched.</p>
+   */
+  function applyRowChange(updated: InterviewSchedule) {
+    setInterviews((rows) =>
+      rows
+        .map((row) => (row.id === updated.id ? updated : row))
+        .filter((row) => showRemoved || !row.deletedAt),
+    );
+    fetchStats();
   }
 
   // CSV Export
@@ -568,6 +615,25 @@ export function InterviewResultsPage() {
                   system; the workbook is what a person reads — typed numbers
                   and dates, the filter recorded, and the same branding as the
                   exam export. Neither substitutes for the other. */}
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Off by default. Removed results are kept, not deleted, and
+                    this is the way back to them — without it a removal would
+                    be indistinguishable from an erasure to everyone except
+                    whoever read the database. */}
+                <Button
+                  variant={showRemoved ? 'outline' : 'ghost'}
+                  size="sm"
+                  leftIcon={<Trash2 size={14} />}
+                  onClick={() => setShowRemoved((on) => !on)}
+                  title={
+                    showRemoved
+                      ? 'Hide results that have been removed'
+                      : 'Also list results that have been removed'
+                  }
+                >
+                  {showRemoved ? 'Hide removed' : 'Show removed'}
+                </Button>
+              </div>
               {interviews.length > 0 && (
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
@@ -622,8 +688,11 @@ export function InterviewResultsPage() {
                   {interviews.map((interview) => (
                     <div
                       key={interview.id}
-                      className="rounded-2xl border border-[var(--borderMuted,var(--border))] bg-[var(--cardBg)] p-4 space-y-3"
+                      className={`rounded-2xl border border-[var(--borderMuted,var(--border))] bg-[var(--cardBg)] p-4 space-y-3 ${
+                        interview.deletedAt ? 'opacity-70' : ''
+                      }`}
                     >
+                      <InterviewRemovalNotice interview={interview} />
                       <div className="flex items-start justify-between gap-3">
                         <button
                           type="button"
@@ -672,7 +741,11 @@ export function InterviewResultsPage() {
                         </div>
                       </dl>
 
-                      <InterviewActions interview={interview} onViewDetail={(row) => openCandidateResult(row.email)} />
+                      <InterviewActions
+                        interview={interview}
+                        onViewDetail={(row) => openCandidateResult(row.email)}
+                        onChanged={applyRowChange}
+                      />
                     </div>
                   ))}
                 </div>
@@ -702,16 +775,31 @@ export function InterviewResultsPage() {
                     </TableHeader>
                     <TableBody>
                       {interviews.map((interview) => (
-                        <TableRow key={interview.id}>
+                        // Dimmed and struck through, so a removed row cannot be
+                        // read as a live one at a glance when "Show removed" is
+                        // on. The reason sits under the address rather than in
+                        // a tooltip: it is why the row is there at all.
+                        <TableRow
+                          key={interview.id}
+                          className={interview.deletedAt ? 'opacity-60' : undefined}
+                        >
                           <TableCell className="font-medium align-top break-all">
                             <button
                               type="button"
                               onClick={() => openCandidateResult(interview.email)}
-                              className="text-left text-[var(--primary)] underline-offset-2 hover:underline"
+                              className={`text-left text-[var(--primary)] underline-offset-2 hover:underline ${
+                                interview.deletedAt ? 'line-through' : ''
+                              }`}
                               title="See this candidate's rounds"
                             >
                               {interview.email}
                             </button>
+                            {interview.deletedAt && (
+                              <p className="mt-1 text-[11px] leading-snug text-red-600 dark:text-red-400">
+                                Removed by {interview.deletedBy || 'unknown'} —{' '}
+                                {interview.deleteReason || 'no reason recorded'}
+                              </p>
+                            )}
                           </TableCell>
                           {showRound && (
                             <TableCell className="align-top">
@@ -747,6 +835,7 @@ export function InterviewResultsPage() {
                             <InterviewActions
                               interview={interview}
                               onViewDetail={(row) => openCandidateResult(row.email)}
+                              onChanged={applyRowChange}
                             />
                           </TableCell>
                         </TableRow>

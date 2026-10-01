@@ -812,6 +812,12 @@ export function useVoiceInterview() {
     amplitude: audioPlayback.amplitude,
     audioLevel: audioStreaming.audioLevel,
     /**
+     * The interviewer's spoken voice, for mixing into the screen recording so
+     * a reviewer hears both halves of the conversation rather than a
+     * candidate answering silence.
+     */
+    getInterviewerAudioStream: audioPlayback.getInterviewerAudioStream,
+    /**
      * Record the next answer from this stream rather than the device
      * microphone. Pass null to go back to the device. Takes effect on the next
      * answer, never mid-recording.
