@@ -112,7 +112,11 @@ export const MESSAGES = {
 
   interview: {
     micToStart: 'Please click the microphone to start answering.',
-    endingConsecutiveUnanswered: 'Interview ending due to consecutive unanswered questions.',
+    // No longer announces an ending, because there is not one. The usual
+    // cause is a microphone that is not working, and ending the interview
+    // was the harshest possible response to the candidate's own equipment.
+    consecutiveUnanswered:
+      'Several questions have gone unanswered. Check your microphone is working — your interview is still running.',
     timeUp: 'Interview time is up. Ending interview.',
     screenShareStopped: 'Screen sharing stopped. This has been logged.',
     resumed: 'Picking up where you left off — your earlier answers are saved.',
@@ -132,7 +136,11 @@ export const MESSAGES = {
       'You have been inactive. Please respond soon or the interview will end automatically.',
     endingInactivity: 'Interview ending due to inactivity.',
     answerTimeLimit: 'Answer time limit reached. Submitting your answer.',
-    maxWarnings: 'Maximum proctoring warnings reached. Ending interview.',
+    // No longer announces an ending, because there is not one. Said once,
+    // as a nudge rather than a threat: the warnings are recorded for a
+    // reviewer and a person decides what they are worth.
+    maxWarnings:
+      'Several proctoring warnings have been recorded. Your interview continues — stay in view of the camera and keep to this window.',
     writeCodeFirst: 'Please write some code first',
     mobileVerified: 'Mobile verification successful!',
     proctoringWarning: (reason: string) => `Proctoring Warning: ${reason}`,

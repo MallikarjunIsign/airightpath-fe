@@ -20,7 +20,7 @@ export function formatDateTime(dateStr: string): string {
  * left as-is is off by the reader's whole UTC offset. Anything that already
  * carries a `Z` or a numeric offset is a real instant and is left alone.
  */
-function parseServerInstant(dateStr: string): Date {
+export function parseServerInstant(dateStr: string): Date {
   const zoned = /(?:Z|[+-]\d{2}:?\d{2})$/.test(dateStr) ? dateStr : `${dateStr.replace(' ', 'T')}Z`;
   return parseISO(zoned);
 }

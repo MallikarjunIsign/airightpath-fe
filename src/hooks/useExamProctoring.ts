@@ -111,10 +111,15 @@ export function useExamProctoring({ loading, onAutoSubmit }: UseExamProctoringOp
         ? config.eyeDetection.maxBeforeAutoSubmit
         : Number.POSITIVE_INFINITY,
     checkIntervalMs: config.eyeDetection.checkIntervalMs,
-    // A second person is a serious violation → flag promptly (2 checks ≈ 8s);
-    // a brief look-away deserves grace → warn slower (4 checks ≈ 16s).
+    // A second person is a serious violation → flag promptly (2 checks ≈ 8s).
     multipleFacesConsecutiveFrames: 2,
-    noFaceConsecutiveFrames: 4,
+    // The rest come from config rather than being hardcoded here. They were
+    // literals, and the one that was never set at all — looking down — fell
+    // back to the hook's default and auto-submitted papers for the act of
+    // typing. See PROCTORING_CONFIG.eyeDetection for why each is what it is.
+    noFaceConsecutiveFrames: config.eyeDetection.noFaceConsecutiveChecks,
+    lookingAwayConsecutiveFrames: config.eyeDetection.lookAwayConsecutiveChecks,
+    detectLookingDown: config.eyeDetection.flagLookingDown,
     onMaxWarnings: () => onAutoSubmitRef.current('Too many face/eye warnings.'),
     onNoFace: () => showToast(MESSAGES.proctoring.faceNotDetected, 'warning'),
     onMultipleFaces: (count) => showToast(MESSAGES.proctoring.multipleFaces(count), 'warning'),

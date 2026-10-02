@@ -265,6 +265,14 @@ export type VoiceInterviewState =
 // Voice interview REST types
 export interface VoiceStartResponse {
   scheduleId: number;
+  /**
+   * When this interview runs out, as a server timestamp.
+   *
+   * The deadline rather than a duration, so the browser's clock cannot
+   * disagree with the one the server enforces — and so a reload cannot
+   * restart it. Optional only for older servers that do not send it.
+   */
+  expiresAt?: string;
   firstQuestion: string;
   interviewerName: string;
   firstQuestionAudio: string | null; // base64 mp3

@@ -56,7 +56,16 @@ export const APP_CONFIG = {
   VIDEO_CHUNK_SECONDS: 15,
   AUDIO_CHUNK_SECONDS: 4,
   AUDIO_CHUNK_MIME_TYPE: "audio/webm;codecs=opus",
-  INTERVIEW_MAX_PROCTORING_WARNINGS: 999999,
+  /**
+   * Warnings before the candidate is told their conduct is being noted.
+   *
+   * A notice, not a limit: nothing in the interview ends on this number. It
+   * replaced INTERVIEW_MAX_PROCTORING_WARNINGS, which was a termination
+   * threshold set to 999999 to defuse it — leaving the candidate's screen
+   * counting towards a ceiling that did not exist while the server still
+   * ended the interview at five of its own.
+   */
+  INTERVIEW_PROCTORING_WARNING_NOTICE: 5,
   INTERVIEW_INACTIVITY_WARNING_SECONDS: 120,
   INTERVIEW_INACTIVITY_TIMEOUT_SECONDS: 180,
   FACE_DETECTION_INTERVAL_MS: 10000,

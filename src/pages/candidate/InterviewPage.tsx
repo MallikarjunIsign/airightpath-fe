@@ -21,6 +21,12 @@ import { useSpeechSynthesis } from '@/hooks/useSpeechSynthesis';
 import { aiService } from '@/services/ai.service';
 import { extractApiError } from '@/services/api.service';
 import { interviewWsService } from '@/services/interview-ws.service';
+import { interviewService } from '@/services/interview.service';
+import { parseServerInstant } from '@/utils/format.utils';
+import {
+  uploadWithRetry,
+  downloadRecording,
+} from '@/utils/recording-upload.utils';
 import { AIAvatar } from '@/components/interview/AIAvatar';
 import { CodingEditor } from '@/components/interview/CodingEditor';
 import { Modal } from '@/components/ui/Modal';
@@ -49,6 +55,36 @@ type PostCompletionStep = 'ending' | 'uploading-screen' | 'done' | null;
 type UploadStatus = 'waiting' | 'uploading' | 'saved' | 'failed' | 'skipped';
 
 /**
+ * One recording's upload, in enough detail for the candidate to tell a slow
+ * upload from a stuck one.
+ *
+ * <p>A bare "Uploading…" for ten minutes — which is what 700 MB on a domestic
+ * uplink takes — is indistinguishable from a page that has hung, and the
+ * candidate is sitting in front of it waiting to be allowed to leave.</p>
+ */
+interface UploadState {
+  status: UploadStatus;
+  /** 0-100, or null where the browser cannot report it. */
+  percent: number | null;
+  attempt: number;
+  attempts: number;
+  /** Counting down between attempts. */
+  retryInSeconds?: number;
+  /** Set once every attempt has failed. */
+  failureReason?: string;
+  /** Captured bytes, so the candidate can be offered the file itself. */
+  bytes: number;
+}
+
+const INITIAL_UPLOAD_STATE: UploadState = {
+  status: 'waiting',
+  percent: null,
+  attempt: 0,
+  attempts: 0,
+  bytes: 0,
+};
+
+/**
  * Why an upload failed, in one line a reviewer can act on.
  *
  * <p>The server message where there is one — a 413 from a proxy refusing the
@@ -56,8 +92,8 @@ type UploadStatus = 'waiting' | 'uploading' | 'saved' | 'failed' | 'skipped';
  * message when the request never reached the server at all.</p>
  */
 /** One recording's upload state, in the candidate's terms. */
-function UploadRow({ label, status }: Readonly<{ label: string; status: UploadStatus }>) {
-  if (status === 'skipped') return null;
+function UploadRow({ label, state }: Readonly<{ label: string; state: UploadState }>) {
+  if (state.status === 'skipped') return null;
 
   const icon = {
     waiting: <Circle size={16} className="text-gray-400" />,
@@ -65,23 +101,49 @@ function UploadRow({ label, status }: Readonly<{ label: string; status: UploadSt
     saved: <CheckCircle2 size={16} className="text-emerald-500" />,
     failed: <AlertCircle size={16} className="text-amber-500" />,
     skipped: null,
-  }[status];
+  }[state.status];
 
-  const text = {
-    waiting: 'Waiting',
-    uploading: 'Uploading…',
-    saved: 'Saved',
-    failed: 'Not saved',
-    skipped: '',
-  }[status];
+  let text: string;
+  if (state.status === 'uploading' && state.retryInSeconds) {
+    // Named as a retry rather than hidden. A candidate who sees "retrying"
+    // knows the page is working; one who sees a frozen bar reaches for the
+    // reload button, which is the one thing that does lose the recording.
+    text = `Retrying in ${state.retryInSeconds}s (attempt ${state.attempt} of ${state.attempts})`;
+  } else if (state.status === 'uploading') {
+    const pct = state.percent != null ? ` ${state.percent}%` : '…';
+    text = state.attempt > 1 ? `Uploading${pct} · attempt ${state.attempt}` : `Uploading${pct}`;
+  } else {
+    text = {
+      waiting: 'Waiting',
+      uploading: '',
+      saved: state.attempt > 1 ? `Saved after ${state.attempt} attempts` : 'Saved',
+      failed: 'Not saved',
+      skipped: '',
+    }[state.status];
+  }
 
   return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="flex items-center gap-2 text-sm text-[var(--text)]">
-        {icon}
-        {label}
-      </span>
-      <span className="text-xs text-[var(--textSecondary)]">{text}</span>
+    <div className="space-y-1">
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex items-center gap-2 text-sm text-[var(--text)]">
+          {icon}
+          {label}
+        </span>
+        <span className="text-right text-xs text-[var(--textSecondary)]">{text}</span>
+      </div>
+      {state.status === 'uploading' && state.percent != null && (
+        <div className="h-1 w-full overflow-hidden rounded-full bg-[var(--border)]">
+          <div
+            className="h-full rounded-full bg-blue-500 transition-[width] duration-300"
+            style={{ width: `${state.percent}%` }}
+          />
+        </div>
+      )}
+      {state.status === 'failed' && state.failureReason && (
+        <p className="text-[11px] leading-snug text-amber-600 dark:text-amber-400">
+          {state.failureReason}
+        </p>
+      )}
     </div>
   );
 }
@@ -158,8 +220,18 @@ export function InterviewPage() {
       showToast(MESSAGES.interview.micToStart, 'warning');
     },
     onMaxSkips: () => {
-      showToast(MESSAGES.interview.endingConsecutiveUnanswered, 'error');
-      runPostCompletionFlowRef.current(false);
+      // Warned, not ended. This used to close the interview after three
+      // questions went unanswered — and the commonest reason for that is a
+      // microphone that is not working, which is the one case where taking
+      // the interview away is both the harshest outcome and the least
+      // deserved. A candidate thinking hard about three coding problems hit
+      // it too. The silence is recorded for the reviewer, who can see the
+      // transcript and judge it.
+      showToast(MESSAGES.interview.consecutiveUnanswered, 'warning');
+      voiceInterview.sendProctoringEvent(
+        'questions_unanswered',
+        'Three consecutive questions passed without an answer',
+      );
     },
   });
 
@@ -175,10 +247,27 @@ export function InterviewPage() {
    */
   const [showRules, setShowRules] = useState(false);
   const [postCompletionStep, setPostCompletionStep] = useState<PostCompletionStep>(null);
-  const [uploadStatus, setUploadStatus] = useState<{ screen: UploadStatus; camera: UploadStatus }>({
-    screen: 'waiting',
-    camera: 'waiting',
+  const [uploadStatus, setUploadStatus] = useState<{ screen: UploadState; camera: UploadState }>({
+    screen: INITIAL_UPLOAD_STATE,
+    camera: INITIAL_UPLOAD_STATE,
   });
+  /**
+   * The captured recordings, held until they are known to be stored.
+   *
+   * <p>So that a recording every attempt failed to upload can still be handed
+   * to the candidate to save. Without this it is simply gone the moment the
+   * tab closes, and with it the only account of a disputed interview.</p>
+   */
+  const unsavedRecordingsRef = useRef<{ screen: Blob[]; camera: Blob[] }>({ screen: [], camera: [] });
+  const [hasUnsavedRecordings, setHasUnsavedRecordings] = useState(false);
+  /**
+   * Set when the candidate chooses to leave rather than wait out the uploads.
+   *
+   * <p>Their answers are already submitted by this point and nothing below
+   * can change the result, so holding them on the screen for up to eighty
+   * minutes of retries is detaining them for the platform's convenience.</p>
+   */
+  const abandonUploadsRef = useRef(false);
   const postCompletionStartedRef = useRef(false);
 
   // Permissions
@@ -230,7 +319,7 @@ export function InterviewPage() {
   const runPostCompletionFlowRef = useRef<(skip: boolean) => void>(() => { });
 
   // Global timer
-  const { secondsLeft: globalSecondsLeft, start: startGlobalTimer } = useTimer({
+  const { secondsLeft: globalSecondsLeft, start: startGlobalTimer, startAt: startGlobalTimerAt } = useTimer({
     initialSeconds: APP_CONFIG.INTERVIEW_TIMER_MINUTES * 60,
     autoStart: false,
     onExpire: () => {
@@ -535,32 +624,206 @@ export function InterviewPage() {
    * did not survive the upload" look identical on the reviewer's screen
    * otherwise, and only one of them is the candidate's doing.</p>
    */
+  /**
+   * Files what became of a recording, twice over.
+   *
+   * <p>Over HTTP first, because that is the record that has to survive: the
+   * failures most worth auditing are a dropped connection or a timeout, and
+   * those have usually taken the interview WebSocket with them, so the socket
+   * report of them never arrived. The socket report is still sent after it,
+   * because it is what reaches a live reviewer immediately.</p>
+   *
+   * <p>Retried, with the same reasoning. An audit that is itself lost to the
+   * outage it is describing is not an audit.</p>
+   *
+   * <p>Worth recording on success too. "No recording" and "a recording that
+   * did not survive the upload" look identical on a reviewer's screen
+   * otherwise, and only one of them is the candidate's doing.</p>
+   */
   const reportRecordingOutcome = useCallback(
-    (kind: 'camera' | 'screen', bytes: number, failureReason?: string, parts?: number) => {
+    async (
+      kind: 'camera' | 'screen',
+      outcome: { success: boolean; bytes: number; attempts: number; parts: number; failureReason?: string },
+    ) => {
+      const scheduleId = voiceInterview.scheduleId;
+
+      if (scheduleId) {
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            await interviewService.reportRecordingOutcome(scheduleId, { kind, ...outcome });
+            break;
+          } catch {
+            // The connection that lost the upload is likely still down. Wait
+            // and try again rather than dropping the only record of it.
+            if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 3000));
+          }
+        }
+      }
+
       try {
-        if (failureReason) {
+        const partNote = outcome.parts > 1 ? `, ${outcome.parts} parts` : '';
+        const attemptNote = outcome.attempts > 1 ? `, ${outcome.attempts} attempts` : '';
+        if (outcome.failureReason) {
           voiceInterview.sendProctoringEvent(
             'recording_upload_failed',
-            `${kind} recording was not saved: ${failureReason}`,
+            `${kind} recording was not saved after ${outcome.attempts} attempts: ${outcome.failureReason}`,
           );
         } else {
-          // The part count goes in the event because it is the only place a
-          // reviewer learns the share was interrupted — two parts means the
-          // candidate stopped sharing partway and started again, and the gap
-          // between them is not on any recording.
-          const partNote = parts && parts > 1 ? `, ${parts} parts` : '';
           voiceInterview.sendProctoringEvent(
             'recording_uploaded',
-            `${kind} recording saved (${Math.round(bytes / 1024)} KB${partNote})`,
+            `${kind} recording saved (${Math.round(outcome.bytes / 1024)} KB${partNote}${attemptNote})`,
           );
         }
       } catch {
-        // The socket may already be gone. Nothing here is worth a second
-        // failure on top of the one being reported.
+        // The socket may already be gone — which is exactly why the HTTP
+        // call above runs first. Nothing here is worth a second failure on
+        // top of the one being reported.
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
+  );
+
+  /**
+   * Hand the candidate the recordings that could not be uploaded.
+   *
+   * <p>Only ever offered, never automatic: most candidates have no use for a
+   * 700 MB file and a download starting by itself at the end of an interview
+   * is alarming. It exists so the evidence is not destroyed by closing a
+   * tab.</p>
+   */
+  const saveRecordingsLocally = useCallback(() => {
+    const scheduleId = voiceInterview.scheduleId ?? 0;
+    const pending = unsavedRecordingsRef.current;
+    downloadRecording(pending.screen, scheduleId, 'screen');
+    downloadRecording(pending.camera, scheduleId, 'camera');
+    showToast('Saving the recording to your downloads folder.', 'info');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showToast]);
+
+  /**
+   * Let the candidate go while the uploads carry on without them.
+   *
+   * <p>Only offered once the interview itself is submitted, which is the
+   * point at which nothing still running can change their result. The
+   * abandonment is recorded against the interview so a missing recording has
+   * a reason attached rather than looking like a fault.</p>
+   *
+   * <p>A request already in flight is not cancelled — if it happens to finish
+   * after they have gone, the recording is saved, which is a better outcome
+   * than aborting it on principle.</p>
+   */
+  const handleLeaveWithoutWaiting = useCallback(() => {
+    abandonUploadsRef.current = true;
+    (['screen', 'camera'] as const).forEach((kind) => {
+      if (unsavedRecordingsRef.current[kind].length === 0) return;
+      void reportRecordingOutcome(kind, {
+        success: false,
+        bytes: unsavedRecordingsRef.current[kind].reduce((sum, blob) => sum + blob.size, 0),
+        attempts: 0,
+        parts: unsavedRecordingsRef.current[kind].length,
+        failureReason: 'The candidate chose to leave before the upload finished.',
+      });
+    });
+    navigate(ROUTES.CANDIDATE.INTERVIEWS);
+  }, [navigate, reportRecordingOutcome]);
+
+  /**
+   * Upload one recording's parts, retrying each, and file the outcome.
+   *
+   * <p>Shared by both streams so the camera cannot quietly end up with weaker
+   * handling than the screen — which is how the camera recording came to be
+   * discarded entirely for a while.</p>
+   */
+  const uploadRecording = useCallback(
+    async (
+      kind: 'camera' | 'screen',
+      segments: Blob[],
+      send: (blob: Blob, onProgress: (percent: number | null) => void) => Promise<unknown>,
+    ) => {
+      const bytes = segments.reduce((sum, blob) => sum + blob.size, 0);
+
+      if (segments.length === 0 || !voiceInterview.scheduleId) {
+        setUploadStatus((prev) => ({
+          ...prev,
+          [kind]: { ...INITIAL_UPLOAD_STATE, status: 'failed', failureReason: 'Nothing was captured to upload.' },
+        }));
+        await reportRecordingOutcome(kind, {
+          success: false,
+          bytes: 0,
+          attempts: 0,
+          parts: 0,
+          failureReason: 'Nothing was captured to upload.',
+        });
+        return;
+      }
+
+      // Held from the start, so a failure part way through a multi-part
+      // upload still leaves the candidate something to save.
+      unsavedRecordingsRef.current[kind] = segments;
+      setHasUnsavedRecordings(true);
+
+      let totalAttempts = 0;
+      for (const [index, segment] of segments.entries()) {
+        if (abandonUploadsRef.current) return;
+        const outcome = await uploadWithRetry(
+          (onUploadProgress) => send(segment, onUploadProgress),
+          segment.size,
+          (progress) =>
+            setUploadStatus((prev) => ({
+              ...prev,
+              [kind]: {
+                status: 'uploading',
+                percent: progress.percent,
+                // Attempts accumulate across parts so the row reads as one
+                // upload rather than restarting its count at each boundary.
+                attempt: progress.attempt,
+                attempts: progress.attempts,
+                retryInSeconds: progress.retryInSeconds,
+                bytes,
+              },
+            })),
+          () => abandonUploadsRef.current,
+        );
+        totalAttempts += outcome.attempts;
+
+        if (!outcome.ok) {
+          const reason =
+            segments.length > 1
+              ? `Part ${index + 1} of ${segments.length}: ${outcome.failureReason}`
+              : outcome.failureReason;
+          setUploadStatus((prev) => ({
+            ...prev,
+            [kind]: { ...prev[kind], status: 'failed', percent: null, failureReason: reason, bytes },
+          }));
+          await reportRecordingOutcome(kind, {
+            success: false,
+            bytes,
+            attempts: totalAttempts,
+            parts: segments.length,
+            failureReason: reason,
+          });
+          return;
+        }
+      }
+
+      unsavedRecordingsRef.current[kind] = [];
+      setHasUnsavedRecordings(
+        unsavedRecordingsRef.current.screen.length + unsavedRecordingsRef.current.camera.length > 0,
+      );
+      setUploadStatus((prev) => ({
+        ...prev,
+        [kind]: { ...prev[kind], status: 'saved', percent: 100, attempt: totalAttempts, bytes },
+      }));
+      await reportRecordingOutcome(kind, {
+        success: true,
+        bytes,
+        attempts: totalAttempts,
+        parts: segments.length,
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [reportRecordingOutcome],
   );
 
   // Post-completion flow
@@ -578,71 +841,66 @@ export function InterviewPage() {
         setPostCompletionStep('uploading-screen');
         if (PROCTORING_CONFIG.recording.screen.required) {
           try {
-            setUploadStatus((prev) => ({ ...prev, screen: 'uploading' }));
             // Segments, not one blob: a candidate who stopped sharing and
-            // picked it back up has more than one. They go up in order and the
-            // backend keeps them as parts — joining two WebM files into one
-            // would leave a recording that plays only as far as the first
-            // boundary, which is worse than two files that both play.
+            // picked it back up has more than one. Each is uploaded and
+            // retried on its own, so a failure costs one part rather than
+            // the hour.
             const screenSegments = await stopScreenAndGetSegments();
-            const totalBytes = screenSegments.reduce((sum, blob) => sum + blob.size, 0);
-            if (screenSegments.length > 0 && voiceInterview.scheduleId) {
-              for (const segment of screenSegments) {
-                await aiService.uploadScreenRecording(voiceInterview.scheduleId, segment);
-              }
-              reportRecordingOutcome(
-                'screen',
-                totalBytes,
-                undefined,
-                screenSegments.length > 1 ? screenSegments.length : undefined,
-              );
-              setUploadStatus((prev) => ({ ...prev, screen: 'saved' }));
-            } else {
-              reportRecordingOutcome('screen', 0, 'Nothing was captured to upload.');
-              setUploadStatus((prev) => ({ ...prev, screen: 'failed' }));
-            }
+            await uploadRecording('screen', screenSegments, (blob, onProgress) =>
+              aiService.uploadScreenRecording(voiceInterview.scheduleId!, blob, onProgress),
+            );
           } catch (err) {
-            // Recorded against the interview, not just the console. A failed
-            // upload used to leave no trace anywhere the reviewer could see:
-            // the recording button simply never appeared, which is
-            // indistinguishable from a candidate who was never asked to share.
-            console.error('Screen recording upload failed:', err);
-            reportRecordingOutcome('screen', 0, recordingFailureReason(err));
-            setUploadStatus((prev) => ({ ...prev, screen: 'failed' }));
+            // Only reached if stopping the recorder itself threw; the upload
+            // path above reports its own failures.
+            console.error('Screen recording could not be finalised:', err);
+            const reason = recordingFailureReason(err);
+            setUploadStatus((prev) => ({
+              ...prev,
+              screen: { ...INITIAL_UPLOAD_STATE, status: 'failed', failureReason: reason },
+            }));
+            await reportRecordingOutcome('screen', {
+              success: false,
+              bytes: 0,
+              attempts: 0,
+              parts: 0,
+              failureReason: reason,
+            });
           }
         } else {
-          setUploadStatus((prev) => ({ ...prev, screen: 'skipped' }));
+          setUploadStatus((prev) => ({ ...prev, screen: { ...INITIAL_UPLOAD_STATE, status: 'skipped' } }));
         }
 
-        // The candidate's camera, which was being recorded and then discarded.
-        // uploadInterviewVideo and its endpoint both existed; nothing called
-        // them, so recordReferences stayed null and the reviewer's Recording
-        // button never appeared for any interview.
-        //
-        // Uploaded after the screen and in its own try/catch on purpose: this
-        // runs while the candidate waits on the "finishing" overlay, and a
-        // failed upload must not cost them a completed interview.
+        // The candidate's camera. Uploaded after the screen and in its own
+        // try/catch on purpose: this runs while the candidate waits on the
+        // finishing overlay, and a failed upload must not cost them a
+        // completed interview.
         try {
-          setUploadStatus((prev) => ({
-            ...prev,
-            camera: PROCTORING_CONFIG.recording.camera.required ? 'uploading' : 'skipped',
-          }));
           // stopVideoAndGetBlob is called either way — it is what releases the
           // camera. In stream-only mode it resolves null and nothing is sent.
           const videoBlob = await stopVideoAndGetBlob();
-          if (videoBlob && voiceInterview.scheduleId) {
-            await aiService.uploadInterviewVideo(voiceInterview.scheduleId, videoBlob);
-            reportRecordingOutcome('camera', videoBlob.size);
-            setUploadStatus((prev) => ({ ...prev, camera: 'saved' }));
-          } else if (PROCTORING_CONFIG.recording.camera.required) {
-            reportRecordingOutcome('camera', 0, 'Nothing was captured to upload.');
-            setUploadStatus((prev) => ({ ...prev, camera: 'failed' }));
+          if (!PROCTORING_CONFIG.recording.camera.required) {
+            setUploadStatus((prev) => ({ ...prev, camera: { ...INITIAL_UPLOAD_STATE, status: 'skipped' } }));
+          } else {
+            await uploadRecording('camera', videoBlob ? [videoBlob] : [], (blob, onProgress) =>
+              aiService.uploadInterviewVideo(voiceInterview.scheduleId!, blob, onProgress),
+            );
           }
         } catch (err) {
-          console.error('Camera recording upload failed:', err);
-          reportRecordingOutcome('camera', 0, recordingFailureReason(err));
-          setUploadStatus((prev) => ({ ...prev, camera: 'failed' }));
+          console.error('Camera recording could not be finalised:', err);
+          const reason = recordingFailureReason(err);
+          setUploadStatus((prev) => ({
+            ...prev,
+            camera: { ...INITIAL_UPLOAD_STATE, status: 'failed', failureReason: reason },
+          }));
+          await reportRecordingOutcome('camera', {
+            success: false,
+            bytes: 0,
+            attempts: 0,
+            parts: 0,
+            failureReason: reason,
+          });
         }
+
         // Tell the paired phone to switch its camera off. Without this it
         // kept filming an interview that had finished, and the candidate was
         // left holding a page that still said "Live Proctoring".
@@ -669,6 +927,7 @@ export function InterviewPage() {
       voiceInterview,
       stopScreenAndGetSegments,
       stopVideoAndGetBlob,
+      uploadRecording,
       stopDetection,
       navigate,
       reportRecordingOutcome,
@@ -749,13 +1008,29 @@ export function InterviewPage() {
     }
   }, [voiceInterview.state, questionTimer]);
 
+  /**
+   * Warnings are told to the candidate once, and never end the interview.
+   *
+   * <p>This used to call {@code runPostCompletionFlow} and submit the
+   * interview. It only looked harmless because the ceiling it compared
+   * against was 999999 — while the server was ending the interview at five,
+   * marking it FAILED with PROCTORING_VIOLATION. Neither side should be
+   * making that call: the warnings are recorded against the interview and a
+   * person decides what they are worth.</p>
+   *
+   * <p>The toast fires once rather than on every warning past the mark; a
+   * candidate being told the same thing every few seconds cannot concentrate
+   * on the question they are being asked.</p>
+   */
+  const warnedAboutProctoringRef = useRef(false);
   useEffect(() => {
-    if (voiceInterview.state !== 'pre-start' && voiceInterview.state !== 'completed' &&
-      totalWarnings >= APP_CONFIG.INTERVIEW_MAX_PROCTORING_WARNINGS) {
-      showToast(MESSAGES.interview.maxWarnings, 'error');
-      runPostCompletionFlow(false);
-    }
-  }, [totalWarnings, voiceInterview.state, runPostCompletionFlow]);
+    if (voiceInterview.state === 'pre-start' || voiceInterview.state === 'completed') return;
+    if (totalWarnings < APP_CONFIG.INTERVIEW_PROCTORING_WARNING_NOTICE) return;
+    if (warnedAboutProctoringRef.current) return;
+    warnedAboutProctoringRef.current = true;
+    showToast(MESSAGES.interview.maxWarnings, 'warning');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalWarnings, voiceInterview.state]);
 
   // Compile handler
   const handleCompile = async () => {
@@ -1102,7 +1377,19 @@ export function InterviewPage() {
       if (started?.resumed) {
         showToast(MESSAGES.interview.resumed, 'info');
       }
-      startGlobalTimer();
+      // Anchored to the server's deadline where it sends one. The clock used
+      // to be a fresh countdown of the configured length, so a reload handed
+      // the candidate another full interview — and a backgrounded tab or a
+      // closed laptop made it run slow, because a throttled interval simply
+      // stops counting. parseServerInstant reads a bare stamp as UTC; a
+      // deadline that has already passed expires immediately, which is the
+      // honest answer rather than time the server will not honour.
+      const deadline = started?.expiresAt ? parseServerInstant(started.expiresAt) : null;
+      if (deadline && !Number.isNaN(deadline.getTime())) {
+        startGlobalTimerAt(deadline.getTime());
+      } else {
+        startGlobalTimer();
+      }
       // The camera is opened when anything wants it: the recording, the face
       // check, or the plain requirement that it be on. Where nothing does, the
       // candidate is not prompted for it at all.
@@ -1321,20 +1608,57 @@ export function InterviewPage() {
               <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--textTertiary)]">
                 Saving recordings
               </p>
-              <UploadRow label="Shared screen" status={uploadStatus.screen} />
-              <UploadRow label="Camera" status={uploadStatus.camera} />
-              {(uploadStatus.screen === 'failed' || uploadStatus.camera === 'failed') && (
-                // Said plainly rather than as an error. It is not the
-                // candidate's failure and there is nothing for them to do.
-                <p className="pt-1 text-xs text-[var(--textSecondary)]">
-                  A recording did not upload. This has been noted for the reviewer and does not
-                  affect your interview or your result.
-                </p>
+              <UploadRow label="Shared screen" state={uploadStatus.screen} />
+              <UploadRow label="Camera" state={uploadStatus.camera} />
+              {(uploadStatus.screen.status === 'failed' || uploadStatus.camera.status === 'failed') && (
+                <div className="space-y-2 pt-1">
+                  {/* Said plainly rather than as an error. It is not the
+                      candidate's failure and it does not change their
+                      result. */}
+                  <p className="text-xs text-[var(--textSecondary)]">
+                    A recording did not upload after several attempts. This has been recorded for
+                    the reviewer and does not affect your interview or your result.
+                  </p>
+                  {hasUnsavedRecordings && (
+                    <>
+                      {/* The last resort. Without it the recording is gone the
+                          moment this tab closes, and with it the only account
+                          of a disputed interview. */}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="w-full"
+                        leftIcon={<Download size={14} />}
+                        onClick={saveRecordingsLocally}
+                      >
+                        Save the recording to this computer
+                      </Button>
+                      <p className="text-[11px] leading-snug text-[var(--textTertiary)]">
+                        Optional. Keep the file in case the reviewer asks for it — you can close
+                        this page afterwards.
+                      </p>
+                    </>
+                  )}
+                </div>
               )}
             </div>
 
-            {postCompletionStep === 'done' && (
+            {postCompletionStep === 'done' ? (
               <p className="text-center text-sm font-medium text-emerald-500">Taking you back…</p>
+            ) : (
+              getStepStatus('ending') === 'done' && (
+                // Offered only once the interview itself is in. Until then
+                // leaving would cost them the submission; after it, waiting
+                // costs them nothing but time, and up to eighty minutes of
+                // retries is not a wait anyone should be held through.
+                <button
+                  type="button"
+                  onClick={handleLeaveWithoutWaiting}
+                  className="w-full text-center text-xs text-[var(--textTertiary)] underline-offset-2 hover:text-[var(--textSecondary)] hover:underline"
+                >
+                  Leave now — my answers are already submitted
+                </button>
+              )
             )}
           </div>
         </div>
@@ -1405,7 +1729,10 @@ export function InterviewPage() {
                 score the candidate cannot affect. */}
             <div className="relative group">
               <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--surface1)] cursor-default ${getWarningColor()}`}>
-                <Shield size={14} /> <span className="text-xs font-semibold">{totalWarnings}/{APP_CONFIG.INTERVIEW_MAX_PROCTORING_WARNINGS}</span>
+                {/* A count, not a countdown. It read "2/999999", which is
+                    both meaningless and — while the server still terminated
+                    at five — actively misleading. */}
+                <Shield size={14} /> <span className="text-xs font-semibold">{totalWarnings}</span>
               </div>
               <div className="absolute right-0 top-full mt-2 w-64 bg-[var(--cardBg)] rounded-lg shadow-lg border border-[var(--border)] p-3 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-30">
                 <p className="text-xs font-semibold text-[var(--text)] mb-2">Warning Breakdown</p>
@@ -1419,8 +1746,9 @@ export function InterviewPage() {
                   <div className="flex justify-between"><span>DevTools</span><span className="font-mono">{devToolsCount}</span></div>
                 </div>
                 <p className="mt-2 text-[11px] text-[var(--textSecondary)] border-t border-[var(--border)] pt-2">
-                  {APP_CONFIG.INTERVIEW_MAX_PROCTORING_WARNINGS} warnings end the interview. Avoid
-                  reloading — if you do, reopen the interview and it picks up where you left off.
+                  These are noted for the reviewer. They do not end your interview and they are
+                  not a score. Avoid reloading — if you do, reopen the interview and it picks up
+                  where you left off.
                 </p>
               </div>
             </div>

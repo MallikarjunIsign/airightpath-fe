@@ -75,6 +75,39 @@ export const PROCTORING_CONFIG = {
      * faces" needs only 2 (≈8s — a second person is flagged promptly).
      */
     checkIntervalMs: parseCount(env.VITE_PROCTORING_EYE_CHECK_INTERVAL_MS, 4000),
+    /**
+     * Whether looking down counts as looking away.
+     *
+     * Off, because the exam is typed. A candidate writing code looks at their
+     * keyboard, and at the default sensitivity that is a warning every eight
+     * seconds — five of them auto-submitted the paper. The behaviour being
+     * punished was "typing", which is the one thing the exam asks for.
+     *
+     * The detector cannot tell a glance at the keyboard from a glance at notes
+     * in your lap, so this is a real reduction in coverage and not a free one.
+     * It is the right trade anyway: the signals that actually catch cheating —
+     * nobody in the seat, a second face, a head turned to another screen — are
+     * all still on, and a check that fires constantly on honest candidates is
+     * not providing coverage, it is providing noise. Turn it back on where the
+     * paper is read rather than typed.
+     */
+    flagLookingDown: parseBool(env.VITE_PROCTORING_FLAG_LOOKING_DOWN, false),
+    /**
+     * Consecutive checks a sideways glance must persist before it warns.
+     * Three at the 4s cadence is ~12s of a head held turned away, which is
+     * looking at something, not glancing at a clock.
+     */
+    lookAwayConsecutiveChecks: parseCount(env.VITE_PROCTORING_LOOK_AWAY_CHECKS, 3),
+    /**
+     * Consecutive checks with no face found before it warns.
+     *
+     * Six (~24s) rather than four. The detector loses a head tilted down over
+     * a keyboard, so a short miss is as likely to mean "typing" as "gone", and
+     * this shares the same warning budget that auto-submits the paper. The
+     * counter resets the moment a face is seen again, so a genuinely empty
+     * seat still crosses it quickly.
+     */
+    noFaceConsecutiveChecks: parseCount(env.VITE_PROCTORING_NO_FACE_CHECKS, 6),
   },
   /**
    * Background-noise check on the exam instructions screen. Thresholds are in

@@ -309,28 +309,40 @@ export function extractApiError(error: unknown): {
    * either without being wrong half the time.
    */
   serverMessage?: string;
+  /**
+   * The HTTP status, or undefined when the request never reached a server.
+   *
+   * The absence is as meaningful as the value: a retry decision turns on
+   * whether a second attempt could plausibly do better, and "the connection
+   * dropped" and "the server said 413" point opposite ways.
+   */
+  status?: number;
 } {
   if (axios.isAxiosError(error)) {
     const data = error.response?.data as ApiErrorEnvelope | undefined;
+    const status = error.response?.status;
     // V2 format: flat object with code field
     if (data?.code) {
       return {
         code: data.code,
         message: getErrorMessage(data.code, data.message),
         serverMessage: data.message,
+        status,
       };
     }
     // Legacy format: { message, timestamp } — no code
     if (data && typeof (data as Record<string, unknown>).message === "string") {
       return {
-        code: `HTTP_${error.response?.status}`,
+        code: `HTTP_${status}`,
         message: (data as Record<string, unknown>).message as string,
+        status,
       };
     }
     if (error.code === "ECONNABORTED") {
       return {
         code: "TIMEOUT_ERROR",
         message: getErrorMessage("TIMEOUT_ERROR"),
+        status,
       };
     }
     if (!error.response) {
@@ -342,6 +354,7 @@ export function extractApiError(error: unknown): {
     return {
       code: `HTTP_${error.response.status}`,
       message: error.response.statusText || getErrorMessage(),
+      status,
     };
   }
   return {

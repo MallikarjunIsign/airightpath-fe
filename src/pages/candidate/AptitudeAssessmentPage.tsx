@@ -31,6 +31,7 @@ import {
 import { useIsDesktop } from '@/hooks/useIsDesktop';
 import { ROUTES } from '@/config/routes';
 import { formatTimer } from '@/utils/format.utils';
+import { parseServerInstant } from '@/utils/format.utils';
 import { computeExamMinutes } from '@/utils/exam-duration.utils';
 import { buildSubmissionMeta } from '@/utils/result.utils';
 // Shared with Test Mode's rehearsal of this screen, so the two cannot render the
@@ -98,7 +99,7 @@ export function AptitudeAssessmentPage() {
 
   // Timer. The real duration is per-question, so it is only known once the
   // paper has loaded — init below resets the clock to it before starting.
-  const { secondsLeft, start: startTimer, reset: resetTimer } = useTimer({
+  const { secondsLeft, start: startTimer, startAt: startTimerAt, reset: resetTimer } = useTimer({
     initialSeconds: APP_CONFIG.EXAM_TIMER_MINUTES * 60,
     autoStart: false,
     onExpire: () => handleAutoSubmit('Time is up!'),
@@ -244,8 +245,9 @@ export function AptitudeAssessmentPage() {
         await beginProctoring();
 
         // Mark assessment as attended
+        let attended: Awaited<ReturnType<typeof assessmentService.markAttended>> | null = null;
         if (user?.email) {
-          await assessmentService.markAttended({
+          attended = await assessmentService.markAttended({
             assessmentId: assessment.id,
             candidateEmail: user.email,
           });
@@ -253,7 +255,20 @@ export function AptitudeAssessmentPage() {
 
         // Proctoring counters go live only now — after all permission prompts.
         markActive();
-        startTimer();
+        // The clock counts down to a fixed moment, not from a fresh
+        // duration. examStartedAt is stamped once on the server, so a reload
+        // part-way through lands on the same deadline — refreshing used to
+        // restart the countdown and hand back a whole paper's worth of time.
+        // Falls back to a plain countdown when the server does not send it,
+        // which is the behaviour this replaces rather than a new risk.
+        const startedAt = attended?.data?.examStartedAt
+          ? parseServerInstant(attended.data.examStartedAt)
+          : null;
+        if (startedAt && !Number.isNaN(startedAt.getTime())) {
+          startTimerAt(startedAt.getTime() + minutes * 60_000);
+        } else {
+          startTimer();
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to load exam questions.';
         setError(message);

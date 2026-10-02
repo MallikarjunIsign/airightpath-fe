@@ -92,8 +92,17 @@ export const assessmentService = {
     });
   },
 
+  /**
+   * Reports the paper opened, and gets back when it was first opened.
+   *
+   * <p>`examStartedAt` is stamped once on the server, so a reload part-way
+   * through returns the original instant rather than the moment of the
+   * reload. It is what the paper's clock counts down from — without it the
+   * countdown restarted on every load and refreshing bought a fresh paper's
+   * worth of time.</p>
+   */
   markAttended(data: { assessmentId: number; candidateEmail: string }) {
-    return api.post<ApiResponse<unknown>>(ENDPOINTS.ASSESSMENTS.MARK_ATTENDED, data);
+    return api.post<{ examStartedAt?: string }>(ENDPOINTS.ASSESSMENTS.MARK_ATTENDED, data);
   },
 
   saveResult(data: AssessmentResult) {

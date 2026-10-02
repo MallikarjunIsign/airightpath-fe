@@ -169,6 +169,29 @@ export const interviewService = {
     );
   },
 
+  /**
+   * Files what became of a recording, so the attempt is on the record.
+   *
+   * <p>Silent and never thrown from by the caller: this runs while the
+   * candidate waits on the finishing screen, and a failure to file the audit
+   * must not cost them their completion on top of whatever it is auditing.</p>
+   */
+  reportRecordingOutcome(
+    scheduleId: number,
+    outcome: {
+      kind: 'camera' | 'screen';
+      success: boolean;
+      bytes: number;
+      attempts: number;
+      parts: number;
+      failureReason?: string;
+    },
+  ) {
+    return api.post<void>(ENDPOINTS.INTERVIEWS.RECORDING_OUTCOME(scheduleId), outcome, {
+      _skipErrorToast: true,
+    } as never);
+  },
+
   getProctoringEvents(scheduleId: number) {
     return api.get<ProctoringEvent[]>(
       ENDPOINTS.INTERVIEW_ADMIN.PROCTORING_EVENTS(scheduleId),

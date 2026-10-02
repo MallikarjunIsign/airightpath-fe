@@ -134,6 +134,14 @@ export const ENDPOINTS = {
     // A signed, playable link to a stored recording. The schedule holds an
     // `s3://` reference, which no browser can open.
     RECORDING_LINK: (id: number) => `/api/interview/${id}/recording`,
+    /**
+     * What became of a recording upload, filed over HTTP.
+     *
+     * Separate from the WebSocket proctoring event that reports the same
+     * thing, because the failures most worth auditing are the ones that have
+     * already taken the socket down with them.
+     */
+    RECORDING_OUTCOME: (id: number) => `/api/interview/${id}/recording-outcome`,
   },
   AI: {
     START_INTERVIEW: "/api/interview/start",

@@ -100,7 +100,11 @@ export function buildProctoringRules(): ProctoringRule[] {
 
   rules.push({
     icon: <Shield size={18} />,
-    text: `${APP_CONFIG.INTERVIEW_MAX_PROCTORING_WARNINGS} warnings end the interview automatically, with whatever you have answered so far.`,
+    // Was "999999 warnings end the interview automatically", which was false
+    // twice over: the number was a disabled threshold, and the server was
+    // ending interviews at five of its own. Nothing ends an interview on a
+    // warning count now — they are recorded, and a person reads them.
+    text: 'Warnings are recorded against your interview for a reviewer to read. They do not end it and they are not a score.',
   });
   rules.push({
     icon: <RotateCcw size={18} />,
