@@ -70,6 +70,60 @@ export function isRetryable(err: unknown): boolean {
   return false;
 }
 
+/** Megabytes, to one decimal, for a message a person has to act on. */
+const mb = (bytes: number) => (bytes / (1024 * 1024)).toFixed(1);
+
+/**
+ * Above this, a connection cut off mid-body is far more likely to be a size
+ * limit than the candidate's wifi.
+ *
+ * <p>Proxies that refuse an oversize body usually do it by closing the
+ * connection rather than answering, and some never send the 413 at all. The
+ * browser reports that as an ordinary network error, which is how a server
+ * limit came to be reported to candidates as "check your internet
+ * connection" — advice that cannot help, aimed at the wrong party, while the
+ * real cause went unnamed in every log.</p>
+ *
+ * <p>Fifty megabytes is well past anything a working connection drops by
+ * chance and well under a real recording, so the two cases separate cleanly.</p>
+ */
+const SIZE_SUSPICION_THRESHOLD = 50 * 1024 * 1024;
+
+/**
+ * What actually went wrong, named, with the number that proves it.
+ *
+ * <p>Every message carries the size, because size is the diagnostic: a
+ * recording that saves at 40 MB and fails at 700 MB is a limit somewhere, and
+ * one that fails at both is not.</p>
+ */
+export function describeUploadFailure(err: unknown, bytes: number): string {
+  const api = extractApiError(err);
+  const size = `${mb(bytes)} MB`;
+
+  if (api.status === 413) {
+    return `The server refused the recording: at ${size} it is over the upload size limit. This is a server or proxy setting, not your connection.`;
+  }
+  if (api.status === 401 || api.status === 403) {
+    return `Your session expired while the ${size} recording was uploading.`;
+  }
+  if (api.status === 429) {
+    return `The server was too busy to accept the ${size} recording.`;
+  }
+  if (api.status && api.status >= 500) {
+    return `The server failed while saving the ${size} recording (error ${api.status}).`;
+  }
+  if (api.code === 'TIMEOUT_ERROR') {
+    return `The ${size} recording was still uploading when the time limit was reached. A slow connection or a very large file.`;
+  }
+  if (api.status == null) {
+    // No response at all. Which of the two causes it is depends on the size.
+    return bytes >= SIZE_SUSPICION_THRESHOLD
+      ? `The connection was cut off while sending ${size}. On a file this large that is usually a size limit on the server or a proxy in front of it rather than your own connection — a proxy refusing an oversize body often closes the connection instead of replying.`
+      : `The connection dropped while sending ${size}.`;
+  }
+  return api.serverMessage || `${api.message} (${size})`;
+}
+
 /** Seconds, rounded up, so a countdown never shows "0s" while still waiting. */
 const toSeconds = (ms: number) => Math.ceil(ms / 1000);
 
@@ -110,8 +164,7 @@ export async function uploadWithRetry(
       await send((percent) => onProgress?.({ attempt, attempts: MAX_ATTEMPTS, percent }));
       return { ok: true, bytes, attempts: attempt };
     } catch (err) {
-      const api = extractApiError(err);
-      lastReason = api.serverMessage || api.message || lastReason;
+      lastReason = describeUploadFailure(err, bytes);
 
       if (!isRetryable(err) || attempt === MAX_ATTEMPTS) {
         return { ok: false, bytes, attempts: attempt, failureReason: lastReason };

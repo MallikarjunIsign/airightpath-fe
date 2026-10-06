@@ -148,9 +148,16 @@ function UploadRow({ label, state }: Readonly<{ label: string; state: UploadStat
   );
 }
 
+/**
+ * Why a recording could not be finalised, before any upload was attempted.
+ *
+ * <p>Separate from {@link describeUploadFailure}, which names an upload
+ * failure and has a byte count to reason about. This covers the recorder
+ * itself throwing, where there is nothing to size.</p>
+ */
 function recordingFailureReason(err: unknown): string {
   const api = extractApiError(err);
-  return api.serverMessage || api.message || 'The upload did not complete.';
+  return api.serverMessage || api.message || 'The recording could not be finalised.';
 }
 
 export function InterviewPage() {

@@ -804,12 +804,18 @@ function AttemptSection({
           {schedule.recordReferences ? (
             <RecordingPlayerButton scheduleId={schedule.id} kind="camera" label="Camera" />
           ) : (
-            <MissingRecording label="Camera" />
+            <MissingRecording
+              label="Camera"
+              reason={recordingFailureFor(attempt.proctoring, 'camera')}
+            />
           )}
           {schedule.screenRecordReferences ? (
             <RecordingPlayerButton scheduleId={schedule.id} kind="screen" label="Shared screen" />
           ) : (
-            <MissingRecording label="Shared screen" />
+            <MissingRecording
+              label="Shared screen"
+              reason={recordingFailureFor(attempt.proctoring, 'screen')}
+            />
           )}
           {/* Here as well as on the list, because this is where a reviewer
               works out that a sitting is a duplicate or a test run — having
@@ -1008,14 +1014,52 @@ function FormatOption({
   );
 }
 
-function MissingRecording({ label }: Readonly<{ label: string }>) {
+/**
+ * The reason a recording is missing, taken from what the candidate's browser
+ * reported at the time.
+ *
+ * <p>The client files a {@code recording_upload_failed} event naming the
+ * cause, the size and the number of attempts — and none of it was shown here.
+ * The reviewer got "Camera: not saved" and a tooltip telling them to go and
+ * read the proctoring log, which is both a worse answer and more work than
+ * simply printing the reason that was already fetched for this page.</p>
+ *
+ * <p>Most recent first: a candidate who re-sat has more than one, and the
+ * last attempt is the one being asked about.</p>
+ */
+function recordingFailureFor(
+  events: ProctoringEvent[],
+  kind: 'camera' | 'screen',
+): string | null {
+  const match = [...events]
+    .reverse()
+    .find(
+      (event) =>
+        event.eventType === 'recording_upload_failed' &&
+        (event.details ?? '').toLowerCase().includes(kind),
+    );
+  return match?.details ?? null;
+}
+
+function MissingRecording({ label, reason }: Readonly<{ label: string; reason?: string | null }>) {
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-[var(--borderMuted)] px-2 py-1 text-xs text-[var(--textTertiary)]"
-      title="Either it was not recorded, or the upload did not reach storage. Check the proctoring log below."
+      className={`inline-flex items-start gap-1.5 rounded-lg border border-dashed px-2 py-1 text-xs ${
+        reason
+          ? 'border-amber-400/60 text-amber-700 dark:text-amber-400'
+          : 'border-[var(--borderMuted)] text-[var(--textTertiary)]'
+      }`}
+      // The full text in the tooltip as well: the inline version is clamped
+      // so one long failure cannot push the recording buttons off the row.
+      title={
+        reason ??
+        'No failure was reported, so this was most likely never recorded — the candidate may not have been asked to share, or the browser refused.'
+      }
     >
-      <VideoOff size={13} />
-      {label}: not saved
+      <VideoOff size={13} className="mt-0.5 shrink-0" />
+      <span className="max-w-[22rem] truncate">
+        {label}: {reason ? reason.replace(/^\w+ recording /, '') : 'never recorded'}
+      </span>
     </span>
   );
 }
