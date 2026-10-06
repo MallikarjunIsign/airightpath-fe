@@ -26,6 +26,17 @@ export default function MobileConnect() {
      */
     const streamRef = useRef<MediaStream | null>(null);
 
+    /**
+     * Whether the candidate has read the recording notice and agreed to share
+     * the camera. Nothing touches the camera until then, so the browser's own
+     * permission prompt arrives with context instead of out of nowhere.
+     */
+    const [consented, setConsented] = useState(false);
+    const [agreed, setAgreed] = useState(false);
+    const consentedRef = useRef(false);
+    /** Set when the browser refused the camera, so we can say how to fix it. */
+    const [cameraDenied, setCameraDenied] = useState(false);
+
     useEffect(() => {
         if (!token) return;
 
@@ -61,26 +72,40 @@ export default function MobileConnect() {
 
     // Start camera for verification preview
     useEffect(() => {
+        if (!consented) return;
         let currentStream: MediaStream | null = null;
+        let cancelled = false;
         async function startCamera() {
             try {
                 currentStream = await navigator.mediaDevices.getUserMedia({
                     video: { facingMode: facingMode }
                 });
+                if (cancelled) {
+                    currentStream.getTracks().forEach(track => track.stop());
+                    return;
+                }
+                setCameraDenied(false);
                 if (videoRef.current) {
                     videoRef.current.srcObject = currentStream;
                 }
             } catch (err) {
                 console.error("Error accessing camera:", err);
+                if (!cancelled) setCameraDenied(true);
             }
         }
         startCamera();
         return () => {
+            cancelled = true;
             if (currentStream) {
                 currentStream.getTracks().forEach(track => track.stop());
             }
         };
-    }, [facingMode]);
+    }, [facingMode, consented]);
+
+    const acceptConsent = () => {
+        consentedRef.current = true;
+        setConsented(true);
+    };
 
     const toggleCamera = () => {
         setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
@@ -176,6 +201,9 @@ export default function MobileConnect() {
     const startingRef = useRef(false);
 
     const startStreaming = async () => {
+        // The desktop's ready signal can beat the candidate's consent; the
+        // camera must not open before they have agreed.
+        if (!consentedRef.current) return;
         // An established connection does not need rebuilding. A dead one does
         // — the desktop reloading is exactly when the phone must renegotiate
         // rather than sit on a peer connection nothing is listening to.
@@ -335,6 +363,49 @@ export default function MobileConnect() {
         );
     }
 
+    if (!consented) {
+        return (
+            <div className="min-h-screen bg-gray-50 p-4 flex flex-col items-center justify-center">
+                <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-xl space-y-4">
+                    <h1 className="text-xl font-bold text-gray-800">Before you connect</h1>
+                    <p className="text-sm text-gray-600">
+                        This phone will act as a second camera for your proctored interview.
+                    </p>
+                    <ol className="list-decimal space-y-2 pl-5 text-sm text-gray-700">
+                        <li>Tap <b>Allow</b> when your browser asks for camera (and microphone) access.</li>
+                        <li>Your phone will show a camera-in-use indicator while the feed is shared with the interview.</li>
+                        <li>Place the phone so it shows you and your computer screen, then tap <b>Verify My Room</b>.</li>
+                        <li>Keep this page open until the interview finishes.</li>
+                    </ol>
+                    <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900 space-y-1">
+                        <p className="font-semibold">This session is recorded</p>
+                        <p>
+                            The camera feed and audio are recorded for interview integrity, in line with our
+                            Privacy Policy. Do not screenshot, screen-record, photograph or otherwise copy or
+                            share any interview content. Doing so may invalidate your interview.
+                        </p>
+                    </div>
+                    <label className="flex items-start gap-2 text-sm text-gray-700">
+                        <input
+                            type="checkbox"
+                            checked={agreed}
+                            onChange={(e) => setAgreed(e.target.checked)}
+                            className="mt-0.5 h-4 w-4"
+                        />
+                        <span>I understand and agree to share my camera and to being recorded.</span>
+                    </label>
+                    <button
+                        onClick={acceptConsent}
+                        disabled={!agreed}
+                        className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl shadow-lg active:scale-95"
+                    >
+                        Allow camera &amp; continue
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="min-h-screen p-4 bg-gray-50 flex flex-col items-center">
             <div className="mb-6 flex w-full max-w-md items-center justify-between">
@@ -388,6 +459,14 @@ export default function MobileConnect() {
                                 alert on a phone covers the camera preview — the
                                 one thing the candidate needs to see to fix the
                                 problem it is describing. */}
+                            {cameraDenied && (
+                                <div className="rounded-xl border border-red-300 bg-red-50 p-3">
+                                    <p className="text-sm text-red-900">
+                                        Camera access was blocked. Open your browser's site settings (the lock
+                                        icon beside the address bar), set Camera to <b>Allow</b>, then reload this page.
+                                    </p>
+                                </div>
+                            )}
                             {checkMessage && (
                                 <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
                                     <p className="text-sm text-amber-900">{checkMessage}</p>
