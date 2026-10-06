@@ -160,9 +160,22 @@ export default function MobileConnect() {
                 const res = await fetch(url, { method: 'POST', body: formData });
                 if (!res.ok) {
                     const errorText = await res.text();
+                    // 401/403/404 mean the QR link is no longer valid; retrying
+                    // cannot help, so tell the candidate to rescan.
+                    if (res.status === 401 || res.status === 403 || res.status === 404) {
+                        setCheckMessage('This pairing link has expired. Please scan the QR code on your computer again.');
+                        return;
+                    }
                     throw new Error(`HTTP ${res.status}: ${errorText}`);
                 }
                 const data = await res.json();
+                // The server could not run the check at all (its AI provider
+                // failed). That is not the candidate's room, so say so rather
+                // than telling them to reposition the phone.
+                if (data.valid === false && /could not be run|unavailable|error/i.test(data.reason ?? '')) {
+                    setCheckMessage('The room check is temporarily unavailable. Please wait a moment and tap Verify My Room again.');
+                    return;
+                }
                 if (data.valid) {
                     setVerified(true);
                     setCheckMessage(null);

@@ -28,7 +28,10 @@ import { getAccessToken } from "@/services/api.service";
  * with VITE_TRANSCRIPTION_SILENCE_FLOOR, because what counts as background
  * depends on the room and the microphone.
  */
-const SILENCE_FLOOR = parseFloat(import.meta.env.VITE_TRANSCRIPTION_SILENCE_FLOOR ?? '') || 6;
+/** Smallest blob worth sending; below this Whisper answers "audio too short". */
+const MIN_CHUNK_BYTES = 2000;
+
+const SILENCE_FLOOR =parseFloat(import.meta.env.VITE_TRANSCRIPTION_SILENCE_FLOOR ?? '') || 6;
 
 export function useAudioStreaming(scheduleId: number | null) {
   const [isRecording, setIsRecording] = useState(false);
@@ -87,6 +90,15 @@ export function useAudioStreaming(scheduleId: number | null) {
     (blob: Blob) => {
       if (blob.size === 0 || !interviewWsService.connected || !scheduleId)
         return;
+
+      // A webm/opus blob this small is a container header with no audio in it.
+      // Whisper rejects those with "audio too short" (400), so the backend
+      // logged an error and burned an API call for every one.
+      if (blob.size < MIN_CHUNK_BYTES) {
+        console.debug(`Skipping tiny audio chunk (${blob.size} bytes)`);
+        peakSinceChunkRef.current = 0;
+        return;
+      }
 
       // Read and reset before the async work below, so the next chunk measures
       // its own window rather than inheriting this one's peak.
