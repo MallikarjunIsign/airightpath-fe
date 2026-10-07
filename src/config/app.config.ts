@@ -54,6 +54,15 @@ export const APP_CONFIG = {
   FACE_DETECTION_MAX_WARNINGS: 999999,
   PROCTORING_MAX_TOTAL_WARNINGS: 9999999,
   VIDEO_CHUNK_SECONDS: 15,
+  /**
+   * How long a recording runs before it is closed off and uploaded while the
+   * interview carries on. A recording held in memory until the end is lost
+   * whole if the tab is closed, reloaded or put to sleep — an hour of footage
+   * gone, with "nothing was captured" the only trace. Cut into parts, the most
+   * that can be lost is the part in progress. 0 disables it (one file at the
+   * end, as before).
+   */
+  RECORDING_SEGMENT_MINUTES: Number(import.meta.env.VITE_RECORDING_SEGMENT_MINUTES ?? 10) || 0,
   AUDIO_CHUNK_SECONDS: 4,
   AUDIO_CHUNK_MIME_TYPE: "audio/webm;codecs=opus",
   /**

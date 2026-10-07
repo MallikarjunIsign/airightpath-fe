@@ -22,6 +22,14 @@ interface UseMediaRecorderOptions {
    * empty recording.
    */
   onProblem?: (message: string) => void;
+  /**
+   * Close the recording off every `segmentMs` and hand the finished part over,
+   * then carry on recording on the same stream. The part is not kept here —
+   * the caller owns it from then on, which is the point: it can be uploaded
+   * while the interview runs instead of sitting in memory until the end.
+   */
+  segmentMs?: number;
+  onSegment?: (blob: Blob) => void;
 }
 
 /** Fresh recorders attempted before giving up on a camera that delivers nothing. */
@@ -40,6 +48,7 @@ export function useMediaRecorder(options?: UseMediaRecorderOptions) {
   const restartsRef = useRef(0);
   const watchdogRef = useRef<number | null>(null);
   const stoppingRef = useRef(false);
+  const segmentTimerRef = useRef<number | null>(null);
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
@@ -47,6 +56,10 @@ export function useMediaRecorder(options?: UseMediaRecorderOptions) {
     if (watchdogRef.current != null) {
       window.clearTimeout(watchdogRef.current);
       watchdogRef.current = null;
+    }
+    if (segmentTimerRef.current != null) {
+      window.clearInterval(segmentTimerRef.current);
+      segmentTimerRef.current = null;
     }
   };
 
@@ -136,6 +149,27 @@ export function useMediaRecorder(options?: UseMediaRecorderOptions) {
       watchdogRef.current = window.setTimeout(() => {
         if (chunksRef.current.length === 0) void restart('The camera produced no footage.');
       }, slice * 2 + 5000);
+    }
+
+    const segmentMs = optionsRef.current?.segmentMs;
+    if (segmentMs && optionsRef.current?.onSegment) {
+      segmentTimerRef.current = window.setInterval(() => {
+        const current = recorderRef.current;
+        if (stoppingRef.current || !current || current.state !== 'recording') return;
+        // Nothing to close off yet: leave the recorder to carry on.
+        const live = streamRef.current;
+        if (!live) return;
+        current.onstop = () => {
+          const finished = chunksRef.current;
+          chunksRef.current = [];
+          setChunks([]);
+          if (finished.length > 0) {
+            optionsRef.current?.onSegment?.(new Blob(finished, { type: current.mimeType || 'video/webm' }));
+          }
+          if (!stoppingRef.current) attach(live);
+        };
+        current.stop();
+      }, segmentMs);
     }
   }, []);
 

@@ -341,6 +341,15 @@ export function InterviewPage() {
   const totalInterviewSeconds = APP_CONFIG.INTERVIEW_TIMER_MINUTES * 60;
   const elapsedSeconds = Math.min(totalInterviewSeconds, Math.max(0, totalInterviewSeconds - globalSecondsLeft));
 
+  /**
+   * Where finished recording parts go. Declared before the recorders because
+   * they take it as an option, and assigned once the upload code below exists.
+   */
+  const segmentSinkRef = useRef<(kind: 'camera' | 'screen', blob: Blob) => void>(() => { });
+  const segmentMs = APP_CONFIG.RECORDING_SEGMENT_MINUTES > 0
+    ? APP_CONFIG.RECORDING_SEGMENT_MINUTES * 60_000
+    : undefined;
+
   // Camera stream for face detection
   const {
     start: startVideoRecording,
@@ -354,6 +363,8 @@ export function InterviewPage() {
     // still needs live frames, and taking the camera down to stop the recording
     // would quietly take the face check with it.
     record: PROCTORING_CONFIG.recording.camera.required,
+    segmentMs,
+    onSegment: (blob) => segmentSinkRef.current('camera', blob),
     // Put on the interview's record, not just the console: a camera that was
     // taken away mid-interview is why a recording is short or missing, and the
     // reviewer would otherwise see only the gap.
@@ -367,6 +378,8 @@ export function InterviewPage() {
   const [screenPermission, setScreenPermission] = useState<'granted' | 'denied' | 'prompt'>('prompt');
   const { start: startScreenRecording, stop: stopScreenRecording, resume: resumeScreenRecording, stopAndGetSegments: stopScreenAndGetSegments, isRecording: isScreenRecording, stoppedEarly: screenShareStoppedEarly, screenStream } = useScreenRecorder({
     timeslice: APP_CONFIG.VIDEO_CHUNK_SECONDS * 1000,
+    segmentMs,
+    onSegment: (blob) => segmentSinkRef.current('screen', blob),
     // Read at record time, not now: the audio graph is built when the first
     // question is spoken, which is after the recording has already started.
     getInterviewerAudio: () => voiceInterview.getInterviewerAudioStream(),
@@ -749,6 +762,49 @@ export function InterviewPage() {
   }, [navigate, reportRecordingOutcome]);
 
   /**
+   * Parts uploaded while the interview is still running.
+   *
+   * <p>Each part is a complete, playable file, uploaded as soon as it is
+   * closed off. They go one at a time, through a chain, because the server
+   * appends each to the list for the interview and two arriving together could
+   * overwrite one another's entry. A part that fails every attempt is kept
+   * here and tried once more at the end rather than dropped.</p>
+   */
+  const backgroundUploadsRef = useRef<Record<'camera' | 'screen', {
+    chain: Promise<void>; ok: number; bytes: number; attempts: number; failed: Blob[];
+  }>>({
+    camera: { chain: Promise.resolve(), ok: 0, bytes: 0, attempts: 0, failed: [] },
+    screen: { chain: Promise.resolve(), ok: 0, bytes: 0, attempts: 0, failed: [] },
+  });
+
+  segmentSinkRef.current = (kind, blob) => {
+    const state = backgroundUploadsRef.current[kind];
+    state.chain = state.chain.then(async () => {
+      const scheduleId = voiceInterview.scheduleId;
+      if (!scheduleId || abandonUploadsRef.current) {
+        state.failed.push(blob);
+        return;
+      }
+      const outcome = await uploadWithRetry(
+        (onProgress) => kind === 'camera'
+          ? aiService.uploadInterviewVideo(scheduleId, blob, onProgress)
+          : aiService.uploadScreenRecording(scheduleId, blob, onProgress),
+        blob.size,
+        undefined,
+        () => abandonUploadsRef.current,
+      );
+      state.attempts += outcome.attempts;
+      if (outcome.ok) {
+        state.ok += 1;
+        state.bytes += blob.size;
+      } else {
+        console.warn(`A ${kind} recording part could not be uploaded yet:`, outcome.failureReason);
+        state.failed.push(blob);
+      }
+    });
+  };
+
+  /**
    * Upload one recording's parts, retrying each, and file the outcome.
    *
    * <p>Shared by both streams so the camera cannot quietly end up with weaker
@@ -758,10 +814,30 @@ export function InterviewPage() {
   const uploadRecording = useCallback(
     async (
       kind: 'camera' | 'screen',
-      segments: Blob[],
+      finalSegments: Blob[],
       send: (blob: Blob, onProgress: (percent: number | null) => void) => Promise<unknown>,
     ) => {
-      const bytes = segments.reduce((sum, blob) => sum + blob.size, 0);
+      let segments = finalSegments;
+      // Parts already uploaded while the interview ran are finished first, and
+      // any that failed then are tried once more alongside what is left now.
+      const background = backgroundUploadsRef.current[kind];
+      await background.chain;
+      segments = [...background.failed, ...segments];
+      background.failed = [];
+      const priorParts = background.ok;
+      const priorBytes = background.bytes;
+      const priorAttempts = background.attempts;
+      const bytes = priorBytes + segments.reduce((sum, blob) => sum + blob.size, 0);
+
+      if (segments.length === 0 && priorParts > 0) {
+        // Everything was saved as it was recorded; there is simply no tail.
+        setUploadStatus((prev) => ({
+          ...prev,
+          [kind]: { ...INITIAL_UPLOAD_STATE, status: 'saved', percent: 100, attempt: priorAttempts, bytes },
+        }));
+        await reportRecordingOutcome(kind, { success: true, bytes, attempts: priorAttempts, parts: priorParts });
+        return;
+      }
 
       if (segments.length === 0 || !voiceInterview.scheduleId) {
         setUploadStatus((prev) => ({
@@ -783,7 +859,7 @@ export function InterviewPage() {
       unsavedRecordingsRef.current[kind] = segments;
       setHasUnsavedRecordings(true);
 
-      let totalAttempts = 0;
+      let totalAttempts = priorAttempts;
       for (const [index, segment] of segments.entries()) {
         if (abandonUploadsRef.current) return;
         const outcome = await uploadWithRetry(
@@ -820,7 +896,7 @@ export function InterviewPage() {
             success: false,
             bytes,
             attempts: totalAttempts,
-            parts: segments.length,
+            parts: priorParts + segments.length,
             failureReason: reason,
           });
           return;
@@ -839,7 +915,7 @@ export function InterviewPage() {
         success: true,
         bytes,
         attempts: totalAttempts,
-        parts: segments.length,
+        parts: priorParts + segments.length,
       });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1397,19 +1473,6 @@ export function InterviewPage() {
       if (started?.resumed) {
         showToast(MESSAGES.interview.resumed, 'info');
       }
-      // Anchored to the server's deadline where it sends one. The clock used
-      // to be a fresh countdown of the configured length, so a reload handed
-      // the candidate another full interview — and a backgrounded tab or a
-      // closed laptop made it run slow, because a throttled interval simply
-      // stops counting. parseServerInstant reads a bare stamp as UTC; a
-      // deadline that has already passed expires immediately, which is the
-      // honest answer rather than time the server will not honour.
-      const deadline = started?.expiresAt ? parseServerInstant(started.expiresAt) : null;
-      if (deadline && !Number.isNaN(deadline.getTime())) {
-        startGlobalTimerAt(deadline.getTime());
-      } else {
-        startGlobalTimer();
-      }
       // The camera is opened when anything wants it: the recording, the face
       // check, or the plain requirement that it be on. Where nothing does, the
       // candidate is not prompted for it at all.
@@ -1444,6 +1507,24 @@ export function InterviewPage() {
           setScreenPermission('denied');
           voiceInterview.sendProctoringEvent('screen_share_denied', 'Screen recording permission denied');
         }
+      }
+      // Started only now that capture is under way (a failed camera or screen
+      // is caught above, so it cannot skip this). It used to start first, and a deadline already in the past (the candidate coming
+      // back after the server had timed the interview out) expired it before
+      // either recorder existed — ending the interview with "nothing was
+      // captured" for both.
+      // Anchored to the server's deadline where it sends one. The clock used
+      // to be a fresh countdown of the configured length, so a reload handed
+      // the candidate another full interview — and a backgrounded tab or a
+      // closed laptop made it run slow, because a throttled interval simply
+      // stops counting. parseServerInstant reads a bare stamp as UTC; a
+      // deadline that has already passed expires immediately, which is the
+      // honest answer rather than time the server will not honour.
+      const deadline = started?.expiresAt ? parseServerInstant(started.expiresAt) : null;
+      if (deadline && !Number.isNaN(deadline.getTime())) {
+        startGlobalTimerAt(deadline.getTime());
+      } else {
+        startGlobalTimer();
       }
     } catch (err) {
       console.error(err);

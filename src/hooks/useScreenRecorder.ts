@@ -11,6 +11,14 @@ interface UseScreenRecorderOptions {
    * starts. Read at start time it would always be null.</p>
    */
   getInterviewerAudio?: () => MediaStream | null;
+  /**
+   * Close the recording off every `segmentMs` and hand the finished part over,
+   * then record on from the same share. Handed over rather than kept, so the
+   * caller can upload it while the interview runs and a closed tab costs one
+   * part instead of the whole recording.
+   */
+  segmentMs?: number;
+  onSegment?: (blob: Blob) => void;
 }
 
 /**
@@ -89,8 +97,12 @@ export function useScreenRecorder(options?: UseScreenRecorderOptions) {
   const micStreamRef = useRef<MediaStream | null>(null);
   /** The graph that mixes the two voices; closed with the recording. */
   const mixContextRef = useRef<AudioContext | null>(null);
+  const segmentTimerRef = useRef<number | null>(null);
 
   // Keep callback ref fresh so stale closures don't matter
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+
   const onScreenStopRef = useRef(options?.onScreenStop);
   onScreenStopRef.current = options?.onScreenStop;
 
@@ -102,6 +114,10 @@ export function useScreenRecorder(options?: UseScreenRecorderOptions) {
 
   /** Release the capture devices and the mixing graph. */
   const releaseCapture = useCallback(() => {
+    if (segmentTimerRef.current != null) {
+      window.clearInterval(segmentTimerRef.current);
+      segmentTimerRef.current = null;
+    }
     screenStreamRef.current?.getTracks().forEach((t) => t.stop());
     micStreamRef.current?.getTracks().forEach((t) => t.stop());
     screenStreamRef.current = null;
@@ -184,25 +200,21 @@ export function useScreenRecorder(options?: UseScreenRecorderOptions) {
     const preferred = 'video/webm;codecs=vp8,opus';
     const supported = MediaRecorder.isTypeSupported(preferred);
     mimeTypeRef.current = supported ? preferred : 'video/webm';
-    const recorder = new MediaRecorder(combinedStream, {
-      mimeType: supported ? preferred : undefined,
-      // A ceiling, not a target. VP8 is variable-rate: a still screen spends
-      // a fraction of this, and the cap only binds while something is moving.
-      // At 800k, 720p text broke up into blocks whenever the candidate
-      // scrolled or typed — which is precisely the moment a reviewer needs to
-      // read it. Raising the ceiling costs almost nothing on an idle screen
-      // and buys legibility on the frames that matter.
-      videoBitsPerSecond: 1_500_000,
-      audioBitsPerSecond: 64_000,
-    });
-
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        chunksRef.current.push(e.data);
-      }
+    const makeRecorder = (): MediaRecorder => {
+      const next = new MediaRecorder(combinedStream, {
+        mimeType: supported ? preferred : undefined,
+        videoBitsPerSecond: 1_500_000,
+        audioBitsPerSecond: 64_000,
+      });
+      next.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
+      return next;
     };
+    const recorder = makeRecorder();
 
-    // 4. Fire onScreenStop when candidate stops sharing (browser stop button)
     screen.getVideoTracks().forEach((track) => {
       track.onended = () => {
         // A track that has already been replaced by a later share is not the
@@ -221,6 +233,32 @@ export function useScreenRecorder(options?: UseScreenRecorderOptions) {
     recorder.start(options?.timeslice);
     setIsRecording(true);
     setStoppedEarly(false);
+
+    const segmentMs = options?.segmentMs;
+    if (segmentMs && options?.onSegment) {
+      if (segmentTimerRef.current != null) window.clearInterval(segmentTimerRef.current);
+      segmentTimerRef.current = window.setInterval(() => {
+        const current = recorderRef.current;
+        if (!current || current.state !== 'recording' || screenStreamRef.current !== screen) return;
+        // The old part is closed first and the next started from its stop
+        // event. A recorder's last chunk arrives as it stops; starting the
+        // successor earlier put that tail into the new part's buffer, leaving
+        // the old part short and the new one starting without its header.
+        current.onstop = () => {
+          const finished = chunksRef.current;
+          chunksRef.current = [];
+          if (finished.length > 0) {
+            optionsRef.current?.onSegment?.(new Blob(finished, { type: mimeTypeRef.current }));
+          }
+          // The share may have ended, or the interview finished, meanwhile.
+          if (screenStreamRef.current !== screen) return;
+          const successor = makeRecorder();
+          recorderRef.current = successor;
+          successor.start(options?.timeslice);
+        };
+        current.stop();
+      }, segmentMs);
+    }
     return combinedStream;
   }, [options?.timeslice, finishSegment, releaseCapture]);
 
