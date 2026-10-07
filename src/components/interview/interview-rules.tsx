@@ -42,7 +42,7 @@ export function buildProctoringRules(): ProctoringRule[] {
   });
   rules.push({
     icon: <Clock size={18} />,
-    text: `The interview lasts up to ${APP_CONFIG.INTERVIEW_TIMER_MINUTES} minutes and ends automatically when the timer reaches zero.`,
+    text: `The interview lasts up to ${APP_CONFIG.INTERVIEW_TIMER_MINUTES} minutes and ends automatically when the timer reaches ${APP_CONFIG.INTERVIEW_TIMER_MINUTES}:00. The timer counts up from 0:00.`,
   });
   rules.push({
     icon: <Mic size={18} />,

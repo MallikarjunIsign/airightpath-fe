@@ -5,7 +5,7 @@ import {
   Clock, Mic, User, Bot, Loader2, Video, AlertTriangle, Maximize, Shield,
   Wifi, WifiOff, Square, LogOut, CheckCircle2, Circle, Volume2,
   EyeOff, Users, Timer, Monitor, MonitorUp, Play, Send, Smartphone, BookOpen,
-  AlertCircle,
+  AlertCircle, Download,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/Toast';
@@ -40,7 +40,6 @@ import { MESSAGES } from '@/config/messages';
 import { InterviewPreStartScreen } from '@/components/interview/InterviewPreStartScreen';
 import { buildProctoringRules } from '@/components/interview/interview-rules';
 import { formatTimer } from '@/utils/format.utils';
-import { interviewService } from '@/services/interview.service';
 import type { InterviewSchedule } from '@/types/interview.types';
 
 type PostCompletionStep = 'ending' | 'uploading-screen' | 'done' | null;
@@ -335,6 +334,13 @@ export function InterviewPage() {
     },
   });
 
+  // Elapsed, for display. Derived from the countdown rather than kept as a
+  // second clock so the two can never disagree, and so a reload — which
+  // re-anchors the countdown to the server's deadline — resumes the count-up
+  // where it really was instead of from zero.
+  const totalInterviewSeconds = APP_CONFIG.INTERVIEW_TIMER_MINUTES * 60;
+  const elapsedSeconds = Math.min(totalInterviewSeconds, Math.max(0, totalInterviewSeconds - globalSecondsLeft));
+
   // Camera stream for face detection
   const {
     start: startVideoRecording,
@@ -348,6 +354,13 @@ export function InterviewPage() {
     // still needs live frames, and taking the camera down to stop the recording
     // would quietly take the face check with it.
     record: PROCTORING_CONFIG.recording.camera.required,
+    // Put on the interview's record, not just the console: a camera that was
+    // taken away mid-interview is why a recording is short or missing, and the
+    // reviewer would otherwise see only the gap.
+    onProblem: (message) => {
+      console.warn('Camera recording:', message);
+      voiceInterview.sendProctoringEvent('camera_recording_issue', message);
+    },
   });
 
   // Screen recording
@@ -1728,7 +1741,11 @@ export function InterviewPage() {
             </div>
             <span className="text-xs text-[var(--textSecondary)]">Q: {voiceInterview.questionsAsked}</span>
             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-mono text-sm font-semibold ${globalSecondsLeft <= 300 ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' : 'bg-[var(--surface1)] text-[var(--text)]'}`}>
-              <Clock size={16} /> {formatTimer(globalSecondsLeft)}
+              {/* Counts up from 0:00, as the L2 and L3 rounds are run. The
+                  deadline underneath is still a countdown to the server's
+                  expiry — only what is shown is elapsed time, and the red
+                  warning still means five minutes remain. */}
+              <Clock size={16} /> {formatTimer(elapsedSeconds)}
             </div>
             {/* The warning pill and its breakdown, as the exam shows them —
                 and, like the exam's, listing only the checks that are actually
