@@ -1,4 +1,5 @@
 import { PROCTORING_CONFIG } from '@/config/proctoring.config';
+import { recordingSync } from '@/services/recording-sync.service';
 import { useState, useRef, useCallback } from 'react';
 
 interface UseMediaRecorderOptions {
@@ -23,13 +24,17 @@ interface UseMediaRecorderOptions {
    */
   onProblem?: (message: string) => void;
   /**
-   * Close the recording off every `segmentMs` and hand the finished part over,
-   * then carry on recording on the same stream. The part is not kept here —
-   * the caller owns it from then on, which is the point: it can be uploaded
-   * while the interview runs instead of sitting in memory until the end.
+   * Close the recording off every `segmentMs` and upload that part in the
+   * background, then carry on recording on the same stream.
    */
   segmentMs?: number;
-  onSegment?: (blob: Blob) => void;
+  /**
+   * Keep every chunk in the browser's own store as it is recorded and upload
+   * finished parts in the background, so the recording survives a closed tab
+   * and the candidate never waits for it. The schedule is read lazily because
+   * the interview has not been created when this hook is.
+   */
+  persist?: { scheduleId: () => number | null | undefined };
 }
 
 /** Fresh recorders attempted before giving up on a camera that delivers nothing. */
@@ -49,6 +54,8 @@ export function useMediaRecorder(options?: UseMediaRecorderOptions) {
   const watchdogRef = useRef<number | null>(null);
   const stoppingRef = useRef(false);
   const segmentTimerRef = useRef<number | null>(null);
+  /** The stored session the current recorder is writing to. */
+  const sessionRef = useRef<string | null>(null);
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
@@ -89,10 +96,19 @@ export function useMediaRecorder(options?: UseMediaRecorderOptions) {
       audioBitsPerSecond: PROCTORING_CONFIG.recording.camera.audioBitsPerSecond,
     });
 
+    // A fresh session per recorder. One abandoned without footage (a camera
+    // that never delivered) is dropped rather than left to be uploaded empty.
+    recordingSync.discard(sessionRef.current);
+    sessionRef.current = optionsRef.current?.persist
+      ? recordingSync.begin(optionsRef.current.persist.scheduleId(), 'camera', recorder.mimeType || mimeType)
+      : null;
+    const sessionId = sessionRef.current;
+
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) {
         chunksRef.current.push(e.data);
         setChunks((prev) => [...prev, e.data]);
+        recordingSync.chunk(sessionId, e.data);
         optionsRef.current?.onDataAvailable?.(e.data);
       }
     };
@@ -152,7 +168,7 @@ export function useMediaRecorder(options?: UseMediaRecorderOptions) {
     }
 
     const segmentMs = optionsRef.current?.segmentMs;
-    if (segmentMs && optionsRef.current?.onSegment) {
+    if (segmentMs && optionsRef.current?.persist) {
       segmentTimerRef.current = window.setInterval(() => {
         const current = recorderRef.current;
         if (stoppingRef.current || !current || current.state !== 'recording') return;
@@ -164,7 +180,8 @@ export function useMediaRecorder(options?: UseMediaRecorderOptions) {
           chunksRef.current = [];
           setChunks([]);
           if (finished.length > 0) {
-            optionsRef.current?.onSegment?.(new Blob(finished, { type: current.mimeType || 'video/webm' }));
+            recordingSync.submit(sessionRef.current, new Blob(finished, { type: current.mimeType || 'video/webm' }));
+            sessionRef.current = null;
           }
           if (!stoppingRef.current) attach(live);
         };
@@ -223,7 +240,22 @@ export function useMediaRecorder(options?: UseMediaRecorderOptions) {
     streamRef.current = null;
   }, []);
 
-  const stopAndGetBlob = useCallback((): Promise<Blob | null> => {
+  const stopAndGetBlob = useCallback(async (): Promise<Blob | null> => {
+    const blob = await collectFinalBlob();
+    // Handed to the background uploader rather than returned to be awaited:
+    // the candidate's submission does not wait on the upload, and the upload
+    // does not depend on this page staying open.
+    const persist = optionsRef.current?.persist;
+    if (persist) {
+      recordingSync.submit(sessionRef.current, blob);
+      sessionRef.current = null;
+      recordingSync.finish(persist.scheduleId(), 'camera');
+    }
+    return blob;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const collectFinalBlob = (): Promise<Blob | null> => {
     stoppingRef.current = true;
     clearWatchdog();
     return new Promise((resolve) => {
@@ -257,7 +289,7 @@ export function useMediaRecorder(options?: UseMediaRecorderOptions) {
       streamRef.current?.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     });
-  }, []);
+  };
 
   const getBlob = useCallback(() => {
     if (chunks.length === 0) return null;

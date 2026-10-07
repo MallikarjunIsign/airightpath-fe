@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from '@/components/layout/Layout';
 import { ExamLayout } from '@/components/layout/ExamLayout';
@@ -5,6 +6,8 @@ import { InterviewLayout } from '@/components/layout/InterviewLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { PublicOnlyRoute } from '@/components/auth/PublicOnlyRoute';
 import { ROUTES } from '@/config/routes';
+import { useAuth } from '@/contexts/AuthContext';
+import { recordingSync } from '@/services/recording-sync.service';
 
 // Auth pages
 import { LoginPage } from '@/pages/auth/LoginPage';
@@ -65,6 +68,16 @@ import { ForbiddenPage } from '@/pages/errors/ForbiddenPage';
 import { UnauthorizedPage } from '@/pages/errors/UnauthorizedPage';
 
 function App() {
+  const { isAuthenticated } = useAuth();
+
+  // Finish any interview recording an earlier page left behind — a tab closed
+  // or reloaded mid-interview, a laptop that slept before the upload was done.
+  // It needs the candidate signed in, so it waits for that and runs on every
+  // app start.
+  useEffect(() => {
+    if (isAuthenticated) void recordingSync.resume();
+  }, [isAuthenticated]);
+
   return (
     <Routes>
       {/* Public routes. Home is signed-out only — a logged-in user landing on

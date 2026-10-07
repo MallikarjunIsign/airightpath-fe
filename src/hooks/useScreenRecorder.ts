@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
+import { recordingSync } from '@/services/recording-sync.service';
 
 interface UseScreenRecorderOptions {
   timeslice?: number;
@@ -12,13 +13,16 @@ interface UseScreenRecorderOptions {
    */
   getInterviewerAudio?: () => MediaStream | null;
   /**
-   * Close the recording off every `segmentMs` and hand the finished part over,
-   * then record on from the same share. Handed over rather than kept, so the
-   * caller can upload it while the interview runs and a closed tab costs one
-   * part instead of the whole recording.
+   * Close the recording off every `segmentMs` and upload that part in the
+   * background, then record on from the same share.
    */
   segmentMs?: number;
-  onSegment?: (blob: Blob) => void;
+  /**
+   * Keep every chunk in the browser's own store as it is recorded and upload
+   * finished parts in the background, so the recording survives a closed tab
+   * and the candidate never waits for it.
+   */
+  persist?: { scheduleId: () => number | null | undefined };
 }
 
 /**
@@ -98,6 +102,7 @@ export function useScreenRecorder(options?: UseScreenRecorderOptions) {
   /** The graph that mixes the two voices; closed with the recording. */
   const mixContextRef = useRef<AudioContext | null>(null);
   const segmentTimerRef = useRef<number | null>(null);
+  const sessionRef = useRef<string | null>(null);
 
   // Keep callback ref fresh so stale closures don't matter
   const optionsRef = useRef(options);
@@ -142,8 +147,16 @@ export function useScreenRecorder(options?: UseScreenRecorderOptions) {
       const recorder = recorderRef.current;
       const bank = () => {
         if (chunksRef.current.length > 0) {
-          segmentsRef.current.push(new Blob(chunksRef.current, { type: mimeTypeRef.current }));
+          const blob = new Blob(chunksRef.current, { type: mimeTypeRef.current });
           chunksRef.current = [];
+          if (optionsRef.current?.persist && sessionRef.current) {
+            // Uploaded in the background, and kept in the browser's store until
+            // it is. Not held here: nothing waits on it.
+            recordingSync.submit(sessionRef.current, blob);
+            sessionRef.current = null;
+          } else {
+            segmentsRef.current.push(blob);
+          }
         }
         recorderRef.current = null;
         setIsRecording(false);
@@ -206,9 +219,15 @@ export function useScreenRecorder(options?: UseScreenRecorderOptions) {
         videoBitsPerSecond: 1_500_000,
         audioBitsPerSecond: 64_000,
       });
+      recordingSync.discard(sessionRef.current);
+      sessionRef.current = optionsRef.current?.persist
+        ? recordingSync.begin(optionsRef.current.persist.scheduleId(), 'screen', mimeTypeRef.current)
+        : null;
+      const sessionId = sessionRef.current;
       next.ondataavailable = (e) => {
         if (e.data.size > 0) {
           chunksRef.current.push(e.data);
+          recordingSync.chunk(sessionId, e.data);
         }
       };
       return next;
@@ -235,7 +254,7 @@ export function useScreenRecorder(options?: UseScreenRecorderOptions) {
     setStoppedEarly(false);
 
     const segmentMs = options?.segmentMs;
-    if (segmentMs && options?.onSegment) {
+    if (segmentMs && options?.persist) {
       if (segmentTimerRef.current != null) window.clearInterval(segmentTimerRef.current);
       segmentTimerRef.current = window.setInterval(() => {
         const current = recorderRef.current;
@@ -248,7 +267,8 @@ export function useScreenRecorder(options?: UseScreenRecorderOptions) {
           const finished = chunksRef.current;
           chunksRef.current = [];
           if (finished.length > 0) {
-            optionsRef.current?.onSegment?.(new Blob(finished, { type: mimeTypeRef.current }));
+            recordingSync.submit(sessionRef.current, new Blob(finished, { type: mimeTypeRef.current }));
+            sessionRef.current = null;
           }
           // The share may have ended, or the interview finished, meanwhile.
           if (screenStreamRef.current !== screen) return;
@@ -300,6 +320,14 @@ export function useScreenRecorder(options?: UseScreenRecorderOptions) {
     await finishSegment();
     releaseCapture();
     setStoppedEarly(false);
+    const persist = optionsRef.current?.persist;
+    if (persist) {
+      // Everything has been handed to the background uploader; tell it that
+      // was the last of it so it can report how the recording went.
+      recordingSync.discard(sessionRef.current);
+      sessionRef.current = null;
+      recordingSync.finish(persist.scheduleId(), 'screen');
+    }
     return segmentsRef.current.slice();
   }, [finishSegment, releaseCapture]);
 

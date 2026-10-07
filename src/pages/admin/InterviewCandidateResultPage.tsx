@@ -1031,14 +1031,31 @@ function recordingFailureFor(
   events: ProctoringEvent[],
   kind: 'camera' | 'screen',
 ): string | null {
-  const match = [...events]
-    .reverse()
-    .find(
-      (event) =>
-        event.eventType === 'recording_upload_failed' &&
-        (event.details ?? '').toLowerCase().includes(kind),
-    );
-  return match?.details ?? null;
+  const latest = (match: (event: ProctoringEvent) => boolean) =>
+    [...events].reverse().find(match)?.details ?? null;
+  const mentions = (event: ProctoringEvent) => (event.details ?? '').toLowerCase().includes(kind);
+
+  // 1. An upload that failed: the most specific answer there is.
+  const uploadFailure = latest((event) => event.eventType === 'recording_upload_failed' && mentions(event));
+  if (uploadFailure) return uploadFailure;
+
+  // 2. Never started, or stopped. The candidate's browser said so at the
+  //    time, so the reviewer is told that rather than "never recorded".
+  const types = kind === 'camera' ? ['camera_recording_not_started'] : ['screen_share_denied', 'screen_share_stopped'];
+  const started = latest((event) => types.includes(event.eventType ?? ''));
+  if (started) {
+    // "Camera recording is required but…" reads as "Camera: required but…"
+    // once the row's own label is in front of it.
+    return started.replace(/^\w+ recording /i, '').replace(/^Candidate stopped/i, 'candidate stopped');
+  }
+
+  // 3. Switched off by configuration: absence that is not a failure.
+  const policy = latest((event) => event.eventType === 'recording_policy');
+  const label = kind === 'camera' ? 'Camera recording' : 'Screen recording';
+  if (policy && policy.includes(`${label}: not required`)) {
+    return 'not required — switched off by configuration';
+  }
+  return null;
 }
 
 function MissingRecording({ label, reason }: Readonly<{ label: string; reason?: string | null }>) {
