@@ -1,4 +1,5 @@
-import api from "./api.service";
+import api, { extractApiError } from "./api.service";
+import { isRetryable } from "@/utils/recording-upload.utils";
 import { ENDPOINTS } from "@/config/api.endpoints";
 import type {
   StartInterviewRequest,
@@ -38,6 +39,20 @@ function progressReporter(onProgress?: (percent: number | null) => void) {
   };
 }
 
+/**
+ * The size of each piece a recording is sent in.
+ *
+ * Five megabytes is S3's minimum for every piece but the last, and it is small
+ * enough to get through whatever sits in front of the server. A whole
+ * recording in one request did not: a proxy refuses an oversize body by
+ * closing the connection, the browser reports a dropped connection, and
+ * recordings of a few megabytes saved while a full interview's never did.
+ */
+const PIECE_BYTES = 5 * 1024 * 1024;
+
+/** Waits before pieces' second to fifth attempts. */
+const PIECE_BACKOFF_MS = [1_000, 3_000, 8_000, 15_000];
+
 export const aiService = {
   startInterview(data: StartInterviewRequest) {
     return api.post<StartInterviewResponse>(ENDPOINTS.AI.START_INTERVIEW, data);
@@ -65,6 +80,66 @@ export const aiService = {
     return api.post<{ text: string }>(ENDPOINTS.AI.VOICE_TO_TEXT, formData, {
       headers: { "Content-Type": "multipart/form-data" },
     });
+  },
+
+  /**
+   * Send a recording in pieces, and join them on the server.
+   *
+   * <p>Each piece is retried on its own, so a bad connection costs one piece
+   * rather than the recording. Where the server does not have the endpoints
+   * yet (an older backend), it falls back to the single request this replaced
+   * — so the two halves can be deployed in either order.</p>
+   */
+  async uploadRecording(
+    scheduleId: number,
+    kind: "camera" | "screen",
+    blob: Blob,
+    onProgress?: (percent: number | null) => void,
+  ): Promise<unknown> {
+    const base = `/api/interview/${scheduleId}/recording-upload`;
+
+    let session: { uploadId: string; blobName: string };
+    try {
+      const res = await api.post<{ uploadId: string; blobName: string }>(base, null, {
+        params: { kind },
+        _skipErrorToast: true,
+      } as never);
+      session = res.data;
+    } catch (err) {
+      const status = extractApiError(err).status;
+      if (status === 404 || status === 405) {
+        return kind === "camera"
+          ? this.uploadInterviewVideo(scheduleId, blob, onProgress)
+          : this.uploadScreenRecording(scheduleId, blob, onProgress);
+      }
+      throw err;
+    }
+
+    const pieces = Math.max(1, Math.ceil(blob.size / PIECE_BYTES));
+    for (let part = 1; part <= pieces; part++) {
+      const piece = blob.slice((part - 1) * PIECE_BYTES, part * PIECE_BYTES);
+      for (let attempt = 1; ; attempt++) {
+        try {
+          await api.post(`${base}/part`, piece, {
+            headers: { "Content-Type": "application/octet-stream" },
+            params: { uploadId: session.uploadId, blobName: session.blobName, part },
+            timeout: 5 * 60 * 1000,
+            _skipErrorToast: true,
+          } as never);
+          break;
+        } catch (err) {
+          if (!isRetryable(err) || attempt > PIECE_BACKOFF_MS.length) throw err;
+          await new Promise((resolve) => setTimeout(resolve, PIECE_BACKOFF_MS[attempt - 1]));
+        }
+      }
+      onProgress?.(Math.round((part / pieces) * 100));
+    }
+
+    return api.post<string>(`${base}/complete`, null, {
+      params: { kind, uploadId: session.uploadId, blobName: session.blobName },
+      timeout: 5 * 60 * 1000,
+      _skipErrorToast: true,
+    } as never);
   },
 
   uploadInterviewVideo(

@@ -241,10 +241,8 @@ async function upload(meta: SessionMeta, attempt: number) {
 
   const entry = statsFor(meta.scheduleId, meta.kind);
   const outcome = await uploadWithRetry(
-    (onProgress) =>
-      meta.kind === 'camera'
-        ? aiService.uploadInterviewVideo(meta.scheduleId, blob, onProgress)
-        : aiService.uploadScreenRecording(meta.scheduleId, blob, onProgress),
+    // In pieces, so no single request is larger than a proxy will carry.
+    (onProgress) => aiService.uploadRecording(meta.scheduleId, meta.kind, blob, onProgress),
     blob.size,
   );
   entry.attempts += outcome.attempts;
