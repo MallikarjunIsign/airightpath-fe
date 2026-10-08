@@ -807,6 +807,7 @@ function AttemptSection({
             <MissingRecording
               label="Camera"
               reason={recordingFailureFor(attempt.proctoring, 'camera')}
+              inProgress={schedule.attemptStatus === 'IN_PROGRESS'}
             />
           )}
           {schedule.screenRecordReferences ? (
@@ -815,6 +816,7 @@ function AttemptSection({
             <MissingRecording
               label="Shared screen"
               reason={recordingFailureFor(attempt.proctoring, 'screen')}
+              inProgress={schedule.attemptStatus === 'IN_PROGRESS'}
             />
           )}
           {/* Here as well as on the list, because this is where a reviewer
@@ -1058,7 +1060,26 @@ function recordingFailureFor(
   return null;
 }
 
-function MissingRecording({ label, reason }: Readonly<{ label: string; reason?: string | null }>) {
+function MissingRecording({
+  label,
+  reason,
+  inProgress,
+}: Readonly<{ label: string; reason?: string | null; inProgress?: boolean }>) {
+  // The interview has not finished, and nothing has gone wrong that the
+  // candidate's browser reported. Recordings are saved in parts as it runs
+  // (the first after about ten minutes) and the rest when it ends, so "never
+  // recorded" would be a claim about something still happening.
+  if (inProgress && !reason) {
+    return (
+      <span
+        className="inline-flex items-start gap-1.5 rounded-lg border border-dashed border-sky-400/60 px-2 py-1 text-xs text-sky-700 dark:text-sky-400"
+        title="The interview is still in progress. Recordings are saved in parts while it runs — the first after about ten minutes — and the rest when it ends. Nothing has failed."
+      >
+        <VideoOff size={13} className="mt-0.5 shrink-0" />
+        <span className="max-w-[22rem] truncate">{label}: interview in progress — saving as it runs</span>
+      </span>
+    );
+  }
   return (
     <span
       className={`inline-flex items-start gap-1.5 rounded-lg border border-dashed px-2 py-1 text-xs ${

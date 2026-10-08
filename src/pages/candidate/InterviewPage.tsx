@@ -521,27 +521,22 @@ export function InterviewPage() {
       setShowEndConfirm(false);
       try {
         setPostCompletionStep('ending');
-        if (!skipEndCall) {
-          await voiceInterview.endInterview();
-        }
         stopDetection();
 
-        // Closing each recorder hands its last part to the uploader. Neither
-        // call waits for an upload — they only wait for the recorder to stop.
-        // Separate try blocks so one failing cannot cost the other.
-        if (PROCTORING_CONFIG.recording.screen.required) {
-          try {
-            await stopScreenAndGetSegments();
-          } catch (err) {
-            console.error('Screen recording could not be finalised:', err);
-          }
-        }
-        try {
+        // Everything that has to happen on submit, started together instead of
+        // one after another. The recorders only wait for themselves to stop —
+        // the upload is the background uploader's job — so they cost
+        // milliseconds, and there is no reason to queue them behind the call
+        // that tells the server the interview is over.
+        const closeRecorders = Promise.allSettled([
+          PROCTORING_CONFIG.recording.screen.required ? stopScreenAndGetSegments() : Promise.resolve([]),
           // Called either way: it is what releases the camera.
-          await stopVideoAndGetBlob();
-        } catch (err) {
-          console.error('Camera recording could not be finalised:', err);
-        }
+          stopVideoAndGetBlob(),
+        ]).then((results) => {
+          results.forEach((result) => {
+            if (result.status === 'rejected') console.error('A recording could not be finalised:', result.reason);
+          });
+        });
 
         // Tell the paired phone to switch its camera off. Without this it
         // kept filming an interview that had finished, and the candidate was
@@ -556,10 +551,23 @@ export function InterviewPage() {
           }
         }
 
+        // The submission itself. Bounded: the server records the end within a
+        // moment, and a slow reply must not hold the candidate on this screen.
+        // A request still in flight when they leave carries on regardless.
+        if (!skipEndCall) {
+          await Promise.race([
+            voiceInterview.endInterview(),
+            new Promise((resolve) => setTimeout(resolve, 8000)),
+          ]);
+        }
+        await closeRecorders;
+
+        // Straight out. It used to pause here to show a confirmation, which is
+        // a candidate watching a screen for no reason once they have pressed
+        // submit. The recordings carry on uploading in the background.
         setPostCompletionStep('done');
-        setTimeout(() => {
-          navigate(ROUTES.CANDIDATE.INTERVIEWS);
-        }, 1500);
+        showToast('Interview submitted.', 'success');
+        navigate(ROUTES.CANDIDATE.INTERVIEWS);
       } catch (err) {
         console.error('Post-completion flow error:', err);
         navigate(ROUTES.CANDIDATE.INTERVIEWS);
@@ -572,6 +580,7 @@ export function InterviewPage() {
       stopDetection,
       navigate,
       mobileToken,
+      showToast,
     ]
   );
 
