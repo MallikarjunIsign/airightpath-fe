@@ -674,23 +674,65 @@ export function useVoiceInterview() {
   }, [sendToInterview]);
 
   // Send proctoring event
+  //
+  // Queued until it can actually go. The socket's `send` drops a message
+  // silently when the connection is not up yet, and the events fired in the
+  // first moments of an interview — what recording the deployment requires,
+  // that the camera started — are exactly the ones that run before it is. They
+  // never reached the reviewer's log, which is how a recording audit came to
+  // have a screen line and no camera line.
+  const pendingEventsRef = useRef<{ type: string; details: string }[]>([]);
+  const eventRetryRef = useRef<number | null>(null);
+
+  const flushProctoringEvents = useCallback(() => {
+    if (scheduleIdRef.current === null || !interviewWsService.connected) return false;
+    while (pendingEventsRef.current.length > 0) {
+      const next = pendingEventsRef.current.shift()!;
+      sendToInterview("proctoring-event", next);
+    }
+    return true;
+  }, [sendToInterview]);
+
   const sendProctoringEvent = useCallback(
     (type: string, details: string) => {
-      sendToInterview("proctoring-event", { type, details });
+      pendingEventsRef.current.push({ type, details });
+      if (flushProctoringEvents()) return;
+      if (eventRetryRef.current !== null) return;
+      let attempts = 0;
+      eventRetryRef.current = window.setInterval(() => {
+        attempts += 1;
+        if (flushProctoringEvents() || attempts >= 60) {
+          window.clearInterval(eventRetryRef.current!);
+          eventRetryRef.current = null;
+        }
+      }, 1000);
     },
-    [sendToInterview],
+    [flushProctoringEvents],
   );
 
   // End interview
   const endInterview = useCallback(async () => {
-    await audioStreaming.stopRecording();
+    // The last answer's audio is flushed, but only for so long. The server is
+    // told the interview is over whether or not this finishes: an audio flush
+    // that hung used to hold back the one call that marks the interview
+    // complete, leaving it IN PROGRESS until the server's own timeout.
+    await Promise.race([
+      audioStreaming.stopRecording(),
+      new Promise((resolve) => setTimeout(resolve, 3000)),
+    ]);
     audioPlayback.stopPlayback();
 
     if (scheduleId !== null) {
-      try {
-        await aiService.endVoiceInterview(scheduleId);
-      } catch (err) {
-        console.error("Error ending interview:", err);
+      // Retried: this is the submission, and one dropped request must not
+      // leave a finished interview looking unfinished.
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          await aiService.endVoiceInterview(scheduleId);
+          break;
+        } catch (err) {
+          console.error(`Error ending interview (attempt ${attempt} of 3):`, err);
+          if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
+        }
       }
     }
 

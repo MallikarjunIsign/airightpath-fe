@@ -551,13 +551,14 @@ export function InterviewPage() {
           }
         }
 
-        // The submission itself. Bounded: the server records the end within a
-        // moment, and a slow reply must not hold the candidate on this screen.
+        // The submission itself. Bounded (the call retries internally, so this
+        // allows for that): a slow reply must not hold the candidate on this
+        // screen.
         // A request still in flight when they leave carries on regardless.
         if (!skipEndCall) {
           await Promise.race([
             voiceInterview.endInterview(),
-            new Promise((resolve) => setTimeout(resolve, 8000)),
+            new Promise((resolve) => setTimeout(resolve, 15000)),
           ]);
         }
         await closeRecorders;
