@@ -44,6 +44,7 @@ import { ROUTES } from '@/config/routes';
 import type { NavOrigin } from '@/components/ui/BackLink';
 import { interviewService, type VoiceConversationEntryDTO } from '@/services/interview.service';
 import { aiService } from '@/services/ai.service';
+import { parseServerInstant } from '@/utils/format.utils';
 import { INTERVIEW_ROUND_LABELS } from '@/types/interview.types';
 import type {
   InterviewRound,
@@ -136,7 +137,7 @@ function warningsOf(schedule: InterviewSchedule): number {
  * instead of collapsing to the epoch alongside every other no-show.
  */
 function attemptTime(schedule: InterviewSchedule): number {
-  const stamp = new Date(schedule.startedAt ?? schedule.assignedAt).getTime();
+  const stamp = parseServerInstant(schedule.startedAt ?? schedule.assignedAt).getTime();
   return Number.isNaN(stamp) ? 0 : stamp;
 }
 
@@ -182,7 +183,7 @@ function groupByRound(details: RoundDetail[]): RoundGroup[] {
 function durationMinutes(schedule: InterviewSchedule): number | null {
   if (!schedule.startedAt || !schedule.endedAt) return null;
   const minutes = Math.round(
-    (new Date(schedule.endedAt).getTime() - new Date(schedule.startedAt).getTime()) / 60000,
+    (parseServerInstant(schedule.endedAt).getTime() - parseServerInstant(schedule.startedAt).getTime()) / 60000,
   );
   return Number.isFinite(minutes) && minutes >= 0 ? minutes : null;
 }
@@ -195,7 +196,10 @@ function minutesLabel(minutes: number | null): string {
 /** "Sep 18, 2026, 14:05" for an attempt heading, or nothing if it will not parse. */
 function attemptDateLabel(schedule: InterviewSchedule): string {
   const raw = schedule.startedAt ?? schedule.assignedAt;
-  const stamp = new Date(raw);
+  // Read as the UTC instant it is, then shown in the viewer's own timezone.
+  // The server's bare stamps were being read as local time, so an admin in
+  // IST saw the UTC clock digits — 04:01 for something that happened at 09:31.
+  const stamp = parseServerInstant(raw);
   if (Number.isNaN(stamp.getTime())) return '';
   return stamp.toLocaleString(undefined, {
     month: 'short',
@@ -808,6 +812,7 @@ function AttemptSection({
               label="Camera"
               reason={recordingFailureFor(attempt.proctoring, 'camera')}
               inProgress={schedule.attemptStatus === 'IN_PROGRESS'}
+              startedAt={recordingStartedAt(attempt.proctoring, 'camera')}
             />
           )}
           {schedule.screenRecordReferences ? (
@@ -817,6 +822,7 @@ function AttemptSection({
               label="Shared screen"
               reason={recordingFailureFor(attempt.proctoring, 'screen')}
               inProgress={schedule.attemptStatus === 'IN_PROGRESS'}
+              startedAt={recordingStartedAt(attempt.proctoring, 'screen')}
             />
           )}
           {/* Here as well as on the list, because this is where a reviewer
@@ -895,7 +901,7 @@ function RoundDetailPanel({ round }: Readonly<{ round: RoundDetail }>) {
                   </div>
                   {event.timestamp && (
                     <span className="flex-shrink-0 text-xs text-[var(--textTertiary)]">
-                      {new Date(event.timestamp).toLocaleTimeString()}
+                      {parseServerInstant(event.timestamp).toLocaleTimeString()}
                     </span>
                   )}
                 </li>
@@ -1060,11 +1066,24 @@ function recordingFailureFor(
   return null;
 }
 
+/**
+ * When the candidate's browser said this recording started, in the viewer's
+ * own timezone — the proof, on a sitting still under way, that it did.
+ */
+function recordingStartedAt(events: ProctoringEvent[], kind: 'camera' | 'screen'): string | null {
+  const type = kind === 'camera' ? 'camera_recording_started' : 'screen_recording_started';
+  const event = events.find((e) => e.eventType === type);
+  if (!event?.timestamp) return null;
+  const at = parseServerInstant(event.timestamp);
+  return Number.isNaN(at.getTime()) ? null : at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
 function MissingRecording({
   label,
   reason,
   inProgress,
-}: Readonly<{ label: string; reason?: string | null; inProgress?: boolean }>) {
+  startedAt,
+}: Readonly<{ label: string; reason?: string | null; inProgress?: boolean; startedAt?: string | null }>) {
   // The interview has not finished, and nothing has gone wrong that the
   // candidate's browser reported. Recordings are saved in parts as it runs
   // (the first after about ten minutes) and the rest when it ends, so "never
@@ -1076,7 +1095,9 @@ function MissingRecording({
         title="The interview is still in progress. Recordings are saved in parts while it runs — the first after about ten minutes — and the rest when it ends. Nothing has failed."
       >
         <VideoOff size={13} className="mt-0.5 shrink-0" />
-        <span className="max-w-[22rem] truncate">{label}: interview in progress — saving as it runs</span>
+        <span className="max-w-[22rem] truncate">
+          {label}: {startedAt ? `recording since ${startedAt}` : 'interview in progress'} — saving as it runs
+        </span>
       </span>
     );
   }
@@ -1195,7 +1216,7 @@ function TranscriptTurn({ entry }: Readonly<{ entry: VoiceConversationEntryDTO }
           <span
             className={`text-xs ${isCandidate ? 'text-white/60' : 'text-[var(--textTertiary)]'}`}
           >
-            {new Date(entry.timestamp).toLocaleTimeString()}
+            {parseServerInstant(entry.timestamp).toLocaleTimeString()}
           </span>
           {isCandidate && entry.wordsPerMinute != null && (
             <span className="text-xs text-white/60">{Math.round(entry.wordsPerMinute)} WPM</span>
