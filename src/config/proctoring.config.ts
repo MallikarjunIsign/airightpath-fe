@@ -18,6 +18,7 @@
 //   VITE_PROCTORING_MOBILE_REQUIRED      "true" | "false"   (default false)
 //   VITE_PROCTORING_CAMERA_RECORDING_REQUIRED "true" | "false" (default true)
 //   VITE_PROCTORING_SCREEN_RECORDING_REQUIRED "true" | "false" (default true)
+//   VITE_PROCTORING_MOBILE_RECORDING_REQUIRED "true" | "false" (default true; only when a phone is paired)
 //   VITE_PROCTORING_ROOM_WATCH_ENABLED   "true" | "false"   (default false)
 //   VITE_PROCTORING_ROOM_WATCH_INTERVAL_MS integer ms       (default 8000)
 //
@@ -230,6 +231,20 @@ export const PROCTORING_CONFIG = {
      */
     screen: {
       required: parseBool(env.VITE_PROCTORING_SCREEN_RECORDING_REQUIRED, true),
+    },
+    /**
+     * The paired phone's camera, recorded and stored with the interview. Applies
+     * only where a phone is paired;
+     * whether pairing itself is needed is `mobileCompanion.required`.
+     *
+     * Recorded on the phone itself, from its own camera, and uploaded from there
+     * under the pairing token the candidate's browser registered. That is what
+     * makes it independent of the live picture: the recording exists whether or
+     * not the stream ever reached the interview screen.
+     */
+    mobile: {
+      required: parseBool(env.VITE_PROCTORING_MOBILE_RECORDING_REQUIRED, true),
+      videoBitsPerSecond: parseCount(env.VITE_PROCTORING_MOBILE_VIDEO_BITRATE, 500_000),
     },
   },
   /**

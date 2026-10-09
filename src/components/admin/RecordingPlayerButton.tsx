@@ -60,7 +60,7 @@ export function RecordingPlayerButton({
   variant = 'ghost',
 }: Readonly<{
   scheduleId: number;
-  kind: 'camera' | 'screen';
+  kind: 'camera' | 'screen' | 'mobile';
   label: string;
   variant?: 'ghost' | 'outline';
 }>) {

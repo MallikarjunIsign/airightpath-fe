@@ -156,6 +156,8 @@ export interface InterviewSchedule {
   recordReferences?: string;
   /** Where the shared screen was stored, when the candidate shared one. */
   screenRecordReferences?: string;
+  /** Where the paired phone's recording was stored, one part per line, when a phone was paired. */
+  mobileRecordReferences?: string;
   summaryReferences?: string;
   assignedAt: string;
   deadlineTime: string;
@@ -250,6 +252,16 @@ export type ConversationEntry = {
   /** Stdout/stderr from the candidate's last run; absent if they never ran it. */
   codeOutput?: string;
 };
+
+/** A still taken from the candidate's paired phone during an interview. */
+export interface MobileCapture {
+  id: number;
+  interviewScheduleId: number;
+  /** ROOM_PHOTO when the phone's view of the room was approved; MONITOR_FRAME while the interview ran. */
+  kind: 'ROOM_PHOTO' | 'MONITOR_FRAME';
+  frameIndex: number;
+  capturedAt?: string;
+}
 
 // ==================== Voice Interview Types ====================
 

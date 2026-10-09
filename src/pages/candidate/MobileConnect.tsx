@@ -2,6 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { PROCTORING_CONFIG } from '@/config/proctoring.config';
 import { interviewWsService } from '@/services/interview-ws.service';
+import { APP_CONFIG } from '@/config/app.config';
+import { useRemoteStreamRecorder } from '@/hooks/useRemoteStreamRecorder';
+import { mobileUploadService } from '@/services/mobile-upload.service';
+import { recordingSync } from '@/services/recording-sync.service';
 
 export default function MobileConnect() {
     const [searchParams] = useSearchParams();
@@ -36,6 +40,35 @@ export default function MobileConnect() {
     const consentedRef = useRef(false);
     /** Set when the browser refused the camera, so we can say how to fix it. */
     const [cameraDenied, setCameraDenied] = useState(false);
+    /** The open camera. State as well as a ref, because the recorder has to react to it changing. */
+    const [captureStream, setCaptureStream] = useState<MediaStream | null>(null);
+    /** Why the live picture to the computer is not up, shown without stopping the recording. */
+    const [streamIssue, setStreamIssue] = useState<string | null>(null);
+
+    /**
+     * This phone's own recording.
+     *
+     * Made here, from the phone's own camera, and uploaded from here under the
+     * pairing token — not recorded from the live picture on the computer. The
+     * live picture is optional: it depends on a peer connection that can fail
+     * for reasons nobody can fix from the phone, and a recording that depended
+     * on it was lost whenever it did. This one exists either way.
+     */
+    const recorder = useRemoteStreamRecorder({
+        stream: captureStream,
+        enabled: verified && PROCTORING_CONFIG.recording.mobile.required && !finished,
+        token,
+        segmentMs: APP_CONFIG.RECORDING_SEGMENT_MINUTES > 0 ? APP_CONFIG.RECORDING_SEGMENT_MINUTES * 60_000 : undefined,
+        onStarted: () => {
+            if (token) void mobileUploadService.sendEvent(token, 'mobile_recording_started', 'Phone recording started');
+        },
+        onProblem: (message) => {
+            console.warn('Phone recording:', message);
+            if (token) void mobileUploadService.sendEvent(token, 'mobile_recording_issue', message);
+        },
+    });
+    const recorderRef = useRef(recorder);
+    recorderRef.current = recorder;
 
     useEffect(() => {
         if (!token) return;
@@ -70,37 +103,111 @@ export default function MobileConnect() {
         return () => interviewWsService.disconnect();
     }, [token]);
 
-    // Start camera for verification preview
+    // The camera: one stream, shared by the preview, the recording and the live
+    // picture. They used to open it separately, and a phone only ever lets one
+    // of them have it — the others got a dead track.
     useEffect(() => {
         if (!consented) return;
-        let currentStream: MediaStream | null = null;
+        let stream: MediaStream | null = null;
         let cancelled = false;
         async function startCamera() {
+            const video = {
+                facingMode,
+                // A video call's worth: this is evidence of the room, not footage,
+                // and it is sent over the candidate's own mobile data.
+                width: { ideal: 640 },
+                height: { ideal: 480 },
+                frameRate: { ideal: 15 },
+            };
             try {
-                currentStream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: facingMode }
-                });
+                // The microphone too where the phone's recording is wanted: the
+                // sound in the room is part of what it shows. The preview element
+                // is muted, so it cannot feed back.
+                const wantAudio = PROCTORING_CONFIG.recording.mobile.required;
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        video,
+                        audio: wantAudio ? { echoCancellation: true, noiseSuppression: true } : false,
+                    });
+                } catch (err) {
+                    if (!wantAudio) throw err;
+                    // Microphone refused: record without it rather than not at all.
+                    stream = await navigator.mediaDevices.getUserMedia({ video });
+                }
                 if (cancelled) {
-                    currentStream.getTracks().forEach(track => track.stop());
+                    stream.getTracks().forEach(track => track.stop());
                     return;
                 }
+                streamRef.current = stream;
+                setCaptureStream(stream);
                 setCameraDenied(false);
                 if (videoRef.current) {
-                    videoRef.current.srcObject = currentStream;
+                    videoRef.current.srcObject = stream;
+                }
+                // Already connected to the computer (the camera was switched):
+                // give the live picture the new camera.
+                const connection = peerConnectionRef.current;
+                if (connection) {
+                    connection.getSenders().forEach((sender) => {
+                        const next = stream?.getTracks().find((track) => track.kind === sender.track?.kind);
+                        if (next) void sender.replaceTrack(next);
+                    });
                 }
             } catch (err) {
                 console.error("Error accessing camera:", err);
-                if (!cancelled) setCameraDenied(true);
+                if (!cancelled) {
+                    setCameraDenied(true);
+                    // On the interview's record: a required recording that could not
+                    // start is something the reviewer needs to see, not infer.
+                    if (token && PROCTORING_CONFIG.recording.mobile.required) {
+                        const why = err instanceof DOMException ? `${err.name}: ${err.message}` : String(err);
+                        void mobileUploadService.sendEvent(token, 'mobile_recording_not_started',
+                            `Phone recording is required but the camera could not be opened (${why})`);
+                    }
+                }
             }
         }
-        startCamera();
+        void startCamera();
         return () => {
             cancelled = true;
-            if (currentStream) {
-                currentStream.getTracks().forEach(track => track.stop());
-            }
+            stream?.getTracks().forEach(track => track.stop());
+            if (streamRef.current === stream) streamRef.current = null;
+            setCaptureStream((current) => (current === stream ? null : current));
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [facingMode, consented]);
+
+    // Keep the screen on while recording. A phone that dims and locks stops the
+    // camera, and an interview's recording ended there.
+    useEffect(() => {
+        if (!verified || finished) return;
+        type WakeLockSentinelLike = { release: () => Promise<void> };
+        const wakeLock = (navigator as unknown as { wakeLock?: { request: (type: 'screen') => Promise<WakeLockSentinelLike> } }).wakeLock;
+        if (!wakeLock) return;
+        let sentinel: WakeLockSentinelLike | null = null;
+        let cancelled = false;
+        const acquire = () => {
+            wakeLock.request('screen').then((lock) => {
+                if (cancelled) void lock.release();
+                else sentinel = lock;
+            }).catch(() => { /* refused: nothing to do about it from here */ });
+        };
+        acquire();
+        // The lock is dropped whenever the page is hidden; take it again on return.
+        const onVisible = () => { if (document.visibilityState === 'visible') acquire(); };
+        document.addEventListener('visibilitychange', onVisible);
+        return () => {
+            cancelled = true;
+            document.removeEventListener('visibilitychange', onVisible);
+            void sentinel?.release();
+        };
+    }, [verified, finished]);
+
+    // Finish anything an earlier visit to this page left unsent — a tab closed
+    // or a phone that lost signal part-way through.
+    useEffect(() => {
+        if (token) void recordingSync.resume({ token });
+    }, [token]);
 
     const acceptConsent = () => {
         consentedRef.current = true;
@@ -198,8 +305,7 @@ export default function MobileConnect() {
 
     /** Leave deliberately: release the camera rather than abandoning the tab. */
     const exitProctoring = () => {
-        shutDown();
-        setFinished('exited');
+        void endSession('exited');
     };
 
     /**
@@ -234,25 +340,24 @@ export default function MobileConnect() {
         startingRef.current = true;
 
         try {
-            // Audio only on the streaming capture, never on the preview above:
-            // the preview is attached to a video element on this same phone, and
-            // an unmuted one would feed the microphone straight back into it.
-            //
-            // The desktop decides whether to record from this track — it arrives
-            // as an offer, not an instruction — so sending it costs nothing when
-            // the candidate keeps using their laptop microphone.
-            const mediaStream = await navigator.mediaDevices.getUserMedia({
-                video: { facingMode: facingMode },
-                audio: PROCTORING_CONFIG.mobileCompanion.audio
-                    ? { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-                    : false,
-            });
-            streamRef.current = mediaStream;
-            if (videoRef.current) videoRef.current.srcObject = mediaStream;
+            // The camera is already open and, once verified, recording; the live
+            // picture shares it. It may not be ready the instant the computer asks.
+            let mediaStream = streamRef.current;
+            for (let waited = 0; !mediaStream && waited < 10_000; waited += 250) {
+                await new Promise((resolve) => setTimeout(resolve, 250));
+                mediaStream = streamRef.current;
+            }
+            if (!mediaStream) throw new Error('The camera is not ready');
             const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
             peerConnectionRef.current = pc;
 
-            mediaStream.getTracks().forEach(track => pc.addTrack(track, mediaStream));
+            // Picture always. Sound only where the phone is offered to the computer
+            // as a microphone — the recording keeps the sound either way, and sending
+            // it would let the candidate answer through a phone they may have
+            // propped across the room.
+            mediaStream.getTracks()
+                .filter(track => track.kind === 'video' || PROCTORING_CONFIG.mobileCompanion.audio)
+                .forEach(track => pc.addTrack(track, mediaStream));
 
             pc.onicecandidate = (event) => {
                 if (event.candidate) {
@@ -267,8 +372,10 @@ export default function MobileConnect() {
             interviewWsService.send('/app/mobile/offer/' + token, pc.localDescription);
             setStreaming(true);
         } catch (err) {
+            // Not an alert, and not an error: the live picture is optional. An alert
+            // covers the camera preview, and this phone is still recording.
             console.error('Streaming start error:', err);
-            alert('Could not start video stream. Please check camera permissions.');
+            setStreamIssue('The live picture to your computer could not start. This phone is still recording.');
         } finally {
             // Cleared either way: a start that failed on a denied camera must
             // not lock out the retry the candidate gets after allowing it.
@@ -303,13 +410,16 @@ export default function MobileConnect() {
         // Node's and `NodeJS.Timeout` does not exist in a browser tsconfig, so
         // this file failed the typecheck on every run.
         let interval: number | null = null;
-        if (streaming) {
+        // Whenever the room is verified and the interview has not ended — not only
+        // while the live picture is up. The photos are kept as evidence now, and
+        // a stream that failed to connect is exactly when they matter most.
+        if (verified && !finished) {
             interval = window.setInterval(monitorRoom, 20000); // Check every 20 seconds
         }
         return () => {
             if (interval) clearInterval(interval);
         };
-    }, [streaming, token]);
+    }, [verified, finished, token]);
 
     /**
      * Release the camera and the connection, once.
@@ -328,6 +438,21 @@ export default function MobileConnect() {
     }, []);
 
     /**
+     * Close the recording and hand its last part to the uploader, *then* release
+     * the camera. The other way round, stopping the tracks ends the recorder
+     * mid-flush and the last seconds are lost.
+     */
+    const endSession = useCallback(async (reason: 'ended' | 'exited') => {
+        try {
+            await recorderRef.current.stopAndFinish(recorderRef.current.hasStarted());
+        } catch (err) {
+            console.warn('The phone recording could not be closed cleanly:', err);
+        }
+        shutDown();
+        setFinished(reason);
+    }, [shutDown]);
+
+    /**
      * The desktop telling this phone the interview has finished.
      *
      * Subscribed separately from the signalling above because it has to stay
@@ -337,11 +462,11 @@ export default function MobileConnect() {
     useEffect(() => {
         if (!token) return;
         const onEnded = () => {
-            shutDown();
-            setFinished('ended');
+            void endSession('ended');
         };
         interviewWsService.subscribe('/user/queue/mobile/ended', onEnded);
         return () => interviewWsService.unsubscribe('/user/queue/mobile/ended');
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [token, shutDown]);
 
     useEffect(() => {
@@ -518,9 +643,29 @@ export default function MobileConnect() {
                             </div>
                             <h2 className="text-xl font-bold text-green-600">Verified & Secure</h2>
                             <p className="text-sm text-gray-600">
-                                Your mobile camera is now providing a secure proctoring feed to the interview.
+                                {PROCTORING_CONFIG.recording.mobile.required
+                                    ? 'This phone is recording the room and sending the recording to your interview.'
+                                    : 'Your mobile camera is set up for the interview.'}
                             </p>
-                            {!streaming && <p className="text-indigo-600 font-medium animate-pulse">Starting secure stream...</p>}
+                            {/* The live picture is a bonus: it may take a moment, or not
+                                connect at all, and the recording does not depend on it. */}
+                            {streaming ? (
+                                <p className="text-xs text-green-700">Your computer can also see this phone live.</p>
+                            ) : (
+                                <p className="text-xs text-gray-500">
+                                    The live picture on your computer is optional and connects when it is ready.
+                                </p>
+                            )}
+                            {streamIssue && !streaming && (
+                                <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+                                    <p className="text-sm text-amber-900">{streamIssue}</p>
+                                </div>
+                            )}
+                            {PROCTORING_CONFIG.recording.mobile.required && (
+                                <p className="text-xs text-gray-500">
+                                    Keep the screen on and this page open until the interview finishes. Use Wi-Fi if you can.
+                                </p>
+                            )}
                         </div>
                     )}
                 </div>

@@ -9,6 +9,7 @@ import type {
   InterviewReviewDTO,
   InterviewReviewRequest,
   ProctoringEvent,
+  MobileCapture,
 } from "@/types/interview.types";
 
 /**
@@ -149,13 +150,48 @@ export const interviewService = {
 
   // Item 16: Get proctoring events
   /**
+   * Tie a phone's pairing token to this interview, so the phone can send its own
+   * recording and photos without a login.
+   */
+  registerMobilePairing(scheduleId: number, token: string) {
+    return api.post(ENDPOINTS.INTERVIEWS.MOBILE_PAIRING(scheduleId), null, {
+      params: { token },
+      _skipErrorToast: true,
+    } as never);
+  },
+
+  /** Save one still taken from the candidate's paired phone. */
+  uploadMobileCapture(scheduleId: number, kind: 'ROOM_PHOTO' | 'MONITOR_FRAME', photo: Blob) {
+    const form = new FormData();
+    form.append('photo', photo, `${kind.toLowerCase()}.jpg`);
+    form.append('kind', kind);
+    form.append('capturedAt', new Date().toISOString());
+    return api.post(ENDPOINTS.INTERVIEWS.MOBILE_CAPTURES(scheduleId), form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      // Silent: a still that did not save is not something to interrupt an
+      // interview about.
+      _skipErrorToast: true,
+    } as never);
+  },
+
+  /** The stills taken from the paired phone during one interview. */
+  listMobileCaptures(scheduleId: number) {
+    return api.get<MobileCapture[]>(ENDPOINTS.INTERVIEWS.MOBILE_CAPTURES(scheduleId));
+  },
+
+  /** One still's bytes. Fetched as a blob: the image sits behind the reviewer's permission. */
+  getMobileCaptureImage(captureId: number) {
+    return api.get<Blob>(ENDPOINTS.INTERVIEWS.MOBILE_CAPTURE_IMAGE(captureId), { responseType: 'blob' });
+  },
+
+  /**
    * A temporary URL that plays one of an interview's recordings.
    *
    * @param kind 'camera' for the webcam, 'screen' for the shared screen
    */
   getRecordingLink(
     scheduleId: number,
-    kind: 'camera' | 'screen',
+    kind: 'camera' | 'screen' | 'mobile',
     disposition: 'inline' | 'attachment' = 'inline',
     part = 0,
   ) {
@@ -179,7 +215,7 @@ export const interviewService = {
   reportRecordingOutcome(
     scheduleId: number,
     outcome: {
-      kind: 'camera' | 'screen';
+      kind: 'camera' | 'screen' | 'mobile';
       success: boolean;
       bytes: number;
       attempts: number;

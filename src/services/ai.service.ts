@@ -92,7 +92,7 @@ export const aiService = {
    */
   async uploadRecording(
     scheduleId: number,
-    kind: "camera" | "screen",
+    kind: "camera" | "screen" | "mobile",
     blob: Blob,
     onProgress?: (percent: number | null) => void,
   ): Promise<unknown> {
@@ -107,7 +107,7 @@ export const aiService = {
       session = res.data;
     } catch (err) {
       const status = extractApiError(err).status;
-      if (status === 404 || status === 405) {
+      if ((status === 404 || status === 405) && kind !== "mobile") {
         return kind === "camera"
           ? this.uploadInterviewVideo(scheduleId, blob, onProgress)
           : this.uploadScreenRecording(scheduleId, blob, onProgress);

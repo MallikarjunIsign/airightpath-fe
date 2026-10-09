@@ -1,5 +1,6 @@
 import { aiService } from '@/services/ai.service';
 import { interviewService } from '@/services/interview.service';
+import { mobileUploadService } from '@/services/mobile-upload.service';
 import { uploadWithRetry } from '@/utils/recording-upload.utils';
 
 /**
@@ -19,11 +20,18 @@ import { uploadWithRetry } from '@/utils/recording-upload.utils';
  * the recording.</p>
  */
 
-type Kind = 'camera' | 'screen';
+type Kind = 'camera' | 'screen' | 'mobile';
 
 interface SessionMeta {
   id: string;
+  /** 0 for a session that belongs to a pairing token rather than a signed-in interview. */
   scheduleId: number;
+  /**
+   * Set on the phone, which has no login: the recording is filed against the
+   * interview its pairing token was registered for, and uploaded with that
+   * token instead of a session.
+   */
+  token?: string;
   kind: Kind;
   mimeType: string;
   /** Which page load wrote it. Another load's sessions are orphans. */
@@ -124,15 +132,21 @@ interface Stats {
   attempts: number;
   failureReason?: string;
 }
-const keyOf = (scheduleId: number, kind: Kind) => `${scheduleId}:${kind}`;
+/** Whose recording this is: an interview the signed-in candidate sits, or a phone's pairing token. */
+interface Target {
+  scheduleId: number;
+  kind: Kind;
+  token?: string;
+}
+const keyOf = (target: Target) => (target.token ? `t:${target.token}:${target.kind}` : `${target.scheduleId}:${target.kind}`);
 const stats = new Map<string, Stats>();
 const pending = new Map<string, number>();
 const finished = new Set<string>();
 const queuedIds = new Set<string>();
 const queues = new Map<Kind, Promise<void>>();
 
-function statsFor(scheduleId: number, kind: Kind): Stats {
-  const key = keyOf(scheduleId, kind);
+function statsFor(target: Target): Stats {
+  const key = keyOf(target);
   let entry = stats.get(key);
   if (!entry) {
     entry = { ok: 0, bytes: 0, attempts: 0 };
@@ -178,8 +192,9 @@ async function assemble(meta: SessionMeta): Promise<Blob | null> {
 
 // ── Outcome reporting ─────────────────────────────────────────────────────
 
-async function reportIfDone(scheduleId: number, kind: Kind) {
-  const key = keyOf(scheduleId, kind);
+async function reportIfDone(target: Target) {
+  const { scheduleId, kind, token } = target;
+  const key = keyOf(target);
   if (!finished.has(key) || (pending.get(key) ?? 0) > 0) return;
   finished.delete(key);
   const entry = stats.get(key) ?? { ok: 0, bytes: 0, attempts: 0 };
@@ -196,7 +211,11 @@ async function reportIfDone(scheduleId: number, kind: Kind) {
   };
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      await interviewService.reportRecordingOutcome(scheduleId, payload);
+      if (token) {
+        await mobileUploadService.reportOutcome(token, { ...payload, kind: 'mobile' });
+      } else {
+        await interviewService.reportRecordingOutcome(scheduleId, payload);
+      }
       break;
     } catch {
       if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 3000));
@@ -211,7 +230,7 @@ function enqueue(id: string, attempt = 0) {
   const meta = metas.get(id);
   if (!meta || queuedIds.has(id)) return;
   queuedIds.add(id);
-  const key = keyOf(meta.scheduleId, meta.kind);
+  const key = keyOf(meta);
   pending.set(key, (pending.get(key) ?? 0) + 1);
 
   // One queue per kind and strictly in order: the server appends each part to
@@ -226,7 +245,7 @@ function enqueue(id: string, attempt = 0) {
       await upload(meta, attempt);
     } finally {
       pending.set(key, Math.max(0, (pending.get(key) ?? 1) - 1));
-      await reportIfDone(meta.scheduleId, meta.kind);
+      await reportIfDone(meta);
     }
   });
   queues.set(meta.kind, job.catch(() => undefined));
@@ -239,10 +258,13 @@ async function upload(meta: SessionMeta, attempt: number) {
     return;
   }
 
-  const entry = statsFor(meta.scheduleId, meta.kind);
+  const entry = statsFor(meta);
   const outcome = await uploadWithRetry(
     // In pieces, so no single request is larger than a proxy will carry.
-    (onProgress) => aiService.uploadRecording(meta.scheduleId, meta.kind, blob, onProgress),
+    (onProgress) =>
+      meta.token
+        ? mobileUploadService.upload(meta.token, blob, meta.mimeType, onProgress)
+        : aiService.uploadRecording(meta.scheduleId, meta.kind, blob, onProgress),
     blob.size,
   );
   entry.attempts += outcome.attempts;
@@ -276,6 +298,30 @@ export const recordingSync = {
     const meta: SessionMeta = {
       id,
       scheduleId,
+      kind,
+      mimeType,
+      pageId: PAGE_ID,
+      createdAt: now,
+      updatedAt: now,
+      status: 'recording',
+    };
+    metas.set(id, meta);
+    void writeMeta(meta);
+    return id;
+  },
+
+  /**
+   * Start a recording on the phone, which has no login: it belongs to a pairing
+   * token, and is uploaded with that token.
+   */
+  beginForToken(token: string | null | undefined, kind: Kind, mimeType: string): string | null {
+    if (!token) return null;
+    const now = Date.now();
+    const id = `t-${token.slice(0, 8)}-${kind}-${now}-${Math.random().toString(36).slice(2, 8)}`;
+    const meta: SessionMeta = {
+      id,
+      scheduleId: 0,
+      token,
       kind,
       mimeType,
       pageId: PAGE_ID,
@@ -335,15 +381,24 @@ export const recordingSync = {
    */
   finish(scheduleId: number | null | undefined, kind: Kind) {
     if (!scheduleId) return;
-    finished.add(keyOf(scheduleId, kind));
-    void reportIfDone(scheduleId, kind);
+    const target = { scheduleId, kind };
+    finished.add(keyOf(target));
+    void reportIfDone(target);
+  },
+
+  /** The phone's recording is over: once its parts are uploaded, say how it went. */
+  finishForToken(token: string | null | undefined, kind: Kind) {
+    if (!token) return;
+    const target = { scheduleId: 0, kind, token };
+    finished.add(keyOf(target));
+    void reportIfDone(target);
   },
 
   /**
    * Upload whatever an earlier page left behind: a closed tab, a reload, a
    * laptop that slept. Safe to call repeatedly.
    */
-  async resume() {
+  async resume(options?: { token?: string }) {
     const sessions = await io((db) =>
       wrap<SessionMeta[]>(db.transaction(SESSIONS, 'readonly').objectStore(SESSIONS).getAll()),
     );
@@ -354,6 +409,10 @@ export const recordingSync = {
     sessions.sort((a, b) => a.createdAt - b.createdAt);
     for (const meta of sessions) {
       if (meta.pageId === PAGE_ID || queuedIds.has(meta.id)) continue;
+      // The laptop resumes its own interviews; a phone resumes only its own
+      // pairing. Neither can upload the other's, which needs the other's way
+      // of signing a request.
+      if (options?.token ? meta.token !== options.token : meta.token) continue;
       if (meta.status === 'recording' && now - meta.updatedAt < ORPHAN_AFTER_MS) {
         waitingOnLive = true;
         continue;
@@ -364,6 +423,6 @@ export const recordingSync = {
     }
     // A reload within the last two minutes leaves a session that is not yet
     // old enough to claim. Look again once it is.
-    if (waitingOnLive) setTimeout(() => void recordingSync.resume(), ORPHAN_AFTER_MS + 5_000);
+    if (waitingOnLive) setTimeout(() => void recordingSync.resume(options), ORPHAN_AFTER_MS + 5_000);
   },
 };

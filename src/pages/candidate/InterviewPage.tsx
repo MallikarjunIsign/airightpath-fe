@@ -805,6 +805,33 @@ export function InterviewPage() {
     }
   }, [interview, mobileToken]);
 
+  // Tell the server which interview this token belongs to.
+  //
+  // The phone records its own camera and uploads it, and it has no login: all it
+  // holds is the token in the QR code. Nothing tied that token to an interview,
+  // so a recording or photo from the phone could not be filed against anyone.
+  // Registered here, signed in as the candidate, the moment the token exists —
+  // retried, because the QR can be scanned a few seconds later and the phone's
+  // first upload must find the pairing already there.
+  useEffect(() => {
+    if (!interview?.id || !mobileToken) return;
+    let cancelled = false;
+    (async () => {
+      for (let attempt = 1; attempt <= 5 && !cancelled; attempt++) {
+        try {
+          await interviewService.registerMobilePairing(interview.id, mobileToken);
+          return;
+        } catch (err) {
+          console.warn(`Could not register the phone pairing (attempt ${attempt} of 5):`, err);
+          await new Promise((resolve) => setTimeout(resolve, attempt * 2000));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [interview?.id, mobileToken]);
+
   /**
    * Show the phone step as soon as there is a token to encode.
    *
@@ -1034,7 +1061,8 @@ export function InterviewPage() {
       voiceInterview.sendProctoringEvent(
         'recording_policy',
         `Camera recording: ${PROCTORING_CONFIG.recording.camera.required ? 'required' : 'not required (switched off by configuration)'}. ` +
-          `Screen recording: ${PROCTORING_CONFIG.recording.screen.required ? 'required' : 'not required (switched off by configuration)'}.`,
+          `Screen recording: ${PROCTORING_CONFIG.recording.screen.required ? 'required' : 'not required (switched off by configuration)'}. ` +
+        `Phone recording: ${PROCTORING_CONFIG.recording.mobile.required ? 'required whenever a phone is paired' : 'not required (switched off by configuration)'}.`,
       );
 
       // The camera is opened when anything wants it: the recording, the face

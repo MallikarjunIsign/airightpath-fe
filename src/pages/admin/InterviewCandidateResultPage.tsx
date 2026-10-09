@@ -26,6 +26,7 @@ import {
 import { EmptyState } from '@/components/ui/EmptyState';
 import { RadialScore, SummaryStat, SkillBar } from '@/components/admin/result/ResultPrimitives';
 import { ProctoringCaptures } from '@/components/admin/result/ProctoringCaptures';
+import { MobileCaptures } from '@/components/admin/result/MobileCaptures';
 import { CodeBlock } from '@/components/interview/CodeBlock';
 import { InterviewReviewPanel } from '@/components/admin/InterviewReviewPanel';
 import { InterviewSubmissionInfo } from '@/components/admin/result/InterviewSubmissionInfo';
@@ -825,6 +826,26 @@ function AttemptSection({
               startedAt={recordingStartedAt(attempt.proctoring, 'screen')}
             />
           )}
+          {/* The paired phone's recording. Shown only where a phone was in play —
+              either it recorded, or the browser said something about it —
+              because an interview sat without one would otherwise carry a
+              "never recorded" chip for a camera that was never there. */}
+          {(schedule.mobileRecordReferences ||
+            attempt.proctoring.some(
+              (event) =>
+                (event.eventType ?? '').startsWith('mobile_recording') ||
+                (event.details ?? '').toLowerCase().startsWith('mobile recording'),
+            )) &&
+            (schedule.mobileRecordReferences ? (
+              <RecordingPlayerButton scheduleId={schedule.id} kind="mobile" label="Phone" />
+            ) : (
+              <MissingRecording
+                label="Phone"
+                reason={recordingFailureFor(attempt.proctoring, 'mobile')}
+                inProgress={schedule.attemptStatus === 'IN_PROGRESS'}
+                startedAt={recordingStartedAt(attempt.proctoring, 'mobile')}
+              />
+            ))}
           {/* Here as well as on the list, because this is where a reviewer
               works out that a sitting is a duplicate or a test run — having
               to go back to the list to act on it is how they end up not
@@ -870,6 +891,10 @@ function RoundDetailPanel({ round }: Readonly<{ round: RoundDetail }>) {
         moduleLabel={roundLabelOf(schedule)}
         contextNoun="interview"
       />
+
+      {/* The paired phone's stills: the room as approved, and frames from during
+          the interview. Draws nothing when there are none. */}
+      <MobileCaptures scheduleId={schedule.id} />
 
       {/* ── Proctoring ──────────────────────────────────────────────── */}
       <Card>
@@ -1037,7 +1062,7 @@ function FormatOption({
  */
 function recordingFailureFor(
   events: ProctoringEvent[],
-  kind: 'camera' | 'screen',
+  kind: 'camera' | 'screen' | 'mobile',
 ): string | null {
   const latest = (match: (event: ProctoringEvent) => boolean) =>
     [...events].reverse().find(match)?.details ?? null;
@@ -1049,7 +1074,12 @@ function recordingFailureFor(
 
   // 2. Never started, or stopped. The candidate's browser said so at the
   //    time, so the reviewer is told that rather than "never recorded".
-  const types = kind === 'camera' ? ['camera_recording_not_started'] : ['screen_share_denied', 'screen_share_stopped'];
+  const types =
+    kind === 'camera'
+      ? ['camera_recording_not_started']
+      : kind === 'screen'
+        ? ['screen_share_denied', 'screen_share_stopped']
+        : [];
   const started = latest((event) => types.includes(event.eventType ?? ''));
   if (started) {
     // "Camera recording is required but…" reads as "Camera: required but…"
@@ -1059,7 +1089,7 @@ function recordingFailureFor(
 
   // 3. Switched off by configuration: absence that is not a failure.
   const policy = latest((event) => event.eventType === 'recording_policy');
-  const label = kind === 'camera' ? 'Camera recording' : 'Screen recording';
+  const label = kind === 'camera' ? 'Camera recording' : kind === 'screen' ? 'Screen recording' : 'Phone recording';
   if (policy && policy.includes(`${label}: not required`)) {
     return 'not required — switched off by configuration';
   }
@@ -1070,8 +1100,13 @@ function recordingFailureFor(
  * When the candidate's browser said this recording started, in the viewer's
  * own timezone — the proof, on a sitting still under way, that it did.
  */
-function recordingStartedAt(events: ProctoringEvent[], kind: 'camera' | 'screen'): string | null {
-  const type = kind === 'camera' ? 'camera_recording_started' : 'screen_recording_started';
+function recordingStartedAt(events: ProctoringEvent[], kind: 'camera' | 'screen' | 'mobile'): string | null {
+  const type =
+    kind === 'camera'
+      ? 'camera_recording_started'
+      : kind === 'screen'
+        ? 'screen_recording_started'
+        : 'mobile_recording_started';
   const event = events.find((e) => e.eventType === type);
   if (!event?.timestamp) return null;
   const at = parseServerInstant(event.timestamp);

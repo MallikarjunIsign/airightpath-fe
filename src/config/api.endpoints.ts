@@ -142,6 +142,10 @@ export const ENDPOINTS = {
      * already taken the socket down with them.
      */
     RECORDING_OUTCOME: (id: number) => `/api/interview/${id}/recording-outcome`,
+    /** Stills from the candidate's paired phone: upload (candidate) and list (reviewer). */
+    MOBILE_PAIRING: (id: number) => `/api/interview/${id}/mobile-pairing`,
+    MOBILE_CAPTURES: (id: number) => `/api/interview/${id}/mobile-captures`,
+    MOBILE_CAPTURE_IMAGE: (captureId: number) => `/api/interview/mobile-captures/${captureId}/image`,
   },
   AI: {
     START_INTERVIEW: "/api/interview/start",
