@@ -37,6 +37,17 @@ interface UseMediaRecorderOptions {
   persist?: { scheduleId: () => number | null | undefined };
 }
 
+/**
+ * Stands in for a chunk that is already stored elsewhere.
+ *
+ * A recording is now one file for the whole interview, and its chunks are kept
+ * in the browser's database as they arrive. Holding them here as well put an
+ * hour of video in memory twice. The list's *length* is what the rest of this
+ * hook reads — whether any data has arrived — so it still gets one entry per
+ * chunk, just not the bytes.
+ */
+const EMPTY_BLOB = new Blob([]);
+
 /** Fresh recorders attempted before giving up on a camera that delivers nothing. */
 const MAX_RESTARTS = 2;
 
@@ -106,8 +117,9 @@ export function useMediaRecorder(options?: UseMediaRecorderOptions) {
 
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) {
-        chunksRef.current.push(e.data);
-        setChunks((prev) => [...prev, e.data]);
+        const kept = sessionId ? EMPTY_BLOB : e.data;
+        chunksRef.current.push(kept);
+        setChunks((prev) => [...prev, kept]);
         recordingSync.chunk(sessionId, e.data);
         optionsRef.current?.onDataAvailable?.(e.data);
       }

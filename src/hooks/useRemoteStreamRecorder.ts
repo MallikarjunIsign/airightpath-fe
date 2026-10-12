@@ -2,6 +2,17 @@ import { useCallback, useEffect, useRef } from 'react';
 import { PROCTORING_CONFIG } from '@/config/proctoring.config';
 import { recordingSync } from '@/services/recording-sync.service';
 
+/**
+ * Stands in for a chunk that is already stored elsewhere.
+ *
+ * A recording is now one file for the whole interview, and its chunks are kept
+ * in the browser's database as they arrive. Holding them here as well put an
+ * hour of video in memory twice. The list's *length* is what the rest of this
+ * hook reads — whether any data has arrived — so it still gets one entry per
+ * chunk, just not the bytes.
+ */
+const EMPTY_BLOB = new Blob([]);
+
 interface UseRemoteStreamRecorderOptions {
   /** The phone's picture, as it arrives over the pairing connection. Null until paired. */
   stream: MediaStream | null;
@@ -118,7 +129,7 @@ export function useRemoteStreamRecorder(options: UseRemoteStreamRecorderOptions)
 
     recorder.ondataavailable = (event) => {
       if (event.data.size > 0) {
-        chunksRef.current.push(event.data);
+        chunksRef.current.push(sessionId ? EMPTY_BLOB : event.data);
         recordingSync.chunk(sessionId, event.data);
       }
     };

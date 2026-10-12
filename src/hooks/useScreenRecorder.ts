@@ -1,6 +1,17 @@
 import { useState, useRef, useCallback } from 'react';
 import { recordingSync } from '@/services/recording-sync.service';
 
+/**
+ * Stands in for a chunk that is already stored elsewhere.
+ *
+ * A recording is now one file for the whole interview, and its chunks are kept
+ * in the browser's database as they arrive. Holding them here as well put an
+ * hour of video in memory twice. The list's *length* is what the rest of this
+ * hook reads — whether any data has arrived — so it still gets one entry per
+ * chunk, just not the bytes.
+ */
+const EMPTY_BLOB = new Blob([]);
+
 interface UseScreenRecorderOptions {
   timeslice?: number;
   onScreenStop?: () => void;
@@ -226,7 +237,7 @@ export function useScreenRecorder(options?: UseScreenRecorderOptions) {
       const sessionId = sessionRef.current;
       next.ondataavailable = (e) => {
         if (e.data.size > 0) {
-          chunksRef.current.push(e.data);
+          chunksRef.current.push(sessionId ? EMPTY_BLOB : e.data);
           recordingSync.chunk(sessionId, e.data);
         }
       };

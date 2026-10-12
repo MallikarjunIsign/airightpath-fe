@@ -237,6 +237,13 @@ export function RecordingPlayerButton({
                   controls
                   autoPlay
                   playsInline
+                  // Straight on to the next part. A recording is normally one
+                  // file; it is several only where the candidate stopped sharing
+                  // and started again, and the reviewer should not have to notice
+                  // the join and press play.
+                  onEnded={() => {
+                    if (part + 1 < parts) void play(part + 1);
+                  }}
                   className="max-h-[70vh] w-full"
                   // Without this the player simply stalls, which reads as a
                   // recording that was never saved. The message names what the

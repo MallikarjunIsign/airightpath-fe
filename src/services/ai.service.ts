@@ -217,3 +217,77 @@ export const aiService = {
     );
   },
 };
+
+/** A multipart upload that has been started, as the server names it. */
+export interface RecordingUploadSession {
+  uploadId: string;
+  blobName: string;
+}
+
+/**
+ * A recording sent to storage while it is still being made.
+ *
+ * <p>The three steps of {@link aiService.uploadRecording}, separated, because a
+ * recording is now one continuous file that grows for the whole interview: it
+ * is begun once, a piece is sent each time enough has been recorded, and it is
+ * joined when the interview ends. Cutting it into separate files every ten
+ * minutes — which is what this replaced — gave the reviewer parts with a gap
+ * between them instead of an interview.</p>
+ */
+export const recordingUploadApi = {
+  async begin(
+    scheduleId: number,
+    kind: "camera" | "screen" | "mobile",
+    contentType: string,
+  ): Promise<RecordingUploadSession> {
+    const res = await api.post<RecordingUploadSession>(`/api/interview/${scheduleId}/recording-upload`, null, {
+      params: { kind, type: contentType },
+      _skipErrorToast: true,
+    } as never);
+    return res.data;
+  },
+
+  /** Send one piece, retrying it on its own. A 410 means the server already finished this upload. */
+  async part(
+    scheduleId: number,
+    session: RecordingUploadSession,
+    part: number,
+    piece: Blob,
+  ): Promise<void> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await api.post(`/api/interview/${scheduleId}/recording-upload/part`, piece, {
+          headers: { "Content-Type": "application/octet-stream" },
+          params: { uploadId: session.uploadId, blobName: session.blobName, part },
+          timeout: 5 * 60 * 1000,
+          _skipErrorToast: true,
+        } as never);
+        return;
+      } catch (err) {
+        if (!isRetryable(err) || attempt > PIECE_BACKOFF_MS.length) throw err;
+        await new Promise((resolve) => setTimeout(resolve, PIECE_BACKOFF_MS[attempt - 1]));
+      }
+    }
+  },
+
+  /** Join the pieces. Safe to ask twice: the server answers the second time with the first's result. */
+  async complete(
+    scheduleId: number,
+    kind: "camera" | "screen" | "mobile",
+    session: RecordingUploadSession,
+  ): Promise<void> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await api.post(`/api/interview/${scheduleId}/recording-upload/complete`, null, {
+          params: { kind, uploadId: session.uploadId, blobName: session.blobName },
+          timeout: 5 * 60 * 1000,
+          _skipErrorToast: true,
+        } as never);
+        return;
+      } catch (err) {
+        if (!isRetryable(err) || attempt > PIECE_BACKOFF_MS.length) throw err;
+        await new Promise((resolve) => setTimeout(resolve, PIECE_BACKOFF_MS[attempt - 1]));
+      }
+    }
+  },
+};

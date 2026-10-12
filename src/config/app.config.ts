@@ -55,14 +55,16 @@ export const APP_CONFIG = {
   PROCTORING_MAX_TOTAL_WARNINGS: 9999999,
   VIDEO_CHUNK_SECONDS: 15,
   /**
-   * How long a recording runs before it is closed off and uploaded while the
-   * interview carries on. A recording held in memory until the end is lost
-   * whole if the tab is closed, reloaded or put to sleep — an hour of footage
-   * gone, with "nothing was captured" the only trace. Cut into parts, the most
-   * that can be lost is the part in progress. 0 disables it (one file at the
-   * end, as before).
+   * Cut a recording into separate files this many minutes long. 0, the default,
+   * keeps each recording as one file for the whole interview.
+   *
+   * It used to default to ten, so that a closed tab lost minutes rather than the
+   * hour. That is now done a different way — the recording is one file, sent to
+   * storage in pieces as it is made, and a closed tab leaves those pieces to be
+   * finished — so the reviewer gets one video instead of a playlist with a gap
+   * between each part. Kept as a lever only: setting it brings the gaps back.
    */
-  RECORDING_SEGMENT_MINUTES: Number(import.meta.env.VITE_RECORDING_SEGMENT_MINUTES ?? 10) || 0,
+  RECORDING_SEGMENT_MINUTES: Number(import.meta.env.VITE_RECORDING_SEGMENT_MINUTES ?? 0) || 0,
   AUDIO_CHUNK_SECONDS: 4,
   AUDIO_CHUNK_MIME_TYPE: "audio/webm;codecs=opus",
   /**
