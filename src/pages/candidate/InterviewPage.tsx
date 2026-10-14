@@ -1199,7 +1199,6 @@ export function InterviewPage() {
         mobileConnected={mobileConnected}
         mobileVerified={mobileVerified}
         mobileConnectUrl={`${getMobileBaseUrl()}/mobile-connect?token=${mobileToken}`}
-        mobileStream={remoteStream}
         isSpeaking={isSpeaking}
         isAudioMuted={isAudioMuted}
         onToggleAudio={toggleInstructionAudio}

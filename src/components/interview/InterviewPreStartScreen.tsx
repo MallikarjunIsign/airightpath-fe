@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   Monitor,
@@ -52,45 +52,6 @@ function captureStepTitle(photoRequired: boolean, roomScanRequired: boolean): st
 }
 
 /** The QR link, shown as text for a phone whose camera will not scan it. */
-/**
- * The paired phone's camera, live.
- *
- * <p>Muted, always. The phone may now send its microphone as well as its
- * camera, and an unmuted preview on the desktop would put the candidate's own
- * voice back through their speakers and into the interview.</p>
- *
- * <p>The stream is attached through a ref rather than a `src`: a MediaStream
- * is not a URL, and assigning one to `src` silently shows nothing.</p>
- */
-function MobilePreview({
-  stream,
-  placeholder,
-}: Readonly<{ stream?: MediaStream | null; placeholder: string }>) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    video.srcObject = stream ?? null;
-    if (stream) {
-      // Autoplay can still be refused; a preview that fails to start is not
-      // worth an error, the candidate simply sees the placeholder.
-      video.play().catch(() => {});
-    }
-  }, [stream]);
-
-  return (
-    <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-[var(--border)] bg-black">
-      <video ref={videoRef} autoPlay playsInline muted className="h-full w-full object-cover" />
-      {!stream && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <p className="text-xs text-white/60">{placeholder}</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function ManualPairingLink({ url }: Readonly<{ url: string }>) {
   const [copied, setCopied] = useState(false);
 
@@ -143,15 +104,6 @@ interface InterviewPreStartScreenProps {
   mobileVerified: boolean;
   /** QR value: the mobile-connect URL with token. */
   mobileConnectUrl: string;
-  /**
-   * What the paired phone is actually seeing.
-   *
-   * <p>The screen showed a green tick and "Phone verified" and nothing else,
-   * so the candidate was asked to angle a camera at themselves and their
-   * screen with no way to see what it had in frame. The one moment the
-   * preview matters is while they are still positioning it.</p>
-   */
-  mobileStream?: MediaStream | null;
   isSpeaking: boolean;
   isAudioMuted: boolean;
   onToggleAudio: () => void;
@@ -192,7 +144,6 @@ export function InterviewPreStartScreen({
   mobileConnected,
   mobileVerified,
   mobileConnectUrl,
-  mobileStream,
   isSpeaking,
   isAudioMuted,
   onToggleAudio,
@@ -554,10 +505,6 @@ export function InterviewPreStartScreen({
 
               {mobileConnected && !mobileVerified && (
                 <div className="space-y-3 py-2">
-                  <MobilePreview
-                    stream={mobileStream}
-                    placeholder="Waiting for the phone's camera…"
-                  />
                   <div className="flex items-center justify-center gap-2">
                     <Monitor className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                     <p className="text-sm font-medium text-blue-600 dark:text-blue-400">
@@ -565,20 +512,13 @@ export function InterviewPreStartScreen({
                     </p>
                   </div>
                   <p className="text-center text-xs text-[var(--textSecondary)]">
-                    Check the picture above shows both you and your screen, then finish the room
-                    check on your phone.
+                    Finish the room check on your phone.
                   </p>
                 </div>
               )}
 
               {mobileVerified && (
                 <div className="space-y-3 py-2">
-                  {/* Kept after verification too. "Leave it exactly where it
-                      is" is only checkable if the candidate can see where it
-                      is — and a phone knocked between verifying and starting
-                      would otherwise go unnoticed until a reviewer watched the
-                      recording. */}
-                  <MobilePreview stream={mobileStream} placeholder="Phone camera feed" />
                   <div className="flex items-center justify-center gap-2">
                     <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                     <p className="text-sm font-medium text-emerald-600 dark:text-emerald-400">
@@ -588,6 +528,14 @@ export function InterviewPreStartScreen({
                   <p className="text-center text-xs text-[var(--textSecondary)]">
                     Leave it exactly where it is. You can start the interview now.
                   </p>
+                </div>
+              )}
+
+              {/* Skipped is a status, like verified: said plainly, with no picture. */}
+              {mobileSkipped && !mobileVerified && !mobileRequired && (
+                <div className="flex items-center justify-center gap-2 py-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                  <p className="text-sm font-medium text-amber-600 dark:text-amber-400">Phone skipped</p>
                 </div>
               )}
 
