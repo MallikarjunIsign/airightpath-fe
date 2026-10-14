@@ -445,7 +445,13 @@ export function InterviewPage() {
     const timerId = window.setTimeout(() => {
       if (instructionAudioFiredRef.current) return;
       instructionAudioFiredRef.current = true;
-      const script = 'Please read the instructions carefully before starting the interview process. ...';
+      // The rules exactly as they are written on screen, so what is heard is
+      // what is read. Built from the same list the screen renders, so a rule
+      // added or switched off there changes the narration with it.
+      const script =
+        'Please read the instructions carefully before starting the interview. ' +
+        buildProctoringRules().map((rule) => rule.text.trim().replace(/([^.!?])$/, '$1.')).join(' ') +
+        ' When you are ready, press Start Interview.';
       speakInstruction(script, { rate: 0.95 });
     }, 500);
     return () => {
