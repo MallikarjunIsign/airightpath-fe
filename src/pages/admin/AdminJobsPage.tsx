@@ -595,14 +595,18 @@ export function AdminJobsPage() {
                       applied to this job.
                     </p>
                     <p>
-                      Their applications, assessments and results are filed under this prefix and
-                      may be removed with it.
+                      Their applications, assessments, interviews and results are kept. Only the job
+                      is archived.
                     </p>
                   </>
                 )}
               </div>
 
-              <p>This cannot be undone.</p>
+              <p>
+                The job is hidden from candidates and from this list, and who deleted it and when is
+                recorded. Nothing is erased from the database, and the prefix can never be reused.
+                There is no restore button in the app.
+              </p>
 
               {deleteNeedsTypedPrefix && (
                 <Input
