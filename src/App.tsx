@@ -22,6 +22,7 @@ import { AdminJobsPage } from '@/pages/admin/AdminJobsPage';
 import { JobPostFormPage } from '@/pages/admin/JobPostFormPage';
 import { CandidateDetailsPage } from '@/pages/admin/CandidateDetailsPage';
 import { UserListPage } from '@/pages/admin/UserListPage';
+import { UserDetailsPage } from '@/pages/admin/UserDetailsPage';
 import { AtsScreeningPage } from '@/pages/admin/AtsScreeningPage';
 import { AtsBatchPage } from '@/pages/admin/AtsBatchPage';
 import { AssignAssessmentPage } from '@/pages/admin/AssignAssessmentPage';
@@ -129,6 +130,7 @@ function App() {
         <Route path="jobs/:jobPrefix/edit" element={<JobPostFormPage />} />
         <Route path="candidates" element={<CandidateDetailsPage />} />
         <Route path="users" element={<UserListPage />} />
+        <Route path="users/:email" element={<UserDetailsPage />} />
         <Route path="ats" element={<AtsScreeningPage />} />
         <Route path="ats/batch" element={<AtsBatchPage />} />
         <Route path="assessments/assign" element={<AssignAssessmentPage />} />

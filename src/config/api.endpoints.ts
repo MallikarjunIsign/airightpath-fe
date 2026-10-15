@@ -53,6 +53,8 @@ export const ENDPOINTS = {
     APPLY: "/api/job-applications/apply",
     UPDATE: "/api/job-applications/update",
     GET_BY_EMAIL: (email: string) => `/api/job-applications/${seg(email)}`,
+    /** Admin: every application, across all jobs. Needs JOB_APPLICATION_READ_ALL. */
+    GET_ALL: "/api/job-applications/getAllApplications",
     GET_BY_PREFIX: (prefix: string) =>
       `/api/job-applications/byJobPrefix/${seg(prefix)}`,
     GET_BY_PREFIX_AND_EMAIL: (prefix: string, email: string) =>

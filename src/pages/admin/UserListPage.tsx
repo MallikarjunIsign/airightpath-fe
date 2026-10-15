@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { ROUTES } from '@/config/routes';
 import { Loader2, Users, UserCheck, UserX, ChevronRight, UserPlus, X } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -8,16 +10,13 @@ import { Select } from '@/components/ui/Select';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { Modal } from '@/components/ui/Modal';
 import { Pagination } from '@/components/ui/Pagination';
 import { UserRoleBadges } from '@/components/admin/UserRoleBadges';
-import { UserDetailsPanel } from '@/components/admin/UserDetailsPanel';
 import { CreateStaffModal } from '@/components/admin/CreateStaffModal';
 import { userService } from '@/services/user.service';
 import { useToast } from '@/components/ui/Toast';
 import { MESSAGES } from '@/config/messages';
 import { usePersistentState } from '@/hooks/usePersistentState';
-import { useMediaQuery, XL_QUERY } from '@/hooks/useMediaQuery';
 import { useRbac } from '@/hooks/useRbac';
 import { PERMISSIONS } from '@/config/permissions';
 import type { UsersDto } from '@/types/user.types';
@@ -80,8 +79,8 @@ export function UserListPage() {
   const { showToast } = useToast();
   // Same breakpoint as the `xl:` classes below, so the pane and the dialog can
   // never both be showing (or both be hidden) at some in-between width.
-  const isWide = useMediaQuery(XL_QUERY);
 
+  const navigate = useNavigate();
   const { can, hasAnyRole } = useRbac();
   const canCreateStaff = hasAnyRole(['ADMIN', 'SUPER_ADMIN']);
   const canChangeStatus = can(PERMISSIONS.USER_ACTIVATE) && can(PERMISSIONS.USER_DEACTIVATE);
@@ -102,7 +101,6 @@ export function UserListPage() {
    * the panel re-reads from `users` — otherwise activating an account from the
    * panel would leave a stale copy of it on screen showing the old status.
    */
-  const [selectedEmail, setSelectedEmail] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
 
   /**
@@ -166,13 +164,6 @@ export function UserListPage() {
     setRoleFilter('ALL');
     setSearchTerm('');
   };
-
-  const selectedUser = users.find((user) => user.email === selectedEmail) ?? null;
-
-  // A filter that excludes the open row would otherwise leave its details up
-  // beside a list that no longer contains it.
-  const selectedIsVisible = users.some((user) => user.email === selectedEmail);
-  const panelUser = selectedIsVisible ? selectedUser : null;
 
   async function confirmToggleStatus() {
     const user = confirmUser;
@@ -284,7 +275,7 @@ export function UserListPage() {
                 >
                   <button
                     className="flex w-full items-start justify-between gap-3 text-left"
-                    onClick={() => setSelectedEmail(user.email)}
+                    onClick={() => navigate(ROUTES.ADMIN.userDetail(user.email))}
                   >
                     <div className="min-w-0">
                       <p className="font-medium text-[var(--text)] break-words">
@@ -335,10 +326,8 @@ export function UserListPage() {
                   {users.map((user) => (
                     <TableRow
                       key={user.email}
-                      onClick={() => setSelectedEmail(user.email)}
-                      className={`cursor-pointer ${
-                        user.email === selectedEmail ? 'bg-[var(--primary)]/5' : ''
-                      }`}
+                      onClick={() => navigate(ROUTES.ADMIN.userDetail(user.email))}
+                      className="cursor-pointer"
                     >
                       <TableCell className="font-medium align-top break-words">
                         {user.firstName} {user.lastName}
@@ -406,51 +395,8 @@ export function UserListPage() {
         )}
       </div>
 
-      {/* On a wide screen the details sit beside the list, so comparing rows
-          against one person's detail needs no navigation. Narrower than that
-          there is no room for a second column, and the same panel opens as a
-          dialog instead — one component, two containers, so the two renderings
-          cannot drift apart. */}
-      <div className="flex flex-col gap-6 xl:flex-row xl:items-start">
-        <div className="min-w-0 flex-1">{list}</div>
-
-        {isWide && panelUser && (
-          <aside className="w-full xl:sticky xl:top-6 xl:w-[22rem] xl:flex-shrink-0">
-            <Card>
-              <CardHeader>
-                <CardTitle>User details</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <UserDetailsPanel
-                  user={panelUser}
-                  isToggling={togglingEmail === panelUser.email}
-                  onToggleStatus={() => setConfirmUser(panelUser)}
-                  onClose={() => setSelectedEmail(null)}
-                  canChangeStatus={canChangeStatus}
-                />
-              </CardContent>
-            </Card>
-          </aside>
-        )}
-      </div>
-
-      <Modal
-        isOpen={!isWide && !!panelUser}
-        onClose={() => setSelectedEmail(null)}
-        title="User details"
-        size="md"
-      >
-        {panelUser && (
-          <UserDetailsPanel
-            user={panelUser}
-            isToggling={togglingEmail === panelUser.email}
-            onToggleStatus={() => setConfirmUser(panelUser)}
-            onClose={() => setSelectedEmail(null)}
-            showClose={false}
-            canChangeStatus={canChangeStatus}
-          />
-        )}
-      </Modal>
+      {/* A row opens the user on a page of their own. */}
+      <div className="min-w-0">{list}</div>
 
       <CreateStaffModal
         isOpen={creating}

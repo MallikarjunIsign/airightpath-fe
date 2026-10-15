@@ -1,3 +1,4 @@
+import { CandidateJourney } from '@/components/admin/CandidateJourney';
 import { Mail, Phone, Clock, CalendarClock, Briefcase, MapPin, CheckCircle, XCircle, FileText, Loader2, Eye, BarChart3, Video } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
 import { Badge } from '@/components/ui/Badge';
@@ -240,6 +241,15 @@ export function CandidateDetailModal({
             paper, nor whether this is the candidate's second go at it. */}
         {jobPrefix && (
           <CandidateExamAssignments email={getAppEmail(candidate)} jobPrefix={jobPrefix} />
+        )}
+
+        {/* The whole path through this job, in order. */}
+        {jobPrefix && (
+          <CandidateJourney
+            candidate={candidate}
+            jobPrefix={jobPrefix}
+            onViewInterviewResult={onViewInterviewResult}
+          />
         )}
 
         {/* Application Status Details */}

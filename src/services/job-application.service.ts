@@ -16,6 +16,10 @@ export const jobApplicationService = {
     });
   },
 
+  getAll() {
+    return api.get<JobApplicationDTO[]>(ENDPOINTS.JOB_APPLICATIONS.GET_ALL);
+  },
+
   getByEmail(email: string) {
     return api.get<JobApplicationDTO[]>(ENDPOINTS.JOB_APPLICATIONS.GET_BY_EMAIL(email));
   },
