@@ -30,6 +30,7 @@ import { Badge } from '@/components/ui/Badge';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { APP_CONFIG } from '@/config/app.config';
 import { PROCTORING_CONFIG } from '@/config/proctoring.config';
+import { MIC_AUDIO_CONSTRAINTS, describeMicProcessing, micProcessingReport } from '@/config/audio.config';
 import { ROUTES } from '@/config/routes';
 import { MESSAGES } from '@/config/messages';
 import { InterviewPreStartScreen } from '@/components/interview/InterviewPreStartScreen';
@@ -1139,7 +1140,7 @@ export function InterviewPage() {
           // connection. `ideal` rather than `exact`: a webcam that cannot
           // offer this should still record at whatever it has, not refuse.
           const mediaStream = await startVideoRecording({
-            audio: true,
+            audio: MIC_AUDIO_CONSTRAINTS,
             video: {
               width: { ideal: PROCTORING_CONFIG.recording.camera.width },
               height: { ideal: PROCTORING_CONFIG.recording.camera.height },
@@ -1152,6 +1153,18 @@ export function InterviewPage() {
           }
           if (PROCTORING_CONFIG.recording.camera.required) {
             voiceInterview.sendProctoringEvent('camera_recording_started', 'Camera recording started');
+          }
+          // Whether the browser really cleaned the microphone, on the record. A
+          // device or browser that cannot suppress noise carries on without saying
+          // so, and a reviewer hearing a noisy recording should be able to tell that
+          // from an unprocessed one.
+          const mic = micProcessingReport(mediaStream);
+          voiceInterview.sendProctoringEvent('mic_processing', describeMicProcessing(mic));
+          if (mediaStream && mediaStream.getAudioTracks().length > 0 && !mic.suppressed) {
+            showToast(
+              'Your browser could not turn on noise reduction for the microphone. Move somewhere quiet, or use a headset with a microphone.',
+              'warning',
+            );
           }
         } catch (err) {
           showToast(MESSAGES.interview.videoRecordFailed, 'warning');

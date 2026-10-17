@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { PROCTORING_CONFIG } from '@/config/proctoring.config';
+import { MIC_AUDIO_CONSTRAINTS } from '@/config/audio.config';
 import { interviewWsService } from '@/services/interview-ws.service';
 import { APP_CONFIG } from '@/config/app.config';
 import { useRemoteStreamRecorder } from '@/hooks/useRemoteStreamRecorder';
@@ -127,7 +128,7 @@ export default function MobileConnect() {
                 try {
                     stream = await navigator.mediaDevices.getUserMedia({
                         video,
-                        audio: wantAudio ? { echoCancellation: true, noiseSuppression: true } : false,
+                        audio: wantAudio ? MIC_AUDIO_CONSTRAINTS : false,
                     });
                 } catch (err) {
                     if (!wantAudio) throw err;

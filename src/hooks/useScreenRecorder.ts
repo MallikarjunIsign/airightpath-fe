@@ -1,3 +1,4 @@
+import { MIC_AUDIO_CONSTRAINTS } from '@/config/audio.config';
 import { useState, useRef, useCallback } from 'react';
 import { recordingSync } from '@/services/recording-sync.service';
 
@@ -237,7 +238,7 @@ export function useScreenRecorder(options?: UseScreenRecorderOptions) {
     setScreenStream(screen);
 
     // 2. Get mic audio separately
-    const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const micStream = await navigator.mediaDevices.getUserMedia({ audio: MIC_AUDIO_CONSTRAINTS });
     micStreamRef.current = micStream;
 
     // 3. Screen video, plus both voices mixed down to a single track.

@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { APP_CONFIG } from "@/config/app.config";
+import { MIC_AUDIO_CONSTRAINTS, describeMicProcessing, micProcessingReport } from "@/config/audio.config";
 import { interviewWsService } from "@/services/interview-ws.service";
 import { getAccessToken } from "@/services/api.service";
 
@@ -259,13 +260,12 @@ export function useAudioStreaming(scheduleId: number | null) {
           console.warn("Paired phone has no live audio track; using this device's microphone");
         }
         stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
+          audio: MIC_AUDIO_CONSTRAINTS,
         });
         ownsStreamRef.current = true;
+        // What the browser really did to this microphone, for whoever is asked why
+        // an answer was noisy. Asking is not the same as receiving.
+        console.info(describeMicProcessing(micProcessingReport(stream)));
       }
 
       streamRef.current = stream;
