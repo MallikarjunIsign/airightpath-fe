@@ -5,6 +5,7 @@ import {
   ClipboardList,
   Send,
   Sparkles,
+  Library,
   Upload,
   Eye,
   Download,
@@ -15,6 +16,7 @@ import {
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { BackLink } from '@/components/ui/BackLink';
+import { QuestionBankPicker } from '@/components/admin/QuestionBankPicker';
 import { QuestionPaperExportDialog } from '@/components/admin/QuestionPaperExportDialog';
 import { ExamDurationFields } from '@/components/admin/ExamDurationFields';
 import { PassMarkField } from '@/components/admin/PassMarkField';
@@ -72,7 +74,7 @@ function hasExamAlready(status: JobApplicationStatus): boolean {
 
 interface FileState {
   file: File | null;
-  source: 'ai' | 'upload' | null;
+  source: 'ai' | 'upload' | 'bank' | null;
 }
 
 /**
@@ -283,6 +285,8 @@ export function AssignAssessmentPage() {
   // Loading states
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
+  // Which paper is being built from the question bank, if either.
+  const [bankPicker, setBankPicker] = useState<'APTITUDE' | 'CODING' | null>(null);
   const [generatingAptitude, setGeneratingAptitude] = useState(generation.aptitude);
   const [generatingCoding, setGeneratingCoding] = useState(generation.coding);
 
@@ -814,6 +818,16 @@ export function AssignAssessmentPage() {
                       Generate via AI
                     </Button>
                     <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => (selectedPrefix ? setBankPicker('APTITUDE') : showToast(MESSAGES.admin.common.selectJobFirst, 'warning'))}
+                      leftIcon={<Library size={14} />}
+                      disabled={submitting || generatingAptitude}
+                      title="Pick questions that already exist — no waiting for the AI"
+                    >
+                      Choose from Question Bank
+                    </Button>
+                    <Button
                       variant="ghost"
                       size="sm"
                       onClick={goToPromptScreen}
@@ -856,7 +870,7 @@ export function AssignAssessmentPage() {
                       {aptitudeFile.file.name}
                     </span>
                     <span className="text-xs text-[var(--textSecondary)] flex-shrink-0">
-                      {aptitudeFile.source === 'ai' ? '(AI Generated)' : '(Uploaded)'}
+                      {aptitudeFile.source === 'ai' ? '(AI Generated)' : aptitudeFile.source === 'bank' ? '(From Question Bank)' : '(Uploaded)'}
                     </span>
                     <button
                       type="button"
@@ -928,6 +942,16 @@ export function AssignAssessmentPage() {
                       Generate via AI
                     </Button>
                     <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => (selectedPrefix ? setBankPicker('CODING') : showToast(MESSAGES.admin.common.selectJobFirst, 'warning'))}
+                      leftIcon={<Library size={14} />}
+                      disabled={submitting || generatingCoding}
+                      title="Pick questions that already exist — no waiting for the AI"
+                    >
+                      Choose from Question Bank
+                    </Button>
+                    <Button
                       variant="ghost"
                       size="sm"
                       onClick={goToPromptScreen}
@@ -970,7 +994,7 @@ export function AssignAssessmentPage() {
                       {codingFile.file.name}
                     </span>
                     <span className="text-xs text-[var(--textSecondary)] flex-shrink-0">
-                      {codingFile.source === 'ai' ? '(AI Generated)' : '(Uploaded)'}
+                      {codingFile.source === 'ai' ? '(AI Generated)' : codingFile.source === 'bank' ? '(From Question Bank)' : '(Uploaded)'}
                     </span>
                     <button
                       type="button"
@@ -1125,6 +1149,18 @@ export function AssignAssessmentPage() {
       </Card>
 
       {/* Format picker for downloading a generated paper */}
+      <QuestionBankPicker
+        isOpen={bankPicker !== null}
+        onClose={() => setBankPicker(null)}
+        jobPrefix={selectedPrefix}
+        type={bankPicker ?? 'APTITUDE'}
+        onUse={(file) => {
+          if (bankPicker === 'CODING') setCodingFile({ file, source: 'bank' });
+          else setAptitudeFile({ file, source: 'bank' });
+          showToast('Question paper built from the question bank.', 'success');
+        }}
+      />
+
       {exporting && (
         <QuestionPaperExportDialog
           file={exporting.file}

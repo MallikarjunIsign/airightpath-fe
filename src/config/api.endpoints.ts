@@ -50,7 +50,10 @@ export const ENDPOINTS = {
     DELETE: (id: number) => `/api/jobs/post/${id}`,
   },
   QUESTION_BANK: {
-    LIST: "/api/question-bank",
+    ITEMS: "/api/question-bank/items",
+    ASSIGNMENTS: (id: number) => `/api/question-bank/items/${id}/assignments`,
+    SYNC: "/api/question-bank/sync",
+    SYNC_STATUS: "/api/question-bank/sync-status",
   },
   JOB_APPLICATIONS: {
     APPLY: "/api/job-applications/apply",
