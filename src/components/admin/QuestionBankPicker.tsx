@@ -25,6 +25,12 @@ interface QuestionBankPickerProps {
   onUse: (file: File, count: number) => void;
 }
 
+const LEVEL_RANK = ['basic', 'easy', 'beginner', 'medium', 'intermediate', 'moderate', 'hard', 'advanced', 'difficult'];
+const rankOf = (d: string) => {
+  const i = LEVEL_RANK.indexOf(d.toLowerCase());
+  return i < 0 ? 99 : i < 3 ? 0 : i < 6 ? 1 : 2;
+};
+
 const DEFAULT_COUNT: Record<BankType, number> = { APTITUDE: 10, CODING: 3 };
 
 /**
@@ -46,6 +52,7 @@ export function QuestionBankPicker({ isOpen, onClose, jobPrefix, type, onUse }: 
   const [difficulty, setDifficulty] = useState('');
   const [unusedOnly, setUnusedOnly] = useState(false);
   const [otherJobs, setOtherJobs] = useState(false);
+  const [perLevel, setPerLevel] = useState('2');
 
   useEffect(() => {
     if (!isOpen) return;
@@ -57,14 +64,18 @@ export function QuestionBankPicker({ isOpen, onClose, jobPrefix, type, onUse }: 
     questionBankService
       .getItems()
       .then((res) => {
-        if (!cancelled) setItems(buildBank(res.data ?? []).questions.filter((q) => q.type === type));
+        if (cancelled) return;
+        const all = buildBank(res.data ?? []).questions.filter((q) => q.type === type);
+        setItems(all);
+        // A job with nothing of its own would open an empty dialog; start from every job instead.
+        setOtherJobs(!all.some((q) => q.jobPrefix === jobPrefix && q.timesAssigned === 0));
       })
       .catch(() => !cancelled && setFailed(true))
       .finally(() => !cancelled && setLoading(false));
     return () => {
       cancelled = true;
     };
-  }, [isOpen, type]);
+  }, [isOpen, type, jobPrefix]);
 
   const wanted = Math.max(0, Math.floor(Number(target) || 0));
   const byId = useMemo(() => new Map(items.map((q) => [q.id, q])), [items]);
@@ -104,6 +115,20 @@ export function QuestionBankPicker({ isOpen, onClose, jobPrefix, type, onUse }: 
       .slice(0, missing)
       .map((q) => q.id);
     setSelectedIds((current) => [...current, ...fresh]);
+  };
+
+  /** N never-assigned questions from every difficulty level, easiest level first; replaces the selection. */
+  const fillPerLevel = () => {
+    const n = Math.max(1, Math.floor(Number(perLevel) || 0));
+    const fresh = items.filter((q) => q.timesAssigned === 0 && (otherJobs || q.jobPrefix === jobPrefix));
+    const levels = [...new Set(fresh.map((q) => q.difficulty || 'Unspecified'))].sort(
+      (a, b) => rankOf(a) - rankOf(b) || a.localeCompare(b),
+    );
+    const ids = levels.flatMap((level) =>
+      fresh.filter((q) => (q.difficulty || 'Unspecified') === level).slice(0, n).map((q) => q.id),
+    );
+    setSelectedIds(ids);
+    setTarget(String(ids.length));
   };
 
   const unusedAvailable = items.filter((q) => q.timesAssigned === 0 && (otherJobs || q.jobPrefix === jobPrefix)).length;
@@ -195,6 +220,25 @@ export function QuestionBankPicker({ isOpen, onClose, jobPrefix, type, onUse }: 
                 <h4 className="text-sm font-semibold text-[var(--text)]">
                   Available ({pool.length})
                 </h4>
+                <span className="flex items-center gap-1 text-xs text-[var(--textSecondary)]">
+                  <input
+                    type="number"
+                    min={1}
+                    value={perLevel}
+                    onChange={(e) => setPerLevel(e.target.value)}
+                    aria-label="Questions per level"
+                    className="h-8 w-14 rounded border border-[var(--border)] bg-transparent px-2 text-[var(--text)]"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={unusedAvailable === 0}
+                    onClick={fillPerLevel}
+                    title="Pick this many never-assigned questions from each difficulty level"
+                  >
+                    per level
+                  </Button>
+                </span>
                 <Button
                   variant="outline"
                   size="sm"
@@ -210,7 +254,9 @@ export function QuestionBankPicker({ isOpen, onClose, jobPrefix, type, onUse }: 
                 <p className="rounded-lg border border-dashed border-[var(--border)] p-4 text-sm text-[var(--textSecondary)]">
                   {items.length === 0
                     ? 'The bank has no questions of this kind yet. Generate or upload a paper, or read stored papers in on the Question Bank page.'
-                    : 'No question matches. Try “Include other jobs” or clear the filters.'}
+                    : !otherJobs && items.some((q) => q.jobPrefix !== jobPrefix && (!unusedOnly || q.timesAssigned === 0))
+                      ? `This job (${jobPrefix}) has no ${unusedOnly ? 'never-assigned ' : ''}${label} questions, but other jobs do. Tick “Include other jobs” to use them.`
+                      : 'No question matches. Clear the filters.'}
                 </p>
               ) : (
                 <ul className="max-h-[22rem] space-y-1.5 overflow-y-auto pr-1">
