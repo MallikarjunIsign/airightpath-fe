@@ -16,6 +16,7 @@ export const ROUTES = {
     jobsEdit: (jobPrefix: string) => `/admin/jobs/${encodeURIComponent(jobPrefix)}/edit`,
     CANDIDATES: '/admin/candidates',
     USERS: '/admin/users',
+    QUESTION_BANK: '/admin/question-bank',
     userDetail: (email: string) => `/admin/users/${encodeURIComponent(email)}`,
     ATS: '/admin/ats',
     ATS_BATCH: '/admin/ats/batch',

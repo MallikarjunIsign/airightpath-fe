@@ -49,6 +49,9 @@ export const ENDPOINTS = {
     UPDATE: (id: number) => `/api/jobs/post/${id}`,
     DELETE: (id: number) => `/api/jobs/post/${id}`,
   },
+  QUESTION_BANK: {
+    LIST: "/api/question-bank",
+  },
   JOB_APPLICATIONS: {
     APPLY: "/api/job-applications/apply",
     UPDATE: "/api/job-applications/update",

@@ -10,6 +10,7 @@ import {
   MessageSquare,
   BookOpen,
   Award,
+  Library,
   FileSearch,
   Layers,
   Video,
@@ -112,6 +113,11 @@ const adminNavItems: NavItem[] = [
     label: "Assessment Results",
     icon: <Award size={18} />,
     path: ROUTES.ADMIN.ASSESSMENTS_RESULTS,
+  },
+  {
+    label: "Question Bank",
+    icon: <Library size={18} />,
+    path: ROUTES.ADMIN.QUESTION_BANK,
   },
   {
     label: "Schedule Interview",
