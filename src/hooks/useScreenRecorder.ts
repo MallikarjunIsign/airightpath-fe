@@ -12,7 +12,32 @@ import { recordingSync } from '@/services/recording-sync.service';
  */
 const EMPTY_BLOB = new Blob([]);
 
+/**
+ * Raised when the candidate shared something other than their whole screen.
+ * `surface` is what the browser says they picked: `window` or `browser` (a tab).
+ */
+export class ScreenSurfaceError extends Error {
+  readonly surface: string;
+  constructor(surface: string) {
+    super(`The ${surface === 'browser' ? 'browser tab' : surface} was shared instead of the entire screen`);
+    this.name = 'ScreenSurfaceError';
+    this.surface = surface;
+  }
+}
+
 interface UseScreenRecorderOptions {
+  /**
+   * Refuse anything but the whole screen.
+   *
+   * A shared window or tab records only that window or tab, so everything outside
+   * it — a call window, a second browser, another app showing the screen to a
+   * helper — is simply not in the recording. The share is also where this is
+   * actually enforceable: a page cannot see that another app is already sharing
+   * the screen, but it can insist that what it records is all of it, banners and
+   * call windows included. Where the browser does not report what was shared
+   * (Firefox, Safari) it cannot be checked and the share is accepted.
+   */
+  requireEntireScreen?: boolean;
   timeslice?: number;
   onScreenStop?: () => void;
   /**
@@ -194,9 +219,20 @@ export function useScreenRecorder(options?: UseScreenRecorderOptions) {
         // scrolling, typing — are better served by spending the budget on a
         // clean frame than on twice as many smeared ones.
         frameRate: { ideal: 10 },
+        // Hints for the picker, not guarantees: the entire screen first, no way to
+        // switch to a tab mid-share, and this page not offered as a thing to share.
+        displaySurface: 'monitor',
+        monitorTypeSurfaces: 'include',
+        selfBrowserSurface: 'exclude',
+        surfaceSwitching: 'exclude',
       } as MediaTrackConstraints,
       audio: false,
     });
+    const surface = screen.getVideoTracks()[0]?.getSettings?.().displaySurface;
+    if (optionsRef.current?.requireEntireScreen && surface && surface !== 'monitor') {
+      screen.getTracks().forEach((track) => track.stop());
+      throw new ScreenSurfaceError(surface);
+    }
     screenStreamRef.current = screen;
     setScreenStream(screen);
 
@@ -321,6 +357,29 @@ export function useScreenRecorder(options?: UseScreenRecorderOptions) {
   }, [releaseCapture]);
 
   /**
+   * Throw the recording away: a start that did not go ahead.
+   *
+   * Different from `stop`, which leaves what was recorded to be uploaded. Here
+   * nothing is wanted — the share was taken before the interview and the
+   * interview never started — and an upload of it would be a recording of
+   * nothing, filed against an interview that did not happen.
+   */
+  const abort = useCallback(() => {
+    recordingSync.discard(sessionRef.current);
+    sessionRef.current = null;
+    try {
+      recorderRef.current?.stop();
+    } catch {
+      // Already stopped.
+    }
+    recorderRef.current = null;
+    chunksRef.current = [];
+    segmentsRef.current = [];
+    releaseCapture();
+    setIsRecording(false);
+  }, [releaseCapture]);
+
+  /**
    * End the recording and hand back every segment, oldest first.
    *
    * <p>Empty when nothing was ever captured. Each segment is a self-contained
@@ -342,5 +401,5 @@ export function useScreenRecorder(options?: UseScreenRecorderOptions) {
     return segmentsRef.current.slice();
   }, [finishSegment, releaseCapture]);
 
-  return { isRecording, stoppedEarly, start, resume, stop, stopAndGetSegments, screenStream };
+  return { isRecording, stoppedEarly, start, resume, stop, abort, stopAndGetSegments, screenStream };
 }

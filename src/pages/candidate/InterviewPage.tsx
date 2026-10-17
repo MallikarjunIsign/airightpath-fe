@@ -12,12 +12,13 @@ import { useTimer } from '@/hooks/useTimer';
 import { useVoiceInterview } from '@/hooks/useVoiceInterview';
 import { useQuestionTimer } from '@/hooks/useQuestionTimer';
 import { useMediaRecorder } from '@/hooks/useMediaRecorder';
-import { useScreenRecorder } from '@/hooks/useScreenRecorder';
+import { useScreenRecorder, ScreenSurfaceError } from '@/hooks/useScreenRecorder';
 import { useFullscreen } from '@/hooks/useFullscreen';
 import { useFaceDetection } from '@/hooks/useFaceDetection';
 import { useDevToolsDetection } from '@/hooks/useDevToolsDetection';
 import { useSpeechSynthesis } from '@/hooks/useSpeechSynthesis';
 import { aiService } from '@/services/ai.service';
+import { extractApiError } from '@/services/api.service';
 import { interviewWsService } from '@/services/interview-ws.service';
 import { interviewService } from '@/services/interview.service';
 import { parseServerInstant } from '@/utils/format.utils';
@@ -236,11 +237,16 @@ export function InterviewPage() {
 
   // Screen recording
   const [screenPermission, setScreenPermission] = useState<'granted' | 'denied' | 'prompt'>('prompt');
-  const { start: startScreenRecording, stop: stopScreenRecording, resume: resumeScreenRecording, stopAndGetSegments: stopScreenAndGetSegments, isRecording: isScreenRecording, stoppedEarly: screenShareStoppedEarly, screenStream } = useScreenRecorder({
+  const { start: startScreenRecording, stop: stopScreenRecording, abort: abortScreenRecording, resume: resumeScreenRecording, stopAndGetSegments: stopScreenAndGetSegments, isRecording: isScreenRecording, stoppedEarly: screenShareStoppedEarly, screenStream } = useScreenRecorder({
     timeslice: APP_CONFIG.VIDEO_CHUNK_SECONDS * 1000,
     segmentMs,
+    // Entire screen only: see useScreenRecorder.
+    requireEntireScreen: true,
+    // The interview's own id, not the server's reply to starting it: the share is
+    // now taken *before* the interview is started, when that reply does not exist
+    // yet, and a recording with nowhere to be filed would be lost.
     persist: PROCTORING_CONFIG.recording.screen.required
-      ? { scheduleId: () => voiceInterview.scheduleId }
+      ? { scheduleId: () => interview?.id ?? voiceInterview.scheduleId }
       : undefined,
     // Read at record time, not now: the audio graph is built when the first
     // question is spoken, which is after the recording has already started.
@@ -279,8 +285,13 @@ export function InterviewPage() {
         'screen_share_resumed',
         'Candidate resumed screen sharing',
       );
-    } catch {
-      showToast('Nothing was shared. Choose a screen to carry on recording.', 'warning');
+    } catch (err) {
+      showToast(
+        err instanceof ScreenSurfaceError
+          ? 'Share your entire screen, not a window or a tab, to carry on recording.'
+          : 'Nothing was shared. Choose a screen to carry on recording.',
+        'warning',
+      );
     } finally {
       setResharingScreen(false);
     }
@@ -828,6 +839,9 @@ export function InterviewPage() {
           await interviewService.registerMobilePairing(interview.id, mobileToken);
           return;
         } catch (err) {
+          // Refused outright (the interview has started, or pairing was closed):
+          // trying again cannot change the answer.
+          if (extractApiError(err).status === 403) return;
           console.warn(`Could not register the phone pairing (attempt ${attempt} of 5):`, err);
           await new Promise((resolve) => setTimeout(resolve, attempt * 2000));
         }
@@ -1030,6 +1044,16 @@ export function InterviewPage() {
         showToast(MESSAGES.interview.mobileSkipNotConfirmed, 'warning');
         return;
       }
+      // Pairing closes here. Without this the QR code kept working: a phone scanned a
+      // minute into the interview recorded and uploaded as a second camera, so an
+      // interview that began with one camera finished with two.
+      if (mobileToken) {
+        try {
+          await interviewService.revokeMobilePairing(interview.id, mobileToken);
+        } catch (err) {
+          console.warn('Could not close phone pairing:', err);
+        }
+      }
       setMobileVerified(true);
       showToast(MESSAGES.interview.proceedingWithoutRoom, 'info');
     }
@@ -1044,6 +1068,32 @@ export function InterviewPage() {
       // The models are a multi-megabyte download; fetching them for a check
       // that is switched off spends the candidate's bandwidth on nothing.
       if (PROCTORING_CONFIG.eyeDetection.enabled) await loadModels();
+
+      // The screen is shared before the interview is started, not after.
+      //
+      // It used to be requested once the first question was already on its way, so
+      // an interview was running — asking questions, with the clock going — before
+      // anything was being watched, and a candidate who dismissed the picker simply
+      // carried on without it. Now the interview does not begin until the entire
+      // screen is being shared.
+      let screenSurface: string | undefined;
+      if (PROCTORING_CONFIG.recording.screen.required) {
+        try {
+          const shared = await startScreenRecording();
+          screenSurface = shared.getVideoTracks()[0]?.getSettings?.().displaySurface;
+          setScreenPermission('granted');
+        } catch (err) {
+          setScreenPermission('denied');
+          showToast(
+            err instanceof ScreenSurfaceError
+              ? 'Share your entire screen — not a window or a browser tab — and then press Begin again.'
+              : 'Screen sharing is required to start the interview. Choose your entire screen and press Begin again.',
+            'warning',
+          );
+          return;
+        }
+      }
+
       const started = await voiceInterview.startInterview({
         email: user.email,
         jobPrefix: interview.jobPrefix,
@@ -1053,6 +1103,13 @@ export function InterviewPage() {
         scheduleId: interview.id,
         mobileToken: mobileToken || undefined,
       });
+      if (!started) {
+        // The interview did not start. The screen share was taken for it; drop it
+        // rather than leave a recording of nothing, and let them try again.
+        abortScreenRecording();
+        setScreenPermission('prompt');
+        return;
+      }
       // Said out loud, because the candidate's own read on a reload is that
       // they have lost the interview. The transcript reappearing behind the
       // toast is the proof, but the reassurance should not depend on them
@@ -1108,16 +1165,17 @@ export function InterviewPage() {
         }
       }
       if (PROCTORING_CONFIG.recording.screen.required) {
-        try {
-          await startScreenRecording();
-          setScreenPermission('granted');
-          voiceInterview.sendProctoringEvent('screen_recording_started', 'Screen recording started');
-        } catch (err) {
-          setScreenPermission('denied');
-          const why = err instanceof DOMException ? ` (${err.name})` : '';
+        voiceInterview.sendProctoringEvent(
+          'screen_recording_started',
+          `Screen recording started (${screenSurface ?? 'surface not reported by this browser'})`,
+        );
+        // A second display is a way to show something the recording never sees.
+        // Recorded for the reviewer, not charged: plenty of honest candidates have
+        // two monitors.
+        if ((window.screen as Screen & { isExtended?: boolean }).isExtended) {
           voiceInterview.sendProctoringEvent(
-            'screen_share_denied',
-            `Screen recording is required but permission was denied${why}`,
+            'multiple_displays',
+            'More than one display is connected. Only the shared screen is recorded.',
           );
         }
       }

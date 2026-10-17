@@ -523,7 +523,11 @@ export const recordingSync = {
   chunk(id: string | null, blob: Blob) {
     if (!id || blob.size === 0) return;
     const meta = metas.get(id);
-    if (meta) meta.updatedAt = Date.now();
+    // A session that was thrown away (a start that was abandoned) can still have a
+    // last chunk arrive as its recorder stops. Storing it would leave chunks that
+    // belong to nothing.
+    if (!meta) return;
+    meta.updatedAt = Date.now();
     void storeChunk(id, blob, meta).then(() => scheduleLive(id));
   },
 

@@ -296,18 +296,20 @@ export function InterviewSchedulerPage() {
             {/* Question Date Range */}
             <div className="grid grid-cols-2 gap-4">
               <Input
-                label="Questions From Date (optional)"
+                label="Use questions created from (optional)"
                 type="date"
                 value={questionsFromDate}
                 onChange={(e) => setQuestionsFromDate(e.target.value)}
                 leftIcon={<Calendar size={16} />}
+                helperText="Only AI-generated interview questions created on or after this date are used."
               />
               <Input
-                label="Questions To Date (optional)"
+                label="Use questions created until (optional)"
                 type="date"
                 value={questionsToDate}
                 onChange={(e) => setQuestionsToDate(e.target.value)}
                 leftIcon={<Calendar size={16} />}
+                helperText="Only questions created on or before this date are used. Leave both empty to use every question."
               />
             </div>
             <p className="text-xs text-[var(--textTertiary)] -mt-4">

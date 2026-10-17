@@ -19,12 +19,14 @@ export const JOB_PAGE_SIZES = [20, 40, 60, 100];
 export const DEFAULT_JOB_PAGE_SIZE = 20;
 
 /**
- * What a job is called in the lists: the role, which identifies the position
- * more precisely than the title. Jobs created before the role became mandatory
- * fall back to the title.
+ * What a job is called, everywhere: the Job Title the admin typed when creating it.
+ *
+ * It used to be the role, so one job read "Backend Developer" on the form and
+ * "Technical Software Engineering" in the list and the details — two names for
+ * one posting. The role is still shown, but labelled as the role.
  */
 export function jobDisplayName(job: Pick<JobPostDTO, 'role' | 'jobTitle'>): string {
-  return job.role?.trim() || job.jobTitle;
+  return job.jobTitle?.trim() || job.role?.trim() || '';
 }
 
 /** A job is expired once its application deadline is before today. */

@@ -88,6 +88,24 @@ export function getInitials(firstName?: string | null, lastName?: string | null)
   return f + l || '?';
 }
 
+/**
+ * How long something took, to the second: "42 s", "12 min 30 s", "1 h 05 min".
+ *
+ * Whole minutes, which is what the results screens showed, read "<1 min" for a
+ * short sitting and round a 9 min 40 s one up to 10 — neither is the time the
+ * candidate spent.
+ */
+export function formatElapsedSeconds(totalSeconds: number | null | undefined): string {
+  if (totalSeconds == null || !Number.isFinite(totalSeconds) || totalSeconds < 0) return '--';
+  const seconds = Math.round(totalSeconds);
+  if (seconds < 60) return `${seconds} s`;
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const rest = seconds % 60;
+  if (hours > 0) return `${hours} h ${String(minutes).padStart(2, '0')} min`;
+  return rest > 0 ? `${minutes} min ${rest} s` : `${minutes} min`;
+}
+
 export function formatTimer(totalSeconds: number): string {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);

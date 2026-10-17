@@ -739,6 +739,14 @@ export function CandidateDetailsPage() {
       return;
     }
 
+    // An interview with no date and time has no deadline: it never expires and
+    // never chases the candidate. The picker is marked required, but nothing
+    // stopped Send being pressed with it empty.
+    if (modalAction === 'interview' && !modalDateTime) {
+      showToast('Choose a date and time for the interview before assigning it.', 'warning');
+      return;
+    }
+
     // A schedule the candidate cannot make is worse than no email at all —
     // the picker blocks past slots, this catches a value that went stale
     // while the modal was open.
@@ -1165,7 +1173,8 @@ export function CandidateDetailsPage() {
               : selectedEmails.size
           }
           sendDisabled={
-            modalAction === 'interview' && interviewEligibility.assignable.length === 0
+            modalAction === 'interview' &&
+            (interviewEligibility.assignable.length === 0 || !modalDateTime)
           }
           sending={sending}
           dateTime={modalDateTime}

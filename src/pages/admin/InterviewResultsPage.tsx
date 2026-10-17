@@ -1,3 +1,4 @@
+import { formatElapsedSeconds, parseServerInstant } from '@/utils/format.utils';
 import { useState, useEffect, useCallback } from 'react';
 import {
   Loader2,
@@ -307,11 +308,10 @@ function InterviewActions({
 
 function formatDuration(startedAt?: string, endedAt?: string): string {
   if (!startedAt || !endedAt) return '--';
-  const start = new Date(startedAt).getTime();
-  const end = new Date(endedAt).getTime();
-  const minutes = Math.round((end - start) / 60000);
-  if (minutes < 1) return '<1 min';
-  return `${minutes} min`;
+  // Read as the UTC instants they are, then shown to the second.
+  const start = parseServerInstant(startedAt).getTime();
+  const end = parseServerInstant(endedAt).getTime();
+  return formatElapsedSeconds((end - start) / 1000);
 }
 
 export function InterviewResultsPage() {

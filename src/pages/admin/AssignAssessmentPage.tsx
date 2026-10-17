@@ -92,6 +92,24 @@ const KEY = 'assign:';
  * visits another module, without pretending to outlive the tab. A real reload
  * still drops it, which is what the unload guard further down warns about.
  */
+/**
+ * Which AI generations are running, kept outside the component.
+ *
+ * Generating a paper is a minutes-long request, and an admin reasonably wanders off
+ * to another screen while it runs. The result used to be written into the
+ * component's own state — gone with the component — so the success toast appeared on
+ * some other page and the questions were nowhere when they came back, with no sign
+ * that anything had been generated or was still being generated. Now the result goes
+ * into the same module-level cache the attached papers use, and the running state
+ * lives here, so a screen that is opened mid-generation shows it and one opened
+ * after shows the paper.
+ */
+const generation = { aptitude: false, coding: false };
+const generationListeners = new Set<() => void>();
+function notifyGeneration() {
+  generationListeners.forEach((listener) => listener());
+}
+
 const paperCache: { aptitude: FileState; coding: FileState } = {
   aptitude: { file: null, source: null },
   coding: { file: null, source: null },
@@ -265,8 +283,23 @@ export function AssignAssessmentPage() {
   // Loading states
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
-  const [generatingAptitude, setGeneratingAptitude] = useState(false);
-  const [generatingCoding, setGeneratingCoding] = useState(false);
+  const [generatingAptitude, setGeneratingAptitude] = useState(generation.aptitude);
+  const [generatingCoding, setGeneratingCoding] = useState(generation.coding);
+
+  // Follow generations that start, finish, or finished while this screen was closed.
+  useEffect(() => {
+    const sync = () => {
+      setGeneratingAptitude(generation.aptitude);
+      setGeneratingCoding(generation.coding);
+      setAptitudeFile(paperCache.aptitude);
+      setCodingFile(paperCache.coding);
+    };
+    generationListeners.add(sync);
+    sync();
+    return () => {
+      generationListeners.delete(sync);
+    };
+  }, []);
   const [submitting, setSubmitting] = useState(false);
 
   // Prompt types already configured for the selected job (to label Edit vs Create).
@@ -504,7 +537,9 @@ export function AssignAssessmentPage() {
       showToast(MESSAGES.admin.common.selectJobFirst, 'warning');
       return;
     }
-    setGeneratingAptitude(true);
+    if (generation.aptitude) return;
+    generation.aptitude = true;
+    notifyGeneration();
     try {
       if (!(await hasPromptFor('APTITUDE'))) {
         showToast(MESSAGES.admin.assign.promptMissing('aptitude'), 'warning');
@@ -516,13 +551,15 @@ export function AssignAssessmentPage() {
       const file = new File([blob], `${selectedPrefix}_aptitude_questions.json`, {
         type: 'application/json',
       });
-      setAptitudeFile({ file, source: 'ai' });
+      // Into the cache, not only this component's state: the admin may have left.
+      paperCache.aptitude = { file, source: 'ai' };
       showToast(MESSAGES.admin.assign.aptitudeGenerated, 'success');
     } catch {
       // Error toast auto-handled by interceptor. If the prompt isn't configured,
       // the admin can click "Create Prompt" to set it up on the Prompts screen.
     } finally {
-      setGeneratingAptitude(false);
+      generation.aptitude = false;
+      notifyGeneration();
     }
   }
 
@@ -531,7 +568,9 @@ export function AssignAssessmentPage() {
       showToast(MESSAGES.admin.common.selectJobFirst, 'warning');
       return;
     }
-    setGeneratingCoding(true);
+    if (generation.coding) return;
+    generation.coding = true;
+    notifyGeneration();
     try {
       if (!(await hasPromptFor('CODING'))) {
         showToast(MESSAGES.admin.assign.promptMissing('coding'), 'warning');
@@ -543,12 +582,13 @@ export function AssignAssessmentPage() {
       const file = new File([blob], `${selectedPrefix}_coding_questions.json`, {
         type: 'application/json',
       });
-      setCodingFile({ file, source: 'ai' });
+      paperCache.coding = { file, source: 'ai' };
       showToast(MESSAGES.admin.assign.codingGenerated, 'success');
     } catch {
       // Error toast auto-handled by interceptor.
     } finally {
-      setGeneratingCoding(false);
+      generation.coding = false;
+      notifyGeneration();
     }
   }
 

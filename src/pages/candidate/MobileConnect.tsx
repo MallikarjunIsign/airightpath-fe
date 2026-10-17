@@ -20,7 +20,7 @@ export default function MobileConnect() {
     const [checkMessage, setCheckMessage] = useState<string | null>(null);
     const [checking, setChecking] = useState(false);
     /** Set once the interview is over, or the candidate exits deliberately. */
-    const [finished, setFinished] = useState<null | 'ended' | 'exited'>(null);
+    const [finished, setFinished] = useState<null | 'ended' | 'exited' | 'closed'>(null);
     /**
      * The live capture, held so it can actually be stopped.
      *
@@ -208,6 +208,28 @@ export default function MobileConnect() {
     useEffect(() => {
         if (token) void recordingSync.resume({ token });
     }, [token]);
+
+    // Whether this phone may still join. The interview page closes pairing when the
+    // candidate starts without a phone, and from then a phone that scans the QR code
+    // must be told so instead of recording into an interview that did not expect it.
+    useEffect(() => {
+        if (!token || finished) return;
+        let cancelled = false;
+        const check = async () => {
+            const state = await mobileUploadService.pairingState(token);
+            if (cancelled || state !== 'closed') return;
+            streamRef.current?.getTracks().forEach((track) => track.stop());
+            streamRef.current = null;
+            setCaptureStream(null);
+            setFinished('closed');
+        };
+        void check();
+        const timer = window.setInterval(check, 10_000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(timer);
+        };
+    }, [token, finished]);
 
     const acceptConsent = () => {
         consentedRef.current = true;
@@ -479,6 +501,7 @@ export default function MobileConnect() {
     // screen invites the candidate to keep holding it up at nothing.
     if (finished) {
         const ended = finished === 'ended';
+        const closed = finished === 'closed';
         return (
             <div className="min-h-screen bg-gray-50 p-4 flex flex-col items-center justify-center">
                 <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-8 text-center shadow-xl">
@@ -488,10 +511,12 @@ export default function MobileConnect() {
                         </svg>
                     </div>
                     <h1 className="text-xl font-bold text-gray-800">
-                        {ended ? 'Interview complete' : 'Proctoring stopped'}
+                        {closed ? 'Phone pairing is closed' : ended ? 'Interview complete' : 'Proctoring stopped'}
                     </h1>
                     <p className="mt-2 text-sm text-gray-600">
-                        {ended
+                        {closed
+                            ? 'This interview was started without a phone, so a phone can no longer be added. Nothing is being recorded here. You can close this page.'
+                            : ended
                             ? 'Your camera has been switched off and the feed has ended. You can close this page.'
                             : 'Your camera has been switched off. Reopen the QR code on your computer if you need to pair again.'}
                     </p>

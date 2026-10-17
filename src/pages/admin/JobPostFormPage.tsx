@@ -302,7 +302,11 @@ export function JobPostFormPage() {
                 // `disabled` so the value still posts back and stays copyable.
                 readOnly={isEdit}
                 className={isEdit ? 'opacity-60 cursor-not-allowed' : ''}
-                helperText={isEdit ? 'Cannot be changed after creation' : undefined}
+                helperText={
+                  isEdit
+                    ? 'Cannot be changed after creation'
+                    : 'Letters, numbers, hyphens (-) and underscores (_) only. A number is added automatically, e.g. DEV-2024 becomes DEV-2024-001.'
+                }
                 error={errors.jobPrefix?.message}
                 {...register('jobPrefix')}
               />
@@ -413,7 +417,7 @@ export function JobPostFormPage() {
                 label="Role"
                 required
                 placeholder="e.g. Backend Developer"
-                helperText="Shown as the job's heading on the Job Events page"
+                helperText="The role or category this job belongs to. The Job Title above is the name shown everywhere."
                 error={errors.role?.message}
                 {...register('role')}
               />

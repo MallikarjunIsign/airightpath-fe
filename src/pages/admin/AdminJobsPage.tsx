@@ -238,9 +238,9 @@ export function AdminJobsPage() {
                         {job.role?.trim() && job.role.trim() !== job.jobTitle && (
                           <p
                             className="text-xs text-[var(--textTertiary)] truncate"
-                            title={job.jobTitle}
+                            title={`Role: ${job.role}`}
                           >
-                            {job.jobTitle}
+                            Role: {job.role}
                           </p>
                         )}
                       </div>
@@ -386,7 +386,7 @@ export function AdminJobsPage() {
                 </h3>
                 {selectedJob.role?.trim() && selectedJob.role.trim() !== selectedJob.jobTitle && (
                   <p className="text-sm text-[var(--textSecondary)] break-words">
-                    {selectedJob.jobTitle}
+                    Role: {selectedJob.role}
                   </p>
                 )}
                 <div className="flex items-center gap-2 mt-1 min-w-0">

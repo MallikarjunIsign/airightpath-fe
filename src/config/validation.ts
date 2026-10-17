@@ -72,7 +72,13 @@ export const resetPasswordSchema = z
   });
 
 export const jobPostSchema = z.object({
-  jobPrefix: z.string().trim().min(1, 'Job prefix is required'),
+  // The prefix becomes part of the web address of a dozen pages, so it is checked as it
+  // is typed rather than after the server refuses it. Same rule as the backend.
+  jobPrefix: z
+    .string()
+    .trim()
+    .min(1, 'Job prefix is required')
+    .regex(/^[A-Za-z0-9_-]+$/, 'Use only letters, numbers, hyphens (-) and underscores (_). No spaces, slashes or other symbols.'),
   jobTitle: z.string().trim().min(1, 'Job title is required'),
   companyName: z.string().trim().min(1, 'Company name is required'),
   location: z.string().trim().min(1, 'Location is required'),
@@ -118,8 +124,11 @@ export const jobPostSchema = z.object({
  * closed posting would force the admin to silently reopen it.
  */
 export function jobEditSchema(originalDeadline?: string) {
-  if (!originalDeadline) return jobPostSchema;
-  return jobPostSchema.extend({
+  // The prefix cannot be changed on an existing job, so a job created before the
+  // rule existed must not be made uneditable by it.
+  const base = jobPostSchema.extend({ jobPrefix: z.string().trim().min(1, 'Job prefix is required') });
+  if (!originalDeadline) return base;
+  return base.extend({
     applicationDeadline: z
       .string()
       .min(1, 'Application deadline is required')

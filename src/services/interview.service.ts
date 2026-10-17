@@ -160,6 +160,14 @@ export const interviewService = {
     } as never);
   },
 
+  /** The candidate is starting without a phone: close pairing so one cannot join later. */
+  revokeMobilePairing(scheduleId: number, token?: string | null) {
+    return api.post(ENDPOINTS.INTERVIEWS.MOBILE_PAIRING_REVOKE(scheduleId), null, {
+      params: token ? { token } : {},
+      _skipErrorToast: true,
+    } as never);
+  },
+
   /** Save one still taken from the candidate's paired phone. */
   uploadMobileCapture(scheduleId: number, kind: 'ROOM_PHOTO' | 'MONITOR_FRAME', photo: Blob) {
     const form = new FormData();

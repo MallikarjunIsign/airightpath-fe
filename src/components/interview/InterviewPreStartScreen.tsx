@@ -595,7 +595,11 @@ export function InterviewPreStartScreen({
               )}
 
               {blockers.length > 0 && (
-                <ul className="space-y-1.5 rounded-lg bg-[var(--surface1)] p-3">
+                <ul
+                  role="alert"
+                  className="space-y-1.5 rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-700/60 dark:bg-amber-900/20"
+                >
+                  <li className="text-sm font-semibold text-[var(--text)]">Before you can begin:</li>
                   {blockers.map((blocker) => (
                     <li
                       key={blocker}

@@ -45,7 +45,7 @@ import { ROUTES } from '@/config/routes';
 import type { NavOrigin } from '@/components/ui/BackLink';
 import { interviewService, type VoiceConversationEntryDTO } from '@/services/interview.service';
 import { aiService } from '@/services/ai.service';
-import { parseServerInstant } from '@/utils/format.utils';
+import { formatElapsedSeconds, parseServerInstant } from '@/utils/format.utils';
 import { INTERVIEW_ROUND_LABELS } from '@/types/interview.types';
 import type {
   InterviewRound,
@@ -123,7 +123,7 @@ function recommendationVariant(recommendation: string): 'success' | 'warning' | 
 }
 
 function durationLabel(schedule: InterviewSchedule): string {
-  return minutesLabel(durationMinutes(schedule));
+  return formatElapsedSeconds(durationSeconds(schedule));
 }
 
 function warningsOf(schedule: InterviewSchedule): number {
@@ -180,18 +180,12 @@ function groupByRound(details: RoundDetail[]): RoundGroup[] {
     });
 }
 
-/** Minutes a sitting ran for, or null when it was never opened or never closed. */
-function durationMinutes(schedule: InterviewSchedule): number | null {
+/** Seconds a sitting ran for, or null when it was never opened or never closed. */
+function durationSeconds(schedule: InterviewSchedule): number | null {
   if (!schedule.startedAt || !schedule.endedAt) return null;
-  const minutes = Math.round(
-    (parseServerInstant(schedule.endedAt).getTime() - parseServerInstant(schedule.startedAt).getTime()) / 60000,
-  );
-  return Number.isFinite(minutes) && minutes >= 0 ? minutes : null;
-}
-
-function minutesLabel(minutes: number | null): string {
-  if (minutes == null) return '--';
-  return minutes < 1 ? '<1 min' : `${minutes} min`;
+  const seconds =
+    (parseServerInstant(schedule.endedAt).getTime() - parseServerInstant(schedule.startedAt).getTime()) / 1000;
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
 }
 
 /** "Sep 18, 2026, 14:05" for an attempt heading, or nothing if it will not parse. */
@@ -321,10 +315,10 @@ export function InterviewCandidateResultPage() {
    */
   const totalMinutes = useMemo(() => {
     const measured = rounds
-      .map((r) => durationMinutes(r.schedule))
-      .filter((minutes): minutes is number => minutes != null);
+      .map((r) => durationSeconds(r.schedule))
+      .filter((seconds): seconds is number => seconds != null);
     if (measured.length === 0) return null;
-    return measured.reduce((sum, minutes) => sum + minutes, 0);
+    return measured.reduce((sum, seconds) => sum + seconds, 0);
   }, [rounds]);
 
   if (loading) {
@@ -424,7 +418,7 @@ export function InterviewCandidateResultPage() {
         />
         <SummaryStat
           icon={<Clock size={16} />}
-          value={minutesLabel(totalMinutes)}
+          value={formatElapsedSeconds(totalMinutes)}
           label="Time in interview"
           hint="Summed over every sitting"
         />

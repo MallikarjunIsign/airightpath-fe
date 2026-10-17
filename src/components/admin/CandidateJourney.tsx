@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { interviewService } from '@/services/interview.service';
-import { formatServerDateTime } from '@/utils/format.utils';
+import { formatElapsedSeconds, formatServerDateTime } from '@/utils/format.utils';
 import { INTERVIEW_ROUND_LABELS } from '@/types/interview.types';
 import type { InterviewSchedule } from '@/types/interview.types';
 import type { JobApplicationDTO } from '@/types/job.types';
@@ -49,11 +49,11 @@ const DOT: Record<Tone, string> = {
 const meaningful = (value?: string | null) =>
   !!value && !/^(pending|not applicable|n\/a|-+)$/i.test(value.trim());
 
-function minutesBetween(a?: string, b?: string): number | null {
+function secondsBetween(a?: string, b?: string): number | null {
   if (!a || !b) return null;
   const ms = new Date(b.includes('Z') || /[+-]\d{2}:?\d{2}$/.test(b) ? b : `${b}Z`).getTime()
     - new Date(a.includes('Z') || /[+-]\d{2}:?\d{2}$/.test(a) ? a : `${a}Z`).getTime();
-  return Number.isFinite(ms) && ms >= 0 ? Math.round(ms / 60000) : null;
+  return Number.isFinite(ms) && ms >= 0 ? ms / 1000 : null;
 }
 
 const partsOf = (references?: string) => (references ?? '').split(/\r?\n/).filter((line) => line.trim()).length;
@@ -198,10 +198,10 @@ export function CandidateJourney({ candidate, jobPrefix, onViewInterviewResult }
         const finished = row.attemptStatus === 'COMPLETED';
         const result = row.overriddenResult ?? row.interviewResult;
         const score = row.evaluation?.overallScore;
-        const minutes = minutesBetween(row.startedAt, row.endedAt);
+        const seconds = secondsBetween(row.startedAt, row.endedAt);
         const lines = [
           `Scheduled ${formatServerDateTime(row.assignedAt)}, due ${formatServerDateTime(row.deadlineTime)}`,
-          row.startedAt ? `Started ${formatServerDateTime(row.startedAt)}${minutes != null ? ` · ${minutes} min` : ''}` : 'Not started',
+          row.startedAt ? `Started ${formatServerDateTime(row.startedAt)}${seconds != null ? ` · ${formatElapsedSeconds(seconds)}` : ''}` : 'Not started',
           score != null ? `Score ${score}/10` : '',
           row.overriddenResult ? `Result overridden by ${row.overriddenBy ?? 'a reviewer'}` : '',
           (row.warningCount ?? row.proctoringWarnings ?? 0) > 0
