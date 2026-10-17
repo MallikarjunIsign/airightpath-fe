@@ -31,7 +31,6 @@ const rankOf = (d: string) => {
   return i < 0 ? 99 : i < 3 ? 0 : i < 6 ? 1 : 2;
 };
 
-const DEFAULT_COUNT: Record<BankType, number> = { APTITUDE: 10, CODING: 3 };
 
 /**
  * Build a question paper out of questions that already exist.
@@ -46,13 +45,16 @@ export function QuestionBankPicker({ isOpen, onClose, jobPrefix, type, onUse }: 
   const [items, setItems] = useState<BankQuestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [target, setTarget] = useState(String(DEFAULT_COUNT[type]));
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [search, setSearch] = useState('');
-  const [difficulty, setDifficulty] = useState('');
-  const [unusedOnly, setUnusedOnly] = useState(false);
-  const [otherJobs, setOtherJobs] = useState(false);
+  // 'ALL' rather than '' for "no filter": the dropdown treats an empty value as nothing chosen.
+  const [difficulty, setDifficulty] = useState('ALL');
+  const [show, setShow] = useState<'UNUSED' | 'ASSIGNED' | 'ALL'>('UNUSED');
+  const [scope, setScope] = useState<'THIS' | 'ALL'>('THIS');
+  const otherJobs = scope === 'ALL';
+  const unusedOnly = show === 'UNUSED';
   const [perLevel, setPerLevel] = useState('2');
+  const [pickKind, setPickKind] = useState<'UNUSED' | 'ASSIGNED' | 'ALL'>('UNUSED');
 
   useEffect(() => {
     if (!isOpen) return;
@@ -60,7 +62,6 @@ export function QuestionBankPicker({ isOpen, onClose, jobPrefix, type, onUse }: 
     setLoading(true);
     setFailed(false);
     setSelectedIds([]);
-    setTarget(String(DEFAULT_COUNT[type]));
     questionBankService
       .getItems()
       .then((res) => {
@@ -68,7 +69,9 @@ export function QuestionBankPicker({ isOpen, onClose, jobPrefix, type, onUse }: 
         const all = buildBank(res.data ?? []).questions.filter((q) => q.type === type);
         setItems(all);
         // A job with nothing of its own would open an empty dialog; start from every job instead.
-        setOtherJobs(!all.some((q) => q.jobPrefix === jobPrefix && q.timesAssigned === 0));
+        setScope(all.some((q) => q.jobPrefix === jobPrefix && q.timesAssigned === 0) ? 'THIS' : 'ALL');
+        setShow('UNUSED');
+        setDifficulty('ALL');
       })
       .catch(() => !cancelled && setFailed(true))
       .finally(() => !cancelled && setLoading(false));
@@ -77,7 +80,6 @@ export function QuestionBankPicker({ isOpen, onClose, jobPrefix, type, onUse }: 
     };
   }, [isOpen, type, jobPrefix]);
 
-  const wanted = Math.max(0, Math.floor(Number(target) || 0));
   const byId = useMemo(() => new Map(items.map((q) => [q.id, q])), [items]);
   const chosen = selectedIds.map((id) => byId.get(id)).filter((q): q is BankQuestion => !!q);
 
@@ -86,11 +88,11 @@ export function QuestionBankPicker({ isOpen, onClose, jobPrefix, type, onUse }: 
       applyFilters(items, {
         ...EMPTY_FILTERS,
         jobPrefix: otherJobs ? '' : jobPrefix,
-        difficulty,
-        usage: unusedOnly ? 'UNUSED' : 'ALL',
+        difficulty: difficulty === 'ALL' ? '' : difficulty,
+        usage: show,
         search,
       }),
-    [items, otherJobs, jobPrefix, difficulty, unusedOnly, search],
+    [items, otherJobs, jobPrefix, difficulty, show, search],
   );
   const difficulties = useMemo(() => distinct(items, (q) => q.difficulty), [items]);
 
@@ -106,34 +108,42 @@ export function QuestionBankPicker({ isOpen, onClose, jobPrefix, type, onUse }: 
       return next;
     });
 
-  /** Fill what is still missing from questions nobody has been given yet, oldest first. */
-  const autoFill = () => {
-    const missing = wanted - selectedIds.length;
-    if (missing <= 0) return;
-    const fresh = items
-      .filter((q) => !selectedIds.includes(q.id) && q.timesAssigned === 0 && (otherJobs || q.jobPrefix === jobPrefix))
-      .slice(0, missing)
-      .map((q) => q.id);
-    setSelectedIds((current) => [...current, ...fresh]);
-  };
-
-  /** N never-assigned questions from every difficulty level, easiest level first; replaces the selection. */
+  /**
+   * N never-assigned questions from each difficulty level, easiest first, never more than the number of
+   * questions asked for. Questions with no level only count when no question has one.
+   */
   const fillPerLevel = () => {
     const n = Math.max(1, Math.floor(Number(perLevel) || 0));
-    const fresh = items.filter((q) => q.timesAssigned === 0 && (otherJobs || q.jobPrefix === jobPrefix));
-    const levels = [...new Set(fresh.map((q) => q.difficulty || 'Unspecified'))].sort(
+    const fresh = quickPool;
+    const known = fresh.filter((q) => q.difficulty);
+    const pickFrom = known.length > 0 ? known : fresh;
+    const levels = [...new Set(pickFrom.map((q) => q.difficulty || 'Unspecified'))].sort(
       (a, b) => rankOf(a) - rankOf(b) || a.localeCompare(b),
     );
-    const ids = levels.flatMap((level) =>
-      fresh.filter((q) => (q.difficulty || 'Unspecified') === level).slice(0, n).map((q) => q.id),
+    const byLevel = levels.map((level) =>
+      pickFrom.filter((q) => (q.difficulty || 'Unspecified') === level).slice(0, n).map((q) => q.id),
     );
+    const limit = Infinity;
+    const ids: number[] = [];
+    // One from each level in turn, so a short count still spans the levels instead of exhausting the first.
+    for (let round = 0; round < n && ids.length < limit; round++) {
+      for (const list of byLevel) {
+        if (round < list.length && ids.length < limit) ids.push(list[round]);
+      }
+    }
+    // Back into level order for the paper.
+    const position = new Map(byLevel.flat().map((id, index) => [id, index]));
+    ids.sort((a, b) => (position.get(a) ?? 0) - (position.get(b) ?? 0));
     setSelectedIds(ids);
-    setTarget(String(ids.length));
   };
 
-  const unusedAvailable = items.filter((q) => q.timesAssigned === 0 && (otherJobs || q.jobPrefix === jobPrefix)).length;
-  const remaining = wanted - chosen.length;
-  const canUse = wanted > 0 && chosen.length === wanted;
+  /** What the quick pick draws from: the chosen kind of question, within the chosen jobs. */
+  const quickPool = items.filter(
+    (q) =>
+      (otherJobs || q.jobPrefix === jobPrefix) &&
+      (pickKind === 'ALL' || (pickKind === 'UNUSED' ? q.timesAssigned === 0 : q.timesAssigned > 0)),
+  );
+  const canUse = chosen.length > 0;
   const label = type === 'APTITUDE' ? 'aptitude' : 'coding';
 
   return (
@@ -146,10 +156,8 @@ export function QuestionBankPicker({ isOpen, onClose, jobPrefix, type, onUse }: 
         <div className="flex w-full flex-wrap items-center justify-between gap-3">
           <span className="text-xs text-[var(--textSecondary)]">
             {canUse
-              ? `${chosen.length} questions selected, in the order shown.`
-              : remaining > 0
-                ? `Select ${remaining} more question${remaining === 1 ? '' : 's'} to reach ${wanted}.`
-                : `Remove ${-remaining} question${remaining === -1 ? '' : 's'} to get down to ${wanted}.`}
+              ? `${chosen.length} question${chosen.length === 1 ? '' : 's'} selected, in the order shown.`
+              : 'Pick the questions for the paper, or use the quick pick above.'}
           </span>
           <div className="flex gap-2">
             <Button variant="ghost" onClick={onClose}>
@@ -179,31 +187,75 @@ export function QuestionBankPicker({ isOpen, onClose, jobPrefix, type, onUse }: 
           </p>
         </div>
 
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border-2 border-[var(--primary)] bg-[var(--primary)]/5 p-3 text-sm text-[var(--text)]">
+          <Sparkles size={16} className="text-[var(--primary)]" />
+          <span className="font-medium">Quick pick</span>
+          <input
+            type="number"
+            min={1}
+            value={perLevel}
+            onChange={(e) => setPerLevel(e.target.value)}
+            aria-label="Questions per level"
+            className="h-9 w-16 rounded border border-[var(--border)] bg-transparent px-2"
+          />
+          <span>from each level, taken from</span>
+          <div className="w-52">
+            <Select
+              aria-label="Kind of question to pick"
+              value={pickKind}
+              onChange={(e) => setPickKind(e.target.value as typeof pickKind)}
+              options={[
+                { value: 'UNUSED', label: 'Never-assigned questions' },
+                { value: 'ASSIGNED', label: 'Already-assigned questions' },
+                { value: 'ALL', label: 'Both' },
+              ]}
+            />
+          </div>
+          <Button
+            size="sm"
+            disabled={quickPool.length === 0}
+            onClick={fillPerLevel}
+            title="Replaces the selection with this many questions from each difficulty level"
+          >
+            Pick
+          </Button>
+          <span className="text-xs text-[var(--textSecondary)]">The number of questions follows from this.</span>
+        </div>
+
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
           <Input
             label="Number of questions"
-            type="number"
-            min={1}
-            value={target}
-            onChange={(e) => setTarget(e.target.value)}
+            value={String(chosen.length)}
+            readOnly
+            disabled
+            title="Counted from the questions you select"
           />
           <Input label="Search" placeholder="Words in the question…" value={search} onChange={(e) => setSearch(e.target.value)} />
           <Select
             label="Difficulty"
             value={difficulty}
             onChange={(e) => setDifficulty(e.target.value)}
-            options={[{ value: '', label: 'Any' }, ...difficulties.map((d) => ({ value: d, label: d }))]}
+            options={[{ value: 'ALL', label: 'Any level' }, ...difficulties.map((d) => ({ value: d, label: d }))]}
           />
-          <div className="flex flex-col justify-end gap-1 text-xs text-[var(--text)]">
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={unusedOnly} onChange={(e) => setUnusedOnly(e.target.checked)} className="h-4 w-4" />
-              Never assigned only
-            </label>
-            <label className="flex items-center gap-2">
-              <input type="checkbox" checked={otherJobs} onChange={(e) => setOtherJobs(e.target.checked)} className="h-4 w-4" />
-              Include other jobs
-            </label>
-          </div>
+          <Select
+            label="Show"
+            value={show}
+            onChange={(e) => setShow(e.target.value as typeof show)}
+            options={[
+              { value: 'UNUSED', label: 'Only never-assigned' },
+              { value: 'ASSIGNED', label: 'Only already-assigned' },
+              { value: 'ALL', label: 'Both' },
+            ]}
+          />
+          <Select
+            label="Jobs"
+            value={scope}
+            onChange={(e) => setScope(e.target.value as typeof scope)}
+            options={[
+              { value: 'THIS', label: 'This job only' },
+              { value: 'ALL', label: 'All jobs' },
+            ]}
+          />
         </div>
 
         {loading && (
@@ -220,42 +272,13 @@ export function QuestionBankPicker({ isOpen, onClose, jobPrefix, type, onUse }: 
                 <h4 className="text-sm font-semibold text-[var(--text)]">
                   Available ({pool.length})
                 </h4>
-                <span className="flex items-center gap-1 text-xs text-[var(--textSecondary)]">
-                  <input
-                    type="number"
-                    min={1}
-                    value={perLevel}
-                    onChange={(e) => setPerLevel(e.target.value)}
-                    aria-label="Questions per level"
-                    className="h-8 w-14 rounded border border-[var(--border)] bg-transparent px-2 text-[var(--text)]"
-                  />
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={unusedAvailable === 0}
-                    onClick={fillPerLevel}
-                    title="Pick this many never-assigned questions from each difficulty level"
-                  >
-                    per level
-                  </Button>
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  leftIcon={<Sparkles size={14} />}
-                  disabled={remaining <= 0 || unusedAvailable === 0}
-                  onClick={autoFill}
-                  title="Add questions nobody has been given yet until the paper is full"
-                >
-                  Fill with never-assigned ({unusedAvailable})
-                </Button>
               </div>
               {pool.length === 0 ? (
                 <p className="rounded-lg border border-dashed border-[var(--border)] p-4 text-sm text-[var(--textSecondary)]">
                   {items.length === 0
                     ? 'The bank has no questions of this kind yet. Generate or upload a paper, or read stored papers in on the Question Bank page.'
                     : !otherJobs && items.some((q) => q.jobPrefix !== jobPrefix && (!unusedOnly || q.timesAssigned === 0))
-                      ? `This job (${jobPrefix}) has no ${unusedOnly ? 'never-assigned ' : ''}${label} questions, but other jobs do. Tick “Include other jobs” to use them.`
+                      ? `This job (${jobPrefix}) has no ${unusedOnly ? 'never-assigned ' : ''}${label} questions, but other jobs do. Set Jobs to “All jobs” to use them.`
                       : 'No question matches. Clear the filters.'}
                 </p>
               ) : (
@@ -289,9 +312,14 @@ export function QuestionBankPicker({ isOpen, onClose, jobPrefix, type, onUse }: 
             </section>
 
             <section>
-              <h4 className="mb-2 text-sm font-semibold text-[var(--text)]">
-                Order on the paper ({chosen.length} of {wanted || '—'})
-              </h4>
+              <div className="mb-2 flex items-center justify-between">
+                <h4 className="text-sm font-semibold text-[var(--text)]">
+                  Order on the paper ({chosen.length} selected)
+                </h4>
+                <Button variant="ghost" size="sm" disabled={chosen.length === 0} onClick={() => setSelectedIds([])}>
+                  Clear all
+                </Button>
+              </div>
               {chosen.length === 0 ? (
                 <p className="rounded-lg border border-dashed border-[var(--border)] p-4 text-sm text-[var(--textSecondary)]">
                   Nothing selected yet.
