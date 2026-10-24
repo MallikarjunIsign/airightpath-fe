@@ -178,6 +178,13 @@ export function InterviewPreStartScreen({
   const capturesNeeded = photoRequired || roomScanRequired;
 
   const [agreed, setAgreed] = useState(false);
+  /**
+   * The candidate's answer to "will you use a phone?". Null until they say: the QR is not the first
+   * thing on the page, because a code shown before the question invites a scan the candidate may not
+   * mean to make. Where the phone is required there is nothing to ask, so the code is shown at once.
+   */
+  const [wantsPhone, setWantsPhone] = useState(false);
+  const showQr = mobileRequired || (wantsPhone && !mobileSkipped);
   const [enablingDevices, setEnablingDevices] = useState(false);
 
   /**
@@ -251,7 +258,7 @@ export function InterviewPreStartScreen({
     blockers.push(
       mobileRequired
         ? 'Pair your phone — this interview requires it as a second camera.'
-        : 'Pair your phone, or tick "Continue without my phone" below.',
+        : 'Choose whether to use your phone: pair it, or tick "Continue without my phone".',
     );
   }
   if (mobileVerified && !canStartInterview) {
@@ -465,7 +472,37 @@ export function InterviewPreStartScreen({
               </p>
             </CardHeader>
             <CardContent>
-              {!mobileConnected && (
+              {/* The choice comes first. Skipping closes pairing, so a phone cannot be scanned in
+                  afterwards; choosing to pair is what brings up the code. */}
+              {!mobileRequired && !mobileVerified && !mobileConnected && (
+                <div className="space-y-3">
+                  <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface2)] p-3">
+                    <input
+                      type="checkbox"
+                      checked={mobileSkipped}
+                      onChange={(e) => {
+                        if (e.target.checked) setWantsPhone(false);
+                        onMobileSkippedChange(e.target.checked);
+                      }}
+                      className="mt-0.5 h-4 w-4 flex-shrink-0 rounded border-[var(--border)] text-[var(--primary)] focus:ring-[var(--primary)]"
+                    />
+                    <span className="text-sm text-[var(--text)]">
+                      Continue without my phone.
+                      <span className="mt-0.5 block text-xs text-[var(--textSecondary)]">
+                        The interview goes ahead with one camera, the QR code is switched off, and it is
+                        recorded that the second camera was not used.
+                      </span>
+                    </span>
+                  </label>
+                  {!mobileSkipped && !wantsPhone && (
+                    <Button variant="outline" onClick={() => setWantsPhone(true)} leftIcon={<ScanLine size={16} />}>
+                      Use my phone — show the QR code
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {showQr && !mobileConnected && (
                 <div className="space-y-4">
                   <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-start">
                     <div className="flex-shrink-0 rounded-xl bg-white p-3 shadow-inner">
@@ -537,27 +574,6 @@ export function InterviewPreStartScreen({
                   <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
                   <p className="text-sm font-medium text-amber-600 dark:text-amber-400">Phone skipped</p>
                 </div>
-              )}
-
-              {/* The waiver. Only offered where the switch says a phone is
-                  optional — elsewhere it would be a checkbox that does nothing,
-                  which reads as a broken page rather than a closed door. */}
-              {!mobileRequired && !mobileVerified && (
-                <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface2)] p-3">
-                  <input
-                    type="checkbox"
-                    checked={mobileSkipped}
-                    onChange={(e) => onMobileSkippedChange(e.target.checked)}
-                    className="mt-0.5 h-4 w-4 flex-shrink-0 rounded border-[var(--border)] text-[var(--primary)] focus:ring-[var(--primary)]"
-                  />
-                  <span className="text-sm text-[var(--text)]">
-                    Continue without my phone.
-                    <span className="mt-0.5 block text-xs text-[var(--textSecondary)]">
-                      The interview goes ahead with one camera, and it is recorded that the second
-                      camera was not used.
-                    </span>
-                  </span>
-                </label>
               )}
 
               {mobileRequired && !mobileVerified && (

@@ -294,6 +294,9 @@ function InterviewActions({
       {interview.screenRecordReferences && (
         <RecordingPlayerButton scheduleId={interview.id} kind="screen" label="Screen" />
       )}
+      {interview.mobileRecordReferences && (
+        <RecordingPlayerButton scheduleId={interview.id} kind="mobile" label="Phone" />
+      )}
       {/* Removal is soft and reversible, so both directions live here rather
           than behind separate screens. A removed row is only on this list at
           all because someone turned "Show removed" on. */}

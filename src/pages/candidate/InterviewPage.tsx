@@ -1026,6 +1026,24 @@ export function InterviewPage() {
     return window.location.origin;
   };
 
+  /**
+   * Skipping the phone closes pairing at once, not at Start: until now the code kept working while the
+   * box was ticked, so a phone could still be scanned in. A closed token cannot be reopened, so
+   * unticking issues a new one (registered by the effect above) and the old code is dead.
+   */
+  const handleMobileSkippedChange = (skipped: boolean) => {
+    setMobileSkipped(skipped);
+    if (!interview?.id || !mobileToken) return;
+    if (skipped) {
+      interviewService.revokeMobilePairing(interview.id, mobileToken).catch((err) => {
+        console.warn('Could not close phone pairing:', err);
+      });
+    } else {
+      setMobileConnected(false);
+      setMobileToken(uuidv4());
+    }
+  };
+
   // Start interview handler
   const handleStartInterview = async () => {
     if (!interview || !user?.email) return;
@@ -1279,7 +1297,7 @@ export function InterviewPage() {
         cameraPermission={cameraPermission}
         mobileRequired={PROCTORING_CONFIG.mobileCompanion.required}
         mobileSkipped={mobileSkipped}
-        onMobileSkippedChange={setMobileSkipped}
+        onMobileSkippedChange={handleMobileSkippedChange}
         error={voiceInterview.error ?? undefined}
         starting={voiceInterview.state === 'starting'}
         canStartInterview={canStartInterview}
