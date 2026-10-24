@@ -39,6 +39,13 @@ export const mobileUploadService = {
     }
   },
 
+  /** The room scan photos, saved with the interview. The server does not judge them; a reviewer looks. */
+  async roomScan(token: string, photos: Blob[]): Promise<void> {
+    const form = new FormData();
+    photos.forEach((photo, index) => form.append('photos', photo, `room-${index + 1}.jpg`));
+    await http().post('/api/mobile/room-scan', form, { params: { token }, timeout: 2 * 60 * 1000 });
+  },
+
   /** Start the phone's recording upload. */
   async begin(token: string, mimeType: string): Promise<{ uploadId: string; blobName: string }> {
     const res = await http().post<{ uploadId: string; blobName: string }>('/api/mobile/recording-upload', null, {

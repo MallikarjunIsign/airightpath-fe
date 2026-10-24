@@ -77,7 +77,7 @@ export function MobileCaptures({ scheduleId }: Readonly<{ scheduleId: number }>)
         {room.length > 0 && (
           <div className="mb-4">
             <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-[var(--textTertiary)]">
-              Room, as approved before the interview
+              Room scan, taken before the interview
             </p>
             <div className="flex flex-wrap gap-2">
               {room.map((capture) => (
@@ -114,7 +114,7 @@ export function MobileCaptures({ scheduleId }: Readonly<{ scheduleId: number }>)
 
 function captureTitle(capture: MobileCapture): string {
   const when = capture.capturedAt ? new Date(capture.capturedAt).toLocaleTimeString() : '';
-  return `${capture.kind === 'ROOM_PHOTO' ? 'Room photo' : 'Phone frame'}${when ? ` · ${when}` : ''}`;
+  return `${capture.kind === 'ROOM_PHOTO' ? 'Room scan photo' : 'Phone frame'}${when ? ` · ${when}` : ''}`;
 }
 
 /** One still, fetched when it first scrolls into view. */

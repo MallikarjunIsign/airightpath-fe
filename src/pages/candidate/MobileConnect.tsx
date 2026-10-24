@@ -4,6 +4,7 @@ import { PROCTORING_CONFIG } from '@/config/proctoring.config';
 import { MIC_AUDIO_CONSTRAINTS } from '@/config/audio.config';
 import { interviewWsService } from '@/services/interview-ws.service';
 import { APP_CONFIG } from '@/config/app.config';
+import axios from 'axios';
 import { useRemoteStreamRecorder } from '@/hooks/useRemoteStreamRecorder';
 import { mobileUploadService } from '@/services/mobile-upload.service';
 import { recordingSync } from '@/services/recording-sync.service';
@@ -20,6 +21,13 @@ export default function MobileConnect() {
     /** What the room check said, so the candidate knows what to change. */
     const [checkMessage, setCheckMessage] = useState<string | null>(null);
     const [checking, setChecking] = useState(false);
+    /**
+     * The phone's recording starts with the first room scan and runs to the end of the interview, as the
+     * desktop camera does from the start of the interview: one file, so the scan is the first part of
+     * the phone video instead of a separate clip. Sticky, so a scan that has to be retried does not close
+     * the recording and begin another.
+     */
+    const [recordingOn, setRecordingOn] = useState(false);
     /** Set once the interview is over, or the candidate exits deliberately. */
     const [finished, setFinished] = useState<null | 'ended' | 'exited' | 'closed'>(null);
     /**
@@ -57,7 +65,7 @@ export default function MobileConnect() {
      */
     const recorder = useRemoteStreamRecorder({
         stream: captureStream,
-        enabled: verified && PROCTORING_CONFIG.recording.mobile.required && !finished,
+        enabled: (verified || recordingOn) && PROCTORING_CONFIG.recording.mobile.required && !finished,
         token,
         segmentMs: APP_CONFIG.RECORDING_SEGMENT_MINUTES > 0 ? APP_CONFIG.RECORDING_SEGMENT_MINUTES * 60_000 : undefined,
         onStarted: () => {
@@ -248,15 +256,20 @@ export default function MobileConnect() {
         startStreaming();
     };
 
-    const takePhoto = async () => {
-        const video = videoRef.current;
-        if (!video || checking) return;
+    /**
+     * The room scan. The candidate pans the phone slowly round the room while frames are taken at even
+     * intervals, then they are all saved with the interview for a reviewer to look at. This is the same
+     * capture-and-store scan the desktop does, with no AI judging it: nothing here can fail the
+     * candidate for a reason they cannot fix, and an OpenAI outage no longer stops anyone verifying.
+     */
+    const [scanProgress, setScanProgress] = useState<{ taken: number; total: number } | null>(null);
 
-        // A phone fires this the moment the button is tapped, which on a slow
-        // camera is before the first frame exists. videoWidth is 0 then, the
-        // canvas is 0x0, and the blank JPEG that follows came back as "no
-        // person visible" — a verification failure the candidate could not
-        // fix by repositioning anything.
+    const scanRoom = async () => {
+        const video = videoRef.current;
+        if (!video || checking || !token) return;
+
+        // On a slow camera the first tap comes before the first frame exists: videoWidth is 0 and every
+        // frame would be a blank JPEG.
         if (video.readyState < 2 || video.videoWidth === 0) {
             setCheckMessage('The camera is still starting. Wait for the picture to appear, then try again.');
             return;
@@ -264,66 +277,47 @@ export default function MobileConnect() {
 
         setChecking(true);
         setCheckMessage(null);
+        setRecordingOn(true);
 
-        const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-            setChecking(false);
-            return;
-        }
-        ctx.drawImage(video, 0, 0);
-        canvas.toBlob(async (blob) => {
-            if (!blob) {
-                setChecking(false);
-                setCheckMessage('The photo could not be taken. Please try again.');
+        const total = Math.max(2, PROCTORING_CONFIG.roomScan.frames);
+        const gap = Math.max(300, Math.floor(PROCTORING_CONFIG.roomScan.durationMs / total));
+        const photos: Blob[] = [];
+
+        try {
+            for (let i = 0; i < total; i++) {
+                setScanProgress({ taken: i, total });
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) throw new Error('canvas');
+                ctx.drawImage(video, 0, 0);
+                const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+                if (blob) photos.push(blob);
+                if (i < total - 1) await new Promise((resolve) => setTimeout(resolve, gap));
+            }
+            setScanProgress({ taken: total, total });
+            if (photos.length === 0) {
+                setCheckMessage('The photos could not be taken. Please try again.');
                 return;
             }
-            const formData = new FormData();
-            formData.append('photo', blob, 'room.jpg');
-
-            const backendBaseUrl = import.meta.env.VITE_API_BASE_URL || `${window.location.protocol}//${window.location.hostname}:8082`;
-            const url = `${backendBaseUrl}/api/mobile/verify-room?token=${token}`;
-
-            try {
-                const res = await fetch(url, { method: 'POST', body: formData });
-                if (!res.ok) {
-                    const errorText = await res.text();
-                    // 401/403/404 mean the QR link is no longer valid; retrying
-                    // cannot help, so tell the candidate to rescan.
-                    if (res.status === 401 || res.status === 403 || res.status === 404) {
-                        setCheckMessage('This pairing link has expired. Please scan the QR code on your computer again.');
-                        return;
-                    }
-                    throw new Error(`HTTP ${res.status}: ${errorText}`);
-                }
-                const data = await res.json();
-                // The server could not run the check at all (its AI provider
-                // failed). That is not the candidate's room, so say so rather
-                // than telling them to reposition the phone.
-                if (data.valid === false && /could not be run|unavailable|error/i.test(data.reason ?? '')) {
-                    setCheckMessage('The room check is temporarily unavailable. Please wait a moment and tap Verify My Room again.');
-                    return;
-                }
-                if (data.valid) {
-                    setVerified(true);
-                    setCheckMessage(null);
-                    interviewWsService.send('/app/mobile/verified/' + token, { status: 'verified' });
-                    startStreaming();
-                } else {
-                    // The server's own words. "Reposition the phone" told the
-                    // candidate nothing about what was wrong; "your screen is
-                    // not visible" tells them exactly what to move.
-                    setCheckMessage(data.reason || 'The room check did not pass. Please try again.');
-                }
-            } catch (err) {
-                console.error('Verification fetch error:', err);
-                setCheckMessage('Could not reach the room check. Check your connection and try again.');
-            } finally {
-                setChecking(false);
-            }
-        }, 'image/jpeg');
+            await mobileUploadService.roomScan(token, photos);
+            setVerified(true);
+            interviewWsService.send('/app/mobile/verified/' + token, { status: 'verified' });
+            startStreaming();
+        } catch (err) {
+            console.error('Room scan upload error:', err);
+            const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+            // 401, 403 and 404 mean the QR link is no longer valid; retrying cannot help.
+            setCheckMessage(
+                status === 401 || status === 403 || status === 404
+                    ? 'This pairing link has expired. Please scan the QR code on your computer again.'
+                    : 'The room scan could not be saved. Check your connection and try again.',
+            );
+        } finally {
+            setScanProgress(null);
+            setChecking(false);
+        }
     };
 
     /** Leave deliberately: release the camera rather than abandoning the tab. */
@@ -538,7 +532,7 @@ export default function MobileConnect() {
                     <ol className="list-decimal space-y-2 pl-5 text-sm text-gray-700">
                         <li>Tap <b>Allow</b> when your browser asks for camera (and microphone) access.</li>
                         <li>Your phone will show a camera-in-use indicator while the feed is shared with the interview.</li>
-                        <li>Place the phone so it shows you and your computer screen, then tap <b>Verify My Room</b>.</li>
+                        <li>Place the phone so it shows you and your computer screen, then tap <b>Scan My Room</b> and slowly turn the phone round the room.</li>
                         <li>Keep this page open until the interview finishes.</li>
                     </ol>
                     <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-900 space-y-1">
@@ -638,18 +632,21 @@ export default function MobileConnect() {
                             )}
                             <div className="flex flex-col gap-3">
                                 <button
-                                    onClick={takePhoto}
+                                    onClick={scanRoom}
                                     disabled={checking}
                                     className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-bold py-3 rounded-xl transition-all shadow-lg active:scale-95"
                                 >
-                                    {checking ? 'Checking…' : 'Verify My Room'}
+                                    {scanProgress ? `Scanning… ${Math.min(scanProgress.taken + 1, scanProgress.total)} of ${scanProgress.total}. Keep turning slowly` : checking ? 'Saving…' : 'Scan My Room'}
                                 </button>
+                                {/* A way past the room scan, for local testing only: shipped, it was a button any candidate could press. */}
+                                {import.meta.env.DEV && (
                                 <button
                                     onClick={bypassVerification}
                                     className="w-full border-2 border-indigo-600 text-indigo-600 font-bold py-2 rounded-xl hover:bg-indigo-50 transition-all text-sm"
                                 >
                                     Skip Verification (Test Mode)
                                 </button>
+                                )}
                             </div>
                         </>
                     ) : (
