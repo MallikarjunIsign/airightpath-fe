@@ -249,8 +249,8 @@ export function InterviewPage() {
     persist: PROCTORING_CONFIG.recording.screen.required
       ? { scheduleId: () => interview?.id ?? voiceInterview.scheduleId }
       : undefined,
-    // Read at record time, not now: the audio graph is built when the first
-    // question is spoken, which is after the recording has already started.
+    // Read at record time, not now. The playback graph is created on this request if the first question has
+    // not been spoken yet, so the recording carries the interviewer's voice from its first second.
     getInterviewerAudio: () => voiceInterview.getInterviewerAudioStream(),
     onScreenStop: () => {
       // Nothing was asked for, so nothing can have been stopped. Without this
