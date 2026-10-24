@@ -160,6 +160,14 @@ export const interviewService = {
     } as never);
   },
 
+  /** Whether the phone behind this token has saved its room scan. Read from the server, not a live message. */
+  getMobilePairingState(scheduleId: number, token: string) {
+    return api.get<{ verified: boolean }>(ENDPOINTS.INTERVIEWS.MOBILE_PAIRING_STATE(scheduleId), {
+      params: { token },
+      _skipErrorToast: true,
+    } as never);
+  },
+
   /** The candidate is starting without a phone: close pairing so one cannot join later. */
   revokeMobilePairing(scheduleId: number, token?: string | null) {
     return api.post(ENDPOINTS.INTERVIEWS.MOBILE_PAIRING_REVOKE(scheduleId), null, {

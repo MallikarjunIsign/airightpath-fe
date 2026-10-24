@@ -152,6 +152,7 @@ export const ENDPOINTS = {
     RECORDING_OUTCOME: (id: number) => `/api/interview/${id}/recording-outcome`,
     /** Stills from the candidate's paired phone: upload (candidate) and list (reviewer). */
     MOBILE_PAIRING: (id: number) => `/api/interview/${id}/mobile-pairing`,
+    MOBILE_PAIRING_STATE: (id: number) => `/api/interview/${id}/mobile-pairing/state`,
     MOBILE_PAIRING_REVOKE: (id: number) => `/api/interview/${id}/mobile-pairing/revoke`,
     MOBILE_CAPTURES: (id: number) => `/api/interview/${id}/mobile-captures`,
     MOBILE_CAPTURE_IMAGE: (captureId: number) => `/api/interview/mobile-captures/${captureId}/image`,

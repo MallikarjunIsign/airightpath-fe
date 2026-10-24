@@ -866,6 +866,39 @@ export function InterviewPage() {
     if (mobileToken) setIsSetupActive(true);
   }, [mobileToken]);
 
+  /**
+   * The phone's verification, read from the server.
+   *
+   * The live socket used to be the only way the desktop learned the phone had passed its room scan, so a
+   * message that went astray left the phone saying "Verified" and this page still asking the candidate to
+   * pair, with Begin shut. The scan is now on the server's record, and this asks for it every few seconds
+   * until it appears. The socket still brings the live picture; it no longer decides whether the candidate
+   * can start.
+   */
+  useEffect(() => {
+    if (!interview?.id || !mobileToken || mobileVerified || mobileSkipped) return;
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const res = await interviewService.getMobilePairingState(interview.id, mobileToken);
+        if (!cancelled && res.data?.verified) {
+          setMobileConnected(true);
+          setMobileVerified(true);
+          showToast(MESSAGES.interview.mobileVerified, 'success');
+        }
+      } catch {
+        // Not reachable this time; the next tick asks again.
+      }
+    };
+    const timer = window.setInterval(check, 3000);
+    void check();
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [interview?.id, mobileToken, mobileVerified, mobileSkipped]);
+
   // 2. Connect WebSocket and register desktop
   useEffect(() => {
     const token = mobileToken;
