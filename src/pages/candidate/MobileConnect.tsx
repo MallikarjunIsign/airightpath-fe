@@ -226,14 +226,23 @@ export default function MobileConnect() {
         let cancelled = false;
         const check = async () => {
             const state = await mobileUploadService.pairingState(token);
-            if (cancelled || state !== 'closed') return;
+            if (cancelled) return;
+            if (state === 'ended') {
+                // The interview is over. Close the recording and send its last part, exactly as the
+                // desktop's message would have: that message is not always delivered.
+                void endSession('ended');
+                return;
+            }
+            if (state !== 'closed') return;
             streamRef.current?.getTracks().forEach((track) => track.stop());
             streamRef.current = null;
             setCaptureStream(null);
             setFinished('closed');
         };
         void check();
-        const timer = window.setInterval(check, 10_000);
+        // Every 20 seconds: this is the fallback for a missed socket message, not the main route, and it
+        // is one request per phone for as long as an interview runs.
+        const timer = window.setInterval(check, 20_000);
         return () => {
             cancelled = true;
             window.clearInterval(timer);
@@ -492,6 +501,20 @@ export default function MobileConnect() {
         };
     }, [shutDown]);
 
+    /**
+     * What to tell the candidate once the interview is over. "Safe to close" used to be said at once, while the
+     * last part of the recording was still being sent, and closing the tab then lost it. It now says so until the
+     * recording has been saved.
+     */
+    const [uploadStatus, setUploadStatus] = useState<'uploading' | 'saved' | 'not-sent' | 'none'>('uploading');
+    useEffect(() => {
+        if (finished !== 'ended' && finished !== 'exited') return;
+        const read = () => setUploadStatus(recordingSync.statusForToken(token));
+        read();
+        const timer = window.setInterval(read, 1000);
+        return () => window.clearInterval(timer);
+    }, [finished, token]);
+
     // Once it is over the phone has no job left, and leaving the live UI on
     // screen invites the candidate to keep holding it up at nothing.
     if (finished) {
@@ -506,16 +529,26 @@ export default function MobileConnect() {
                         </svg>
                     </div>
                     <h1 className="text-xl font-bold text-gray-800">
-                        {closed ? 'Phone pairing is closed' : ended ? 'Interview complete' : 'Proctoring stopped'}
+                        {closed ? 'Phone pairing is closed' : ended ? 'Thank you. Your interview is complete.' : 'Proctoring stopped'}
                     </h1>
                     <p className="mt-2 text-sm text-gray-600">
                         {closed
                             ? 'This interview was started without a phone, so a phone can no longer be added. Nothing is being recorded here. You can close this page.'
                             : ended
-                            ? 'Your camera has been switched off and the feed has ended. You can close this page.'
+                            ? uploadStatus === 'uploading'
+                                ? 'Your camera is switched off. Your recording is still being sent, so please keep this page open for a moment.'
+                                : uploadStatus === 'not-sent'
+                                ? 'Your camera is switched off, but the recording could not be fully sent yet. Keep this page open on a good connection and it will keep trying.'
+                                : uploadStatus === 'none'
+                                ? 'Your camera is switched off. You can close this page.'
+                                : 'Your camera is switched off and your recording has been saved. You can close this page.'
                             : 'Your camera has been switched off. Reopen the QR code on your computer if you need to pair again.'}
                     </p>
-                    <p className="mt-4 text-xs text-gray-400">It is safe to close this tab.</p>
+                    <p className="mt-4 text-xs text-gray-400">
+                        {ended && (uploadStatus === 'uploading' || uploadStatus === 'not-sent')
+                            ? 'Please do not close this tab yet.'
+                            : 'It is safe to close this tab.'}
+                    </p>
                 </div>
             </div>
         );

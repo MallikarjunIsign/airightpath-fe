@@ -214,6 +214,8 @@ const keyOf = (target: Target) =>
   target.token ? `t:${target.token}:${target.kind}` : `${target.scheduleId}:${target.kind}`;
 const stats = new Map<string, Stats>();
 const pending = new Map<string, number>();
+/** How each finished recording ended up, for a screen that wants to say so. */
+const outcomes = new Map<string, boolean>();
 const finished = new Set<string>();
 const queuedIds = new Set<string>();
 const queues = new Map<Kind, Promise<void>>();
@@ -376,6 +378,7 @@ async function reportIfDone(target: Target) {
 
   const failureReason =
     entry.failureReason ?? (entry.ok === 0 ? 'Nothing was captured to upload.' : undefined);
+  outcomes.set(key, !failureReason);
   const payload = {
     kind,
     success: !failureReason,
@@ -564,6 +567,19 @@ export const recordingSync = {
     const target = { scheduleId, kind };
     finished.add(keyOf(target));
     void reportIfDone(target);
+  },
+
+  /**
+   * Where the phone's recording stands once the interview is over: still being sent, sent, or not sent
+   * (it keeps trying). 'none' where the phone never recorded anything.
+   */
+  statusForToken(token: string | null | undefined): 'uploading' | 'saved' | 'not-sent' | 'none' {
+    if (!token) return 'none';
+    const key = keyOf({ scheduleId: 0, kind: 'mobile', token });
+    if ((pending.get(key) ?? 0) > 0 || finished.has(key)) return 'uploading';
+    const outcome = outcomes.get(key);
+    if (outcome === undefined) return 'none';
+    return outcome ? 'saved' : 'not-sent';
   },
 
   /** The phone's recording is over: once it is uploaded, say how it went. */

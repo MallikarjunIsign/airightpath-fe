@@ -1073,12 +1073,17 @@ function recordingFailureFor(
       ? ['camera_recording_not_started']
       : kind === 'screen'
         ? ['screen_share_denied', 'screen_share_stopped']
-        : [];
+        : ['mobile_recording_not_started', 'mobile_recording_issue'];
   const started = latest((event) => types.includes(event.eventType ?? ''));
   if (started) {
     // "Camera recording is required but…" reads as "Camera: required but…"
     // once the row's own label is in front of it.
     return started.replace(/^\w+ recording /i, '').replace(/^Candidate stopped/i, 'candidate stopped');
+  }
+
+  // Started, and then nothing was saved. Said as that, not as "never recorded": the phone did begin.
+  if (kind === 'mobile' && events.some((event) => event.eventType === 'mobile_recording_started')) {
+    return 'started, but no recording was saved. The phone page was probably closed, locked or lost signal before it finished uploading.';
   }
 
   // 3. Switched off by configuration: absence that is not a failure.

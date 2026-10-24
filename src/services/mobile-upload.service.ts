@@ -27,10 +27,10 @@ const PIECE_BACKOFF_MS = [1_000, 3_000, 8_000, 15_000];
 const http = () => axios.create({ baseURL: mobileApiBase(), timeout: 5 * 60 * 1000 });
 
 export const mobileUploadService = {
-  /** open, closed (the interview began without a phone) or unknown (not registered yet). */
-  async pairingState(token: string): Promise<'open' | 'closed' | 'unknown'> {
+  /** open, closed (the interview began without a phone), ended (the interview is over) or unknown (not registered yet). */
+  async pairingState(token: string): Promise<'open' | 'closed' | 'ended' | 'unknown'> {
     try {
-      const res = await http().get<{ state: 'open' | 'closed' | 'unknown' }>('/api/mobile/pairing-status', {
+      const res = await http().get<{ state: 'open' | 'closed' | 'ended' | 'unknown' }>('/api/mobile/pairing-status', {
         params: { token },
       });
       return res.data.state;

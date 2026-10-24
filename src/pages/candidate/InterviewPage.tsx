@@ -890,11 +890,22 @@ export function InterviewPage() {
         // Not reachable this time; the next tick asks again.
       }
     };
-    const timer = window.setInterval(check, 3000);
+    // Quick at first, when the candidate has just scanned and is waiting; slower after a minute. Skipped
+    // while the tab is hidden, so a page left open in the background costs nothing.
+    const startedAt = Date.now();
+    let timer = 0;
+    const schedule = () => {
+      const delay = Date.now() - startedAt < 60_000 ? 5000 : 15_000;
+      timer = window.setTimeout(async () => {
+        if (!document.hidden) await check();
+        if (!cancelled) schedule();
+      }, delay);
+    };
+    schedule();
     void check();
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [interview?.id, mobileToken, mobileVerified, mobileSkipped]);
