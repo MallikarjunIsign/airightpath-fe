@@ -5,7 +5,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { assessmentService } from '@/services/assessment.service';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
-import { ROUTES } from '@/config/routes';
 import { formatDate } from '@/utils/format.utils';
 import type { Assessment } from '@/types/assessment.types';
 import type { Result } from '@/types/result.types';

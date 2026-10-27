@@ -6,6 +6,18 @@ interface UseFaceDetectionOptions {
   lookingAwayThreshold?: number;
   lookingDownThreshold?: number;
   lookingAwayConsecutiveFrames?: number;
+  /**
+   * Whether a downward glance counts as looking away.
+   *
+   * <p>Defaults to true for callers that have always had it. A typed exam
+   * should pass false: the detector cannot tell a keyboard from a crib sheet,
+   * and penalising the former fails honest candidates for typing.</p>
+   */
+  detectLookingDown?: boolean;
+  /** Consecutive "no face" detections before warning (grace for brief look-aways). */
+  noFaceConsecutiveFrames?: number;
+  /** Consecutive "multiple faces" detections before warning (kept low = prompt). */
+  multipleFacesConsecutiveFrames?: number;
   onMaxWarnings?: () => void;
   onNoFace?: () => void;
   onMultipleFaces?: (count: number) => void;
@@ -45,6 +57,9 @@ export function useFaceDetection(options?: UseFaceDetectionOptions) {
   const lookingAwayThreshold = options?.lookingAwayThreshold ?? 0.28;
   const lookingDownThreshold = options?.lookingDownThreshold ?? 0.22;
   const lookingAwayConsecutiveFrames = options?.lookingAwayConsecutiveFrames ?? 2;
+  const detectLookingDown = options?.detectLookingDown ?? true;
+  const noFaceConsecutiveFrames = options?.noFaceConsecutiveFrames ?? 2;
+  const multipleFacesConsecutiveFrames = options?.multipleFacesConsecutiveFrames ?? 2;
 
   // Stable refs for callbacks
   const onNoFaceRef = useRef(options?.onNoFace);
@@ -71,14 +86,27 @@ export function useFaceDetection(options?: UseFaceDetectionOptions) {
     }
   }, []);
 
+  /**
+   * The count behind the warning limit, as a ref as well as state.
+   *
+   * <p>The ref is what the limit is tested against. The callback used to be
+   * fired from inside the {@code setWarningCount} updater, which React is
+   * free to run more than once — and does, on every render under StrictMode.
+   * Firing auto-submit from there meant submitting an exam twice from one
+   * violation.</p>
+   */
+  const warningCountRef = useRef(0);
+
   const addWarning = useCallback(() => {
-    setWarningCount((prev) => {
-      const next = prev + 1;
-      if (next >= maxWarnings) {
-        onMaxWarningsRef.current?.();
-      }
-      return next;
-    });
+    warningCountRef.current += 1;
+    setWarningCount(warningCountRef.current);
+
+    // Strictly equal, not >=: the limit is crossed once. Anything that fires
+    // again on every later warning is asking the page to submit an exam it is
+    // already submitting.
+    if (warningCountRef.current === maxWarnings) {
+      onMaxWarningsRef.current?.();
+    }
   }, [maxWarnings]);
 
   const startDetection = useCallback(
@@ -117,7 +145,7 @@ export function useFaceDetection(options?: UseFaceDetectionOptions) {
               multipleFacesCountRef.current = 0;
               multipleFacesActiveRef.current = false;
 
-              if (noFaceCountRef.current >= 2) {
+              if (noFaceCountRef.current >= noFaceConsecutiveFrames) {
                 setFaceDetected(false);
 
                 // Fire callback + add warning once per sustained no-face episode
@@ -138,7 +166,7 @@ export function useFaceDetection(options?: UseFaceDetectionOptions) {
               noFaceCountRef.current = 0;
               noFaceActiveRef.current = false;
 
-              if (multipleFacesCountRef.current >= 2) {
+              if (multipleFacesCountRef.current >= multipleFacesConsecutiveFrames) {
                 setMultipleFaces(true);
 
                 // Fire callback + add warning once per sustained multiple-faces episode
@@ -175,7 +203,7 @@ export function useFaceDetection(options?: UseFaceDetectionOptions) {
                 direction = horizontalOffset > 0 ? 'right' : 'left';
               } else if (verticalOffset < -0.22) {
                 direction = 'up';
-              } else if (verticalOffset > lookingDownThreshold) {
+              } else if (detectLookingDown && verticalOffset > lookingDownThreshold) {
                 direction = 'down';
               }
 
@@ -223,7 +251,7 @@ export function useFaceDetection(options?: UseFaceDetectionOptions) {
         });
       }
     },
-    [checkIntervalMs, lookingAwayThreshold, lookingDownThreshold, lookingAwayConsecutiveFrames, addWarning]
+    [checkIntervalMs, lookingAwayThreshold, lookingDownThreshold, detectLookingDown, lookingAwayConsecutiveFrames, noFaceConsecutiveFrames, multipleFacesConsecutiveFrames, addWarning]
   );
 
   const stopDetection = useCallback(() => {
@@ -257,6 +285,9 @@ export function useFaceDetection(options?: UseFaceDetectionOptions) {
     loadModels,
     startDetection,
     stopDetection,
-    resetWarnings: () => setWarningCount(0),
+    resetWarnings: () => {
+      warningCountRef.current = 0;
+      setWarningCount(0);
+    },
   };
 }

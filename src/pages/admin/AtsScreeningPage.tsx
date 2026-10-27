@@ -7,18 +7,13 @@ import {
   Users,
   CheckCircle,
   XCircle,
-  ArrowUpDown,
   BarChart3,
-  Eye,
-  Mail,
-  Phone,
   MapPin,
   Clock,
-  FileText,
-  AlertTriangle,
   TrendingUp,
-  TrendingDown,
   Search,
+  Download,
+  ExternalLink,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -26,12 +21,20 @@ import { Select } from '@/components/ui/Select';
 import { Badge } from '@/components/ui/Badge';
 import { Input } from '@/components/ui/Input';
 import { Modal } from '@/components/ui/Modal';
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { BackLink } from '@/components/ui/BackLink';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
+import { resumeService } from '@/services/resume.service';
+import axios from 'axios';
 import { useToast } from '@/components/ui/Toast';
-import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
+import { usePersistentState } from '@/hooks/usePersistentState';
+import { AtsCandidateDetailModal } from '@/components/admin/AtsCandidateDetailModal';
+import { AtsResultsTable } from '@/components/admin/AtsResultsTable';
+import { ScreeningRunReport } from '@/components/admin/ScreeningRunReport';
+import { getAppEmail } from '@/utils/application.utils';
+import { MESSAGES } from '@/config/messages';
+import type { JobPostDTO, JobApplicationDTO, ScreeningRun } from '@/types/job.types';
 
 type FilterTab = 'all' | 'shortlisted' | 'rejected';
 type SortField = 'matchPercent' | 'firstName' | 'experience';
@@ -41,23 +44,99 @@ export function AtsScreeningPage() {
   const { showToast } = useToast();
 
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
-  const [selectedPrefix, setSelectedPrefix] = useState('');
+  const [selectedPrefix, setSelectedPrefix] = usePersistentState('ats:selectedPrefix', '');
   const [selectedJob, setSelectedJob] = useState<JobPostDTO | null>(null);
   const [candidates, setCandidates] = useState<JobApplicationDTO[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [screening, setScreening] = useState(false);
   const [screened, setScreened] = useState(false);
-  const [activeTab, setActiveTab] = useState<FilterTab>('all');
-  const [sortField, setSortField] = useState<SortField>('matchPercent');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [loadingResults, setLoadingResults] = useState(false);
+  /** Report from the last screening run — per-candidate outcomes and counts. */
+  const [run, setRun] = useState<ScreeningRun | null>(null);
+  /** After a scoped run, show just those candidates until the admin widens it. */
+  const [resultsView, setResultsView] = useState<'run' | 'all'>('all');
+  const [activeTab, setActiveTab] = usePersistentState<FilterTab>('ats:activeTab', 'all');
+  const [sortField, setSortField] = usePersistentState<SortField>('ats:sortField', 'matchPercent');
+  const [sortDirection, setSortDirection] = usePersistentState<SortDirection>('ats:sortDirection', 'desc');
+  const [searchQuery, setSearchQuery] = usePersistentState('ats:searchQuery', '');
+
+  // Candidates ticked on the Candidates page before coming here. Screening
+  // defaults to just these — the admin already said who they meant.
+  const [scopeEmails, setScopeEmails] = usePersistentState<string[]>('ats:scopeEmails', []);
+  const [scope, setScope] = useState<'all' | 'selected'>(
+    scopeEmails.length > 0 ? 'selected' : 'all',
+  );
 
   // Candidate detail modal
   const [selectedCandidate, setSelectedCandidate] = useState<JobApplicationDTO | null>(null);
 
+  // Resume viewer
+  const [resumeView, setResumeView] = useState<{ url: string; name: string } | null>(null);
+  const [resumeLoading, setResumeLoading] = useState(false);
+
   useEffect(() => {
     fetchJobs();
   }, []);
+
+  // Revoke the blob URL when the resume viewer closes / on unmount.
+  useEffect(() => {
+    return () => {
+      if (resumeView) URL.revokeObjectURL(resumeView.url);
+    };
+  }, [resumeView]);
+
+  async function openResume(candidate: JobApplicationDTO) {
+    const email = getAppEmail(candidate);
+    if (!email) return;
+    setResumeLoading(true);
+    try {
+      const res = await resumeService.view(email, { _skipErrorToast: true });
+      const url = URL.createObjectURL(res.data);
+      setResumeView({ url, name: candidate.resumeFileName || `${email}-resume.pdf` });
+    } catch (err) {
+      const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+      showToast(
+        status === 400 || status === 404
+          ? MESSAGES.admin.resume.unavailable
+          : MESSAGES.admin.resume.openFailed,
+        'error',
+      );
+    } finally {
+      setResumeLoading(false);
+    }
+  }
+
+  function closeResume() {
+    setResumeView((prev) => {
+      if (prev) URL.revokeObjectURL(prev.url);
+      return null;
+    });
+  }
+
+  function downloadResume() {
+    if (!resumeView) return;
+    const a = document.createElement('a');
+    a.href = resumeView.url;
+    a.download = resumeView.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  // Re-derive the selected job from the persisted prefix once jobs load,
+  // so the selection survives a page refresh.
+  useEffect(() => {
+    if (selectedPrefix && jobs.length > 0) {
+      setSelectedJob(jobs.find((j) => j.jobPrefix === selectedPrefix) ?? null);
+    }
+  }, [jobs, selectedPrefix]);
+
+  // Show what is already stored for the job on arrival. The read is safe now
+  // that it no longer re-screens, so the page is useful before pressing
+  // anything — including when the admin lands here from the Candidates page.
+  useEffect(() => {
+    if (selectedPrefix) loadStoredResults(selectedPrefix);
+  }, [selectedPrefix]);
 
   async function fetchJobs() {
     setLoadingJobs(true);
@@ -72,65 +151,122 @@ export function AtsScreeningPage() {
   }
 
   function onJobSelected(prefix: string) {
+    const changed = prefix !== selectedPrefix;
     setSelectedPrefix(prefix);
     const job = jobs.find((j) => j.jobPrefix === prefix) ?? null;
     setSelectedJob(job);
     setCandidates([]);
     setScreened(false);
+    setRun(null);
+    setResultsView('all');
     setActiveTab('all');
     setSearchQuery('');
+    // A selection handed over for one job means nothing on another.
+    if (changed) clearScope();
+    // The [selectedPrefix] effect loads the stored results.
+  }
+
+  /** Reads what is stored for the job — no scoring, no status changes. */
+  async function loadStoredResults(prefix: string) {
+    setLoadingResults(true);
+    try {
+      const res = await jobApplicationService.getByPrefix(prefix);
+      setCandidates(res.data ?? []);
+    } catch {
+      // Error toast auto-handled
+    } finally {
+      setLoadingResults(false);
+    }
   }
 
   async function handleScreenCandidates() {
     if (!selectedPrefix) {
-      showToast('Please select a job first', 'warning');
+      showToast(MESSAGES.admin.common.selectJobFirst, 'warning');
       return;
     }
+    const screenSelectedOnly = scope === 'selected' && scopeEmails.length > 0;
 
     setScreening(true);
-    setCandidates([]);
-    setScreened(false);
+    setRun(null);
     try {
-      const res = await jobApplicationService.filterByPrefix(selectedPrefix);
-      const data = res.data ?? [];
-      setCandidates(data);
-      setScreened(true);
+      // Passing emails screens only those; omitting them screens the whole job.
+      const res = await jobApplicationService.screen({
+        jobPrefix: selectedPrefix,
+        ...(screenSelectedOnly ? { emails: scopeEmails } : {}),
+      });
+      const report = res.data;
+      setRun(report ?? null);
+      // Land on just-screened when the run was scoped; a job-wide run is
+      // everyone anyway.
+      setResultsView(report?.scope === 'SELECTED' ? 'run' : 'all');
 
-      const shortlisted = data.filter((c) => c.status === 'SHORTLISTED').length;
-      const rejected = data.filter((c) => c.status === 'REJECTED').length;
-
-      if (data.length === 0) {
-        showToast('No applicants found for this job.', 'info');
-      } else {
+      if (report) {
         showToast(
-          `Screening complete! ${shortlisted} shortlisted, ${rejected} rejected out of ${data.length} candidates.`,
-          'success'
+          report.message ||
+            MESSAGES.admin.ats.screeningComplete(
+              report.shortlistedCount,
+              report.rejectedCount,
+              report.screenedCount,
+            ),
+          report.screenedCount === 0 ? 'info' : 'success',
         );
       }
+
+      // The report carries outcomes, not full applications — re-read for the
+      // table so scores, resumes and statuses all come from stored data.
+      await loadStoredResults(selectedPrefix);
+      setScreened(true);
     } catch {
-      // Error toast auto-handled
+      // Error toast auto-handled by the interceptor (400/404/409 are explained
+      // by the server's own message).
     } finally {
       setScreening(false);
     }
   }
 
-  // Stats
+  /** Drops the hand-off from the Candidates page and screens everyone instead. */
+  function clearScope() {
+    setScopeEmails([]);
+    setScope('all');
+  }
+
+  /**
+   * Emails touched by the last run, when that run was scoped. A job-wide run
+   * covers everyone, so there is nothing to narrow down to.
+   */
+  const runEmails = useMemo(() => {
+    if (!run || run.scope !== 'SELECTED') return null;
+    return new Set((run.results ?? []).map((r) => r.email.toLowerCase()));
+  }, [run]);
+
+  /**
+   * Straight after a scoped run the table shows just those candidates — the
+   * admin asked to screen one person and wants to see what happened to them,
+   * not the other applicants that the run deliberately left alone.
+   */
+  const visibleCandidates = useMemo(() => {
+    if (resultsView !== 'run' || !runEmails) return candidates;
+    return candidates.filter((c) => runEmails.has(getAppEmail(c).toLowerCase()));
+  }, [candidates, runEmails, resultsView]);
+
+  // Stats — describe whatever set is on screen.
   const stats = useMemo(() => {
-    const total = candidates.length;
-    const shortlisted = candidates.filter((c) => c.status === 'SHORTLISTED').length;
-    const rejected = candidates.filter((c) => c.status === 'REJECTED').length;
+    const list = visibleCandidates;
+    const total = list.length;
+    const shortlisted = list.filter((c) => c.status === 'SHORTLISTED').length;
+    const rejected = list.filter((c) => c.status === 'REJECTED').length;
     const avgScore = total > 0
-      ? candidates.reduce((sum, c) => sum + (c.matchPercent ?? 0), 0) / total
+      ? list.reduce((sum, c) => sum + (c.matchPercent ?? 0), 0) / total
       : 0;
     const topScore = total > 0
-      ? Math.max(...candidates.map((c) => c.matchPercent ?? 0))
+      ? Math.max(...list.map((c) => c.matchPercent ?? 0))
       : 0;
     return { total, shortlisted, rejected, avgScore, topScore };
-  }, [candidates]);
+  }, [visibleCandidates]);
 
   // Filter + Search + Sort
   const filteredCandidates = useMemo(() => {
-    let list = [...candidates];
+    let list = [...visibleCandidates];
 
     // Tab filter
     if (activeTab === 'shortlisted') {
@@ -165,7 +301,7 @@ export function AtsScreeningPage() {
     });
 
     return list;
-  }, [candidates, activeTab, searchQuery, sortField, sortDirection]);
+  }, [visibleCandidates, activeTab, searchQuery, sortField, sortDirection]);
 
   function toggleSort(field: SortField) {
     if (sortField === field) {
@@ -174,22 +310,6 @@ export function AtsScreeningPage() {
       setSortField(field);
       setSortDirection('desc');
     }
-  }
-
-  function getScoreColor(score: number): string {
-    if (score >= 80) return 'text-[var(--success)]';
-    if (score >= 60) return 'text-[var(--warning)]';
-    return 'text-[var(--error)]';
-  }
-
-  function getScoreBg(score: number): string {
-    if (score >= 80) return 'bg-[var(--success)]';
-    if (score >= 60) return 'bg-[var(--warning)]';
-    return 'bg-[var(--error)]';
-  }
-
-  function getAppEmail(app: JobApplicationDTO): string {
-    return app.email || app.userEmail || '';
   }
 
   const jobOptions = [
@@ -207,9 +327,12 @@ export function AtsScreeningPage() {
 
   return (
     <div className="space-y-6">
+      {/* Shown only when another screen sent us here */}
+      <BackLink />
+
       {/* Page Header */}
       <div>
-        <h1 className="text-3xl font-bold text-[var(--text)]">ATS Screening</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-[var(--text)]">Screen with ATS</h1>
         <p className="text-[var(--textSecondary)] mt-1">
           Screen and shortlist candidates by matching their resumes against job requirements
         </p>
@@ -229,6 +352,8 @@ export function AtsScreeningPage() {
             <div className="space-y-4">
               <Select
                 options={jobOptions}
+                searchable
+                searchPlaceholder="Search by job title or prefix..."
                 value={selectedPrefix}
                 onChange={(e) => onJobSelected(e.target.value)}
               />
@@ -279,6 +404,69 @@ export function AtsScreeningPage() {
                     </Badge>
                   ))}
                 </div>
+                {/* Who gets screened — spelled out, because screening writes
+                    shortlist/reject statuses onto whoever it touches. */}
+                <div className="rounded-xl border border-[var(--border)] p-3 space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-[var(--textTertiary)]">
+                    Screen
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setScope('all')}
+                      className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+                        scope === 'all'
+                          ? 'border-[var(--primary)] text-[var(--primary)] bg-[var(--primaryMuted,var(--primaryLight))]'
+                          : 'border-[var(--border)] text-[var(--textSecondary)] hover:text-[var(--text)]'
+                      }`}
+                    >
+                      All applicants
+                    </button>
+                    <button
+                      type="button"
+                      disabled={scopeEmails.length === 0}
+                      onClick={() => setScope('selected')}
+                      className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                        scope === 'selected' && scopeEmails.length > 0
+                          ? 'border-[var(--primary)] text-[var(--primary)] bg-[var(--primaryMuted,var(--primaryLight))]'
+                          : 'border-[var(--border)] text-[var(--textSecondary)] hover:text-[var(--text)]'
+                      }`}
+                    >
+                      Selected ({scopeEmails.length})
+                    </button>
+                    {scopeEmails.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={clearScope}
+                        className="px-2 py-1.5 text-sm text-[var(--textTertiary)] hover:text-[var(--error)] transition-colors"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+
+                  {scopeEmails.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {scopeEmails.map((email) => (
+                        <Badge key={email} variant="secondary" size="sm">
+                          {email}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-[var(--textSecondary)]">
+                      Tick candidates on the Candidates page and choose &ldquo;Screen with
+                      ATS&rdquo; to screen only those.
+                    </p>
+                  )}
+
+                  <p className="text-xs text-[var(--textSecondary)]">
+                    {scope === 'selected' && scopeEmails.length > 0
+                      ? `Only these ${scopeEmails.length} candidate${scopeEmails.length === 1 ? '' : 's'} will be scored and have their status updated.`
+                      : 'Everyone still in the screening phase is re-scored, and their shortlist status overwritten. Candidates already past shortlisting are skipped.'}
+                  </p>
+                </div>
+
                 <Button
                   onClick={handleScreenCandidates}
                   isLoading={screening}
@@ -286,7 +474,13 @@ export function AtsScreeningPage() {
                   className="w-full"
                   size="lg"
                 >
-                  {screening ? 'Screening Candidates...' : 'Screen All Candidates'}
+                  {(() => {
+                    if (screening) return 'Screening Candidates...';
+                    if (scope === 'selected' && scopeEmails.length > 0) {
+                      return `Screen ${scopeEmails.length} Selected Candidate${scopeEmails.length === 1 ? '' : 's'}`;
+                    }
+                    return 'Screen All Candidates';
+                  })()}
                 </Button>
               </div>
             ) : (
@@ -299,6 +493,18 @@ export function AtsScreeningPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Reading stored results */}
+      {loadingResults && !screening && candidates.length === 0 && (
+        <Card>
+          <CardContent>
+            <div className="flex items-center justify-center gap-3 py-10">
+              <Loader2 size={20} className="animate-spin text-[var(--primary)]" />
+              <p className="text-sm text-[var(--textSecondary)]">Loading screening results...</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Screening in Progress */}
       {screening && (
@@ -315,8 +521,11 @@ export function AtsScreeningPage() {
         </Card>
       )}
 
+      {/* Last run report — what actually changed, and what didn't */}
+      {run && !screening && <ScreeningRunReport run={run} onDismiss={() => setRun(null)} />}
+
       {/* Results Section */}
-      {screened && !screening && (
+      {(screened || candidates.length > 0) && !screening && (
         <>
           {/* Statistics Cards */}
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
@@ -325,7 +534,10 @@ export function AtsScreeningPage() {
                 <div className="text-center py-2">
                   <Users size={24} className="mx-auto text-[var(--primary)] mb-1" />
                   <p className="text-2xl font-bold text-[var(--text)]">{stats.total}</p>
-                  <p className="text-xs text-[var(--textSecondary)]">Total Candidates</p>
+                  {/* The tiles describe whatever the table is showing. */}
+                  <p className="text-xs text-[var(--textSecondary)]">
+                    {resultsView === 'run' && runEmails ? 'Just Screened' : 'Total Candidates'}
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -403,10 +615,44 @@ export function AtsScreeningPage() {
           {/* Results Table */}
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <CardTitle>
-                  Screening Results ({filteredCandidates.length})
+                  {resultsView === 'run' && runEmails
+                    ? `Just Screened (${filteredCandidates.length})`
+                    : `Screening Results (${filteredCandidates.length})`}
                 </CardTitle>
+
+                {/* After a scoped run the table is narrowed to those
+                    candidates — say so, and offer the way back. */}
+                {runEmails && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="text-[var(--textSecondary)]">Showing</span>
+                    <div className="flex rounded-xl border border-[var(--border)] overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setResultsView('run')}
+                        className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                          resultsView === 'run'
+                            ? 'bg-[var(--primary)] text-white'
+                            : 'text-[var(--textSecondary)] hover:text-[var(--text)]'
+                        }`}
+                      >
+                        Just screened ({runEmails.size})
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setResultsView('all')}
+                        className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                          resultsView === 'all'
+                            ? 'bg-[var(--primary)] text-white'
+                            : 'text-[var(--textSecondary)] hover:text-[var(--text)]'
+                        }`}
+                      >
+                        All applicants ({candidates.length})
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </CardHeader>
             <CardContent>
@@ -421,114 +667,13 @@ export function AtsScreeningPage() {
                   }
                 />
               ) : (
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Rank</TableHead>
-                        <TableHead>
-                          <button
-                            className="flex items-center gap-1 hover:text-[var(--text)] transition-colors"
-                            onClick={() => toggleSort('firstName')}
-                          >
-                            Name
-                            <ArrowUpDown size={14} className={sortField === 'firstName' ? 'text-[var(--primary)]' : ''} />
-                          </button>
-                        </TableHead>
-                        <TableHead>Email</TableHead>
-                        <TableHead>
-                          <button
-                            className="flex items-center gap-1 hover:text-[var(--text)] transition-colors"
-                            onClick={() => toggleSort('experience')}
-                          >
-                            Experience
-                            <ArrowUpDown size={14} className={sortField === 'experience' ? 'text-[var(--primary)]' : ''} />
-                          </button>
-                        </TableHead>
-                        <TableHead>Role</TableHead>
-                        <TableHead>Resume</TableHead>
-                        <TableHead>
-                          <button
-                            className="flex items-center gap-1 hover:text-[var(--text)] transition-colors"
-                            onClick={() => toggleSort('matchPercent')}
-                          >
-                            ATS Score
-                            <ArrowUpDown size={14} className={sortField === 'matchPercent' ? 'text-[var(--primary)]' : ''} />
-                          </button>
-                        </TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredCandidates.map((candidate, idx) => {
-                        const score = candidate.matchPercent ?? 0;
-                        const isShortlisted = candidate.status === 'SHORTLISTED';
-
-                        return (
-                          <TableRow key={candidate.id ?? getAppEmail(candidate)}>
-                            <TableCell>
-                              <span className="text-sm font-bold text-[var(--text)]">#{idx + 1}</span>
-                            </TableCell>
-                            <TableCell className="font-medium">
-                              {candidate.firstName} {candidate.lastName}
-                            </TableCell>
-                            <TableCell className="text-sm">
-                              {getAppEmail(candidate)}
-                            </TableCell>
-                            <TableCell>{candidate.experience}</TableCell>
-                            <TableCell>{candidate.jobRole || '-'}</TableCell>
-                            <TableCell>
-                              {candidate.resumeFileName ? (
-                                <span className="flex items-center gap-1 text-sm text-[var(--textSecondary)]">
-                                  <FileText size={14} />
-                                  <span className="truncate max-w-[120px]">{candidate.resumeFileName}</span>
-                                </span>
-                              ) : (
-                                <span className="text-sm text-[var(--textTertiary)]">-</span>
-                              )}
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex items-center gap-2">
-                                {/* Score bar */}
-                                <div className="w-16 h-2 rounded-full bg-[var(--border)] overflow-hidden">
-                                  <div
-                                    className={`h-full rounded-full ${getScoreBg(score)}`}
-                                    style={{ width: `${Math.min(score, 100)}%` }}
-                                  />
-                                </div>
-                                <span className={`text-sm font-bold ${getScoreColor(score)}`}>
-                                  {score.toFixed(1)}%
-                                </span>
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <Badge
-                                variant={isShortlisted ? 'success' : 'error'}
-                                size="sm"
-                              >
-                                <span className="flex items-center gap-1">
-                                  {isShortlisted ? <CheckCircle size={12} /> : <XCircle size={12} />}
-                                  {isShortlisted ? 'Shortlisted' : 'Rejected'}
-                                </span>
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => setSelectedCandidate(candidate)}
-                                leftIcon={<Eye size={14} />}
-                              >
-                                View
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
+                <AtsResultsTable
+                  candidates={filteredCandidates}
+                  sortField={sortField}
+                  sortDirection={sortDirection}
+                  onSort={toggleSort}
+                  onView={setSelectedCandidate}
+                />
               )}
             </CardContent>
           </Card>
@@ -537,151 +682,44 @@ export function AtsScreeningPage() {
 
       {/* Candidate Detail Modal */}
       {selectedCandidate && (
-        <Modal
-          isOpen={!!selectedCandidate}
+        <AtsCandidateDetailModal
+          candidate={selectedCandidate}
           onClose={() => setSelectedCandidate(null)}
-          title="Candidate Screening Details"
-          size="lg"
+          onViewResume={openResume}
+          resumeLoading={resumeLoading}
+        />
+      )}
+
+      {/* Resume viewer */}
+      {resumeView && (
+        <Modal
+          isOpen={!!resumeView}
+          onClose={closeResume}
+          title={resumeView.name}
+          size="xl"
           footer={
-            <Button variant="ghost" onClick={() => setSelectedCandidate(null)}>
-              Close
-            </Button>
+            <>
+              <Button variant="ghost" onClick={closeResume}>
+                Close
+              </Button>
+              <Button
+                variant="outline"
+                leftIcon={<ExternalLink size={16} />}
+                onClick={() => window.open(resumeView.url, '_blank', 'noopener,noreferrer')}
+              >
+                Open in New Tab
+              </Button>
+              <Button leftIcon={<Download size={16} />} onClick={downloadResume}>
+                Download
+              </Button>
+            </>
           }
         >
-          <div className="space-y-6">
-            {/* Header with Score */}
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-xl font-bold text-[var(--text)]">
-                  {selectedCandidate.firstName} {selectedCandidate.lastName}
-                </h3>
-                <p className="text-sm text-[var(--textSecondary)] mt-0.5">
-                  {getAppEmail(selectedCandidate)}
-                </p>
-              </div>
-              <div className="text-right">
-                <div className={`text-3xl font-bold ${getScoreColor(selectedCandidate.matchPercent ?? 0)}`}>
-                  {(selectedCandidate.matchPercent ?? 0).toFixed(1)}%
-                </div>
-                <Badge
-                  variant={selectedCandidate.status === 'SHORTLISTED' ? 'success' : 'error'}
-                  size="sm"
-                >
-                  {selectedCandidate.status === 'SHORTLISTED' ? 'Shortlisted' : 'Rejected'}
-                </Badge>
-              </div>
-            </div>
-
-            {/* Score Bar */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm text-[var(--textSecondary)]">ATS Match Score</span>
-                <span className={`text-sm font-medium ${getScoreColor(selectedCandidate.matchPercent ?? 0)}`}>
-                  {(selectedCandidate.matchPercent ?? 0).toFixed(1)}%
-                </span>
-              </div>
-              <div className="h-3 rounded-full bg-[var(--border)] overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${getScoreBg(selectedCandidate.matchPercent ?? 0)}`}
-                  style={{ width: `${Math.min(selectedCandidate.matchPercent ?? 0, 100)}%` }}
-                />
-              </div>
-              <div className="flex justify-between mt-1">
-                <span className="text-xs text-[var(--textTertiary)]">0%</span>
-                <span className="text-xs text-[var(--textTertiary)] flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
-                  60% threshold
-                </span>
-                <span className="text-xs text-[var(--textTertiary)]">100%</span>
-              </div>
-            </div>
-
-            {/* Personal Details */}
-            <div>
-              <h4 className="text-sm font-semibold text-[var(--text)] mb-3">Candidate Information</h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="flex items-center gap-2 text-sm">
-                  <Mail size={16} className="text-[var(--primary)] flex-shrink-0" />
-                  <div>
-                    <p className="text-[var(--textTertiary)] text-xs">Email</p>
-                    <p className="text-[var(--text)] font-medium">{getAppEmail(selectedCandidate)}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  <Phone size={16} className="text-[var(--primary)] flex-shrink-0" />
-                  <div>
-                    <p className="text-[var(--textTertiary)] text-xs">Mobile</p>
-                    <p className="text-[var(--text)] font-medium">{selectedCandidate.mobileNumber || 'N/A'}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  <Clock size={16} className="text-[var(--primary)] flex-shrink-0" />
-                  <div>
-                    <p className="text-[var(--textTertiary)] text-xs">Experience</p>
-                    <p className="text-[var(--text)] font-medium">{selectedCandidate.experience}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  <Briefcase size={16} className="text-[var(--primary)] flex-shrink-0" />
-                  <div>
-                    <p className="text-[var(--textTertiary)] text-xs">Applied Role</p>
-                    <p className="text-[var(--text)] font-medium">{selectedCandidate.jobRole || 'N/A'}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 text-sm col-span-full">
-                  <MapPin size={16} className="text-[var(--primary)] flex-shrink-0" />
-                  <div>
-                    <p className="text-[var(--textTertiary)] text-xs">Address</p>
-                    <p className="text-[var(--text)] font-medium">{selectedCandidate.address}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Resume */}
-            {selectedCandidate.resumeFileName && (
-              <div className="flex items-center gap-3 p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
-                <FileText size={20} className="text-[var(--primary)] flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-[var(--text)]">Resume</p>
-                  <p className="text-xs text-[var(--textSecondary)] truncate">{selectedCandidate.resumeFileName}</p>
-                </div>
-              </div>
-            )}
-
-            {/* Score Interpretation */}
-            <div className={`p-4 rounded-lg border ${
-              (selectedCandidate.matchPercent ?? 0) >= 80
-                ? 'bg-[var(--successLight)] border-[var(--success)]/20'
-                : (selectedCandidate.matchPercent ?? 0) >= 60
-                  ? 'bg-[var(--warningLight)] border-[var(--warning)]/20'
-                  : 'bg-[var(--errorLight)] border-[var(--error)]/20'
-            }`}>
-              <div className="flex items-start gap-3">
-                {(selectedCandidate.matchPercent ?? 0) >= 60 ? (
-                  <TrendingUp size={20} className="text-[var(--success)] flex-shrink-0 mt-0.5" />
-                ) : (
-                  <TrendingDown size={20} className="text-[var(--error)] flex-shrink-0 mt-0.5" />
-                )}
-                <div>
-                  <p className="text-sm font-medium text-[var(--text)]">
-                    {(selectedCandidate.matchPercent ?? 0) >= 80
-                      ? 'Excellent Match'
-                      : (selectedCandidate.matchPercent ?? 0) >= 60
-                        ? 'Good Match - Above Threshold'
-                        : 'Below Threshold'}
-                  </p>
-                  <p className="text-xs text-[var(--textSecondary)] mt-1">
-                    {(selectedCandidate.matchPercent ?? 0) >= 80
-                      ? 'This candidate\'s resume strongly matches the job requirements. Highly recommended for the next stage.'
-                      : (selectedCandidate.matchPercent ?? 0) >= 60
-                        ? 'This candidate meets the minimum screening criteria. Consider for further evaluation.'
-                        : 'This candidate\'s resume does not sufficiently match the job requirements. Resume skills, experience, or education may not align.'}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
+          <iframe
+            src={resumeView.url}
+            title="Resume"
+            className="w-full h-[70vh] rounded-lg border border-[var(--border)] bg-white"
+          />
         </Modal>
       )}
     </div>

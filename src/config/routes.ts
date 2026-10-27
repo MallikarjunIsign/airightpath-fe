@@ -10,20 +10,43 @@ export const ROUTES = {
   },
   ADMIN: {
     DASHBOARD: '/admin/dashboard',
+    JOBS: '/admin/jobs',
     JOBS_CREATE: '/admin/jobs/create',
+    JOBS_EDIT: '/admin/jobs/:jobPrefix/edit',
+    jobsEdit: (jobPrefix: string) => `/admin/jobs/${encodeURIComponent(jobPrefix)}/edit`,
     CANDIDATES: '/admin/candidates',
     USERS: '/admin/users',
+    QUESTION_BANK: '/admin/question-bank',
+    userDetail: (email: string) => `/admin/users/${encodeURIComponent(email)}`,
     ATS: '/admin/ats',
     ATS_BATCH: '/admin/ats/batch',
     ASSESSMENTS_ASSIGN: '/admin/assessments/assign',
     ASSESSMENTS_UPLOAD: '/admin/assessments/upload',
     ASSESSMENTS_RESULTS: '/admin/assessments/results',
+    // One candidate's interview, every round, as a page rather than a modal —
+    // it holds full transcripts and per-area scores, which a dialog cannot show
+    // and which reviewers need to link to and come back to.
+    INTERVIEW_RESULT_DETAIL: '/admin/interviews/results/:jobPrefix/:email',
+    interviewResultDetail: (jobPrefix: string, email: string) =>
+      `/admin/interviews/results/${encodeURIComponent(jobPrefix)}/${encodeURIComponent(email)}`,
     CANDIDATE_RESULT_DETAIL: '/admin/assessments/results/:jobPrefix/:email',
+    candidateResultDetail: (jobPrefix: string, email: string) =>
+      `/admin/assessments/results/${encodeURIComponent(jobPrefix)}/${encodeURIComponent(email)}`,
     INTERVIEWS_SCHEDULE: '/admin/interviews/schedule',
     INTERVIEWS_RESULTS: '/admin/interviews/results',
     PROMPTS: '/admin/prompts',
     PROFILE: '/admin/profile',
     CHANGE_PASSWORD: '/admin/change-password',
+    /**
+     * Test Mode — a sandbox that replays the candidate experience for each
+     * assessment and interview stage. Everything it does lives in React state
+     * and is gone on refresh; nothing is written to the backend.
+     */
+    TEST_MODE: '/admin/test-mode',
+    TEST_MODE_APTITUDE: '/admin/test-mode/aptitude',
+    TEST_MODE_CODING: '/admin/test-mode/coding',
+    TEST_MODE_INTERVIEW_TECHNICAL: '/admin/test-mode/interview/technical',
+    TEST_MODE_INTERVIEW_BEHAVIORAL: '/admin/test-mode/interview/behavioral',
   },
   CANDIDATE: {
     DASHBOARD: '/candidate/dashboard',
@@ -33,6 +56,7 @@ export const ROUTES = {
     EVENTS: '/candidate/events',
     APPLICATIONS: '/candidate/applications',
     APPLY: '/candidate/apply',
+    APPLY_JOB: '/candidate/apply/:jobPrefix',
     ASSESSMENTS: '/candidate/assessments',
     INSTRUCTIONS: '/candidate/instructions',
     EXAM_APTITUDE: '/candidate/exam/aptitude',
@@ -48,3 +72,49 @@ export const ROUTES = {
     FORBIDDEN: '/forbidden',
   },
 } as const;
+
+/** Relative apply path for a specific job, e.g. `/candidate/apply/DEV-2024-001`. */
+export function applyJobPath(jobPrefix: string): string {
+  return `/candidate/apply/${encodeURIComponent(jobPrefix)}`;
+}
+
+/** Absolute, shareable apply URL for a specific job (includes the current origin). */
+export function applyJobUrl(jobPrefix: string): string {
+  return `${window.location.origin}${applyJobPath(jobPrefix)}`;
+}
+
+/**
+ * The route a signed-in user belongs on when no specific destination was asked
+ * for — after login, or when they land on a public/auth-only page. Admins get
+ * the admin dashboard, everyone else the candidate one.
+ */
+export function getDefaultDashboard(roles: readonly string[]): string {
+  const isAdmin = roles.some((r) => r === 'ADMIN' || r === 'SUPER_ADMIN');
+  return isAdmin ? ROUTES.ADMIN.DASHBOARD : ROUTES.CANDIDATE.DASHBOARD;
+}
+
+/** Routes a signed-in user must never be redirected back onto. */
+const AUTH_ONLY_PATHS: readonly string[] = [
+  ROUTES.PUBLIC.HOME,
+  ROUTES.PUBLIC.LOGIN,
+  ROUTES.PUBLIC.REGISTER,
+  ROUTES.PUBLIC.FORGOT_PASSWORD,
+  ROUTES.PUBLIC.RESET_PASSWORD,
+  ROUTES.ERRORS.UNAUTHORIZED,
+  ROUTES.ERRORS.FORBIDDEN,
+];
+
+/**
+ * Where to send a user after they sign in: back to the page that bounced them
+ * to login, or their role's dashboard. `from` is ignored when it points at an
+ * auth page, which would otherwise bounce them straight back to login.
+ */
+export function resolvePostLoginPath(
+  roles: readonly string[],
+  from?: string | null
+): string {
+  if (from && from.startsWith('/') && !AUTH_ONLY_PATHS.includes(from.split('?')[0])) {
+    return from;
+  }
+  return getDefaultDashboard(roles);
+}

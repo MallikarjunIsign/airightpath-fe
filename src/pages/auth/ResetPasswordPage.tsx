@@ -5,6 +5,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useToast } from '@/components/ui/Toast';
+import { MESSAGES } from '@/config/messages';
 import { authService } from '@/services/auth.service';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -36,7 +37,7 @@ export function ResetPasswordPage() {
 
   const onSubmit = async (data: ResetPasswordFormValues) => {
     if (!resetMethod || !resetValue) {
-      showToast('Session expired. Please start the forgot password flow again.', 'error');
+      showToast(MESSAGES.auth.sessionExpired, 'error');
       navigate(ROUTES.PUBLIC.FORGOT_PASSWORD, { replace: true });
       return;
     }
@@ -47,7 +48,7 @@ export function ResetPasswordPage() {
         : { mobile: resetValue, newPassword: data.newPassword };
 
       await authService.updatePassword(payload);
-      showToast('Password updated successfully', 'success');
+      showToast(MESSAGES.auth.passwordUpdated, 'success');
 
       localStorage.removeItem('rightpath_resetMethod');
       localStorage.removeItem('rightpath_resetValue');

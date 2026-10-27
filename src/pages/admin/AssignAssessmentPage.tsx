@@ -1,47 +1,315 @@
-import { useState, useEffect, useRef } from 'react';
-import { Loader2, ClipboardList, Send, Sparkles, Upload, Eye, FileText, X } from 'lucide-react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import {
+  Loader2,
+  ClipboardList,
+  Send,
+  Sparkles,
+  Library,
+  Upload,
+  Eye,
+  Download,
+  FileText,
+  X,
+  FileCog,
+} from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
+import { BackLink } from '@/components/ui/BackLink';
+import { QuestionBankPicker } from '@/components/admin/QuestionBankPicker';
+import { ReusePromptDialog } from '@/components/admin/ReusePromptDialog';
+import { QuestionPaperExportDialog } from '@/components/admin/QuestionPaperExportDialog';
+import { ExamDurationFields } from '@/components/admin/ExamDurationFields';
+import { PassMarkField } from '@/components/admin/PassMarkField';
+import { DEFAULT_PASS_PERCENTAGE } from '@/utils/result.utils';
+import { DateTimeInput } from '@/components/ui/DateTimeInput';
 import { Select } from '@/components/ui/Select';
+import { Badge } from '@/components/ui/Badge';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
 import { assessmentService } from '@/services/assessment.service';
-import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
+import { promptService } from '@/services/prompt.service';
+import { ROUTES } from '@/config/routes';
+import { nowDateTimeLocal, isPast } from '@/utils/datetime.utils';
+import { usePersistentState } from '@/hooks/usePersistentState';
+import { parseQuestionPaper } from '@/utils/question-paper.utils';
+import {
+  clampMinutesPerQuestion,
+  defaultMinutesPerQuestion,
+  effectiveQuestionCount,
+} from '@/utils/exam-duration.utils';
+import { MESSAGES } from '@/config/messages';
+import { APP_CONFIG } from '@/config/app.config';
+import type { JobPostDTO, JobApplicationDTO, JobApplicationStatus } from '@/types/job.types';
+
+/**
+ * Who may be assigned an exam.
+ *
+ * RECONFIRMED is the first round of the full pipeline. EXAM_SENT and
+ * EXAM_COMPLETED are here because an exam round is not always one assignment: a
+ * job may set aptitude first and add coding once it is sat, and listing only
+ * RECONFIRMED made that impossible — the candidate left this screen the moment
+ * their first paper was assigned, so their coding exam could never be created
+ * and never appeared on their assessments list.
+ *
+ * APPLIED and SHORTLISTED are the direct route. A recruiter who already wants a
+ * candidate examined can send the paper without walking them through the ack and
+ * reconfirmation round-trip; the backend shortlists an applicant as part of the
+ * assignment, so they still pass through SHORTLISTED on the way to EXAM_SENT.
+ */
+const ASSIGNABLE_STATUSES = new Set<JobApplicationStatus>([
+  'APPLIED',
+  'SHORTLISTED',
+  'RECONFIRMED',
+  'EXAM_SENT',
+  'EXAM_COMPLETED',
+]);
+
+/** Marks a candidate who already has at least one exam for this job. */
+function hasExamAlready(status: JobApplicationStatus): boolean {
+  return status === 'EXAM_SENT' || status === 'EXAM_COMPLETED';
+}
 
 interface FileState {
   file: File | null;
-  source: 'ai' | 'upload' | null;
+  source: 'ai' | 'upload' | 'bank' | null;
+}
+
+/**
+ * Every serialisable field on this form is persisted (see the `assign:` keys
+ * below), so leaving for another module and coming back no longer wipes the
+ * half-filled form. Keys are namespaced and sessionStorage-backed: per tab, and
+ * gone when the tab closes.
+ */
+const KEY = 'assign:';
+
+/**
+ * The two question papers, held outside React.
+ *
+ * A File cannot go into sessionStorage, and an AI-generated paper costs a long
+ * backend call — losing it was the expensive half of the bug. This cache
+ * outlives the component, which is the thing that unmounts when the admin
+ * visits another module, without pretending to outlive the tab. A real reload
+ * still drops it, which is what the unload guard further down warns about.
+ */
+/**
+ * Which AI generations are running, kept outside the component.
+ *
+ * Generating a paper is a minutes-long request, and an admin reasonably wanders off
+ * to another screen while it runs. The result used to be written into the
+ * component's own state — gone with the component — so the success toast appeared on
+ * some other page and the questions were nowhere when they came back, with no sign
+ * that anything had been generated or was still being generated. Now the result goes
+ * into the same module-level cache the attached papers use, and the running state
+ * lives here, so a screen that is opened mid-generation shows it and one opened
+ * after shows the paper.
+ */
+const generation = { aptitude: false, coding: false };
+const generationListeners = new Set<() => void>();
+function notifyGeneration() {
+  generationListeners.forEach((listener) => listener());
+}
+
+const paperCache: { aptitude: FileState; coding: FileState } = {
+  aptitude: { file: null, source: null },
+  coding: { file: null, source: null },
+};
+
+/** Wipe the retained form after a successful assign, so the next one starts clean. */
+function clearPaperCache(): void {
+  paperCache.aptitude = { file: null, source: null };
+  paperCache.coding = { file: null, source: null };
+}
+
+/**
+ * Questions in a paper, or null when the file isn't readable as one.
+ *
+ * Generated papers are JSON and count exactly; a PDF or Word upload doesn't,
+ * and the admin types the number instead. Either way this only drives the total
+ * shown on screen — the candidate's clock is recomputed from the real paper
+ * when the exam opens, so a wrong guess here cannot shorten anyone's exam.
+ */
+async function countQuestionsInPaper(file: File): Promise<number | null> {
+  try {
+    const paper = parseQuestionPaper(await file.text());
+    return paper.kind === 'raw' ? null : paper.items.length;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Adds the timing config for one assessment type to the assign payload.
+ *
+ * `minutesPerQuestion` is the authoritative field — it is what the exam clock is
+ * built from. The count and the total go along as `estimated*` so nobody
+ * downstream mistakes an admin's typed guess for a duration the exam must obey.
+ */
+function appendTiming(
+  form: FormData,
+  prefix: 'aptitude' | 'coding',
+  minutesPerQuestion: number,
+  detectedCount: number | null,
+  manualCount: string
+): void {
+  const minutes = clampMinutesPerQuestion(minutesPerQuestion);
+  form.append(`${prefix}MinutesPerQuestion`, String(minutes));
+
+  const count = effectiveQuestionCount(detectedCount, manualCount);
+  if (count) {
+    form.append(`${prefix}QuestionCount`, String(count));
+    form.append(`${prefix}EstimatedDurationMinutes`, String(count * minutes));
+  }
+}
+
+/**
+ * The typed pass mark as a whole number, or the default when the field is blank
+ * or nonsense. Bounds are 1-100: a paper nobody can fail is not a pass mark.
+ */
+function parsePassMark(raw: string): number {
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isFinite(value) || value <= 0 || value > 100) return DEFAULT_PASS_PERCENTAGE;
+  return value;
 }
 
 export function AssignAssessmentPage() {
   const { showToast } = useToast();
   const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Candidates to pre-select once they load (passed from the Candidate page).
+  const pendingEmailsRef = useRef<string[] | null>(null);
+  const preselectAppliedRef = useRef(false);
+  // False until the job-change effect has run once, so its first (mount) pass
+  // can be told apart from an actual change of job.
+  const mountedPrefixRef = useRef(false);
 
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
-  const [selectedPrefix, setSelectedPrefix] = useState('');
+  const [selectedPrefix, setSelectedPrefix] = usePersistentState(`${KEY}jobPrefix`, '');
   const [candidates, setCandidates] = useState<JobApplicationDTO[]>([]);
-  const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set());
-  const [startTime, setStartTime] = useState('');
-  const [deadline, setDeadline] = useState('');
+  // Persisted as an array — a Set does not survive JSON. The Set is what the
+  // rest of the screen reads, and it is derived rather than mirrored so the two
+  // can never drift apart.
+  const [selectedEmailList, setSelectedEmailList] = usePersistentState<string[]>(
+    `${KEY}selectedEmails`,
+    []
+  );
+  const selectedEmails = useMemo(() => new Set(selectedEmailList), [selectedEmailList]);
+  const [startTime, setStartTime] = usePersistentState(`${KEY}startTime`, '');
+  const [deadline, setDeadline] = usePersistentState(`${KEY}deadline`, '');
+  // Floor for the date-time pickers (computed once on mount).
+  const [minDateTime] = useState(nowDateTimeLocal);
+
+  // Shown against the fields themselves rather than only as a toast on submit,
+  // so an impossible window is visible while it is being chosen. `min` on the
+  // input does not cover a typed value, nor one that expires while the form is
+  // open — the submit guards still run, these just surface the same rules early.
+  const startInPast = !!startTime && isPast(startTime);
+  const deadlineInvalid =
+    !!deadline &&
+    (isPast(deadline) ||
+      (!!startTime && new Date(deadline).getTime() <= new Date(startTime).getTime()));
 
   // Checkbox state for assessment types
-  const [aptitudeChecked, setAptitudeChecked] = useState(false);
-  const [codingChecked, setCodingChecked] = useState(false);
+  const [aptitudeChecked, setAptitudeChecked] = usePersistentState(`${KEY}aptitudeChecked`, false);
+  const [codingChecked, setCodingChecked] = usePersistentState(`${KEY}codingChecked`, false);
 
-  // File state for each type
-  const [aptitudeFile, setAptitudeFile] = useState<FileState>({ file: null, source: null });
-  const [codingFile, setCodingFile] = useState<FileState>({ file: null, source: null });
+  // File state for each type, seeded from whatever survived the last visit.
+  const [aptitudeFile, setAptitudeFile] = useState<FileState>(() => paperCache.aptitude);
+  const [codingFile, setCodingFile] = useState<FileState>(() => paperCache.coding);
+
+  useEffect(() => {
+    paperCache.aptitude = aptitudeFile;
+  }, [aptitudeFile]);
+
+  useEffect(() => {
+    paperCache.coding = codingFile;
+  }, [codingFile]);
+
+  /**
+   * A reload is the one exit this screen cannot cover on its own: the fields
+   * come back from sessionStorage, the attached paper cannot, and regenerating
+   * one is a minutes-long AI call. So warn — but only when there is a paper to
+   * lose. An unconditional guard on a form this long would nag on every
+   * refresh, and people stop reading a prompt that always fires.
+   */
+  const hasAttachedPaper = !!aptitudeFile.file || !!codingFile.file;
+
+  useEffect(() => {
+    if (!hasAttachedPaper) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      // Browsers show their own wording and ignore this string, but setting it
+      // is still what makes the prompt appear at all.
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [hasAttachedPaper]);
+
+  // Per-question time, and the question counts used to show the resulting total.
+  const [aptitudeMinutes, setAptitudeMinutes] = usePersistentState(
+    `${KEY}aptitudeMinutes`,
+    defaultMinutesPerQuestion('APTITUDE')
+  );
+  const [codingMinutes, setCodingMinutes] = usePersistentState(
+    `${KEY}codingMinutes`,
+    defaultMinutesPerQuestion('CODING')
+  );
+  // Held as strings so the field can be emptied while typing; validated on submit.
+  const [aptitudePassMark, setAptitudePassMark] = usePersistentState(
+    `${KEY}aptitudePassMark`,
+    String(DEFAULT_PASS_PERCENTAGE)
+  );
+  const [codingPassMark, setCodingPassMark] = usePersistentState(
+    `${KEY}codingPassMark`,
+    String(DEFAULT_PASS_PERCENTAGE)
+  );
+  // Derived from the paper itself, so they come back with the cached file.
+  const [aptitudeCount, setAptitudeCount] = useState<number | null>(null);
+  const [codingCount, setCodingCount] = useState<number | null>(null);
+  const [aptitudeCountManual, setAptitudeCountManual] = usePersistentState(
+    `${KEY}aptitudeCountManual`,
+    ''
+  );
+  const [codingCountManual, setCodingCountManual] = usePersistentState(
+    `${KEY}codingCountManual`,
+    ''
+  );
+  /** Paper being exported, with the heading its document should carry. */
+  const [exporting, setExporting] = useState<{ file: File; title: string } | null>(null);
 
   // Loading states
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
-  const [generatingAptitude, setGeneratingAptitude] = useState(false);
-  const [generatingCoding, setGeneratingCoding] = useState(false);
+  // Which paper is being built from the question bank, if either.
+  const [reusePrompts, setReusePrompts] = useState(false);
+  const [bankPicker, setBankPicker] = useState<'APTITUDE' | 'CODING' | null>(null);
+  const [generatingAptitude, setGeneratingAptitude] = useState(generation.aptitude);
+  const [generatingCoding, setGeneratingCoding] = useState(generation.coding);
+
+  // Follow generations that start, finish, or finished while this screen was closed.
+  useEffect(() => {
+    const sync = () => {
+      setGeneratingAptitude(generation.aptitude);
+      setGeneratingCoding(generation.coding);
+      setAptitudeFile(paperCache.aptitude);
+      setCodingFile(paperCache.coding);
+    };
+    generationListeners.add(sync);
+    sync();
+    return () => {
+      generationListeners.delete(sync);
+    };
+  }, []);
   const [submitting, setSubmitting] = useState(false);
+
+  // Prompt types already configured for the selected job (to label Edit vs Create).
+  const [configuredPromptTypes, setConfiguredPromptTypes] = useState<Set<string>>(new Set());
 
   // File input refs
   const aptitudeInputRef = useRef<HTMLInputElement>(null);
@@ -51,14 +319,112 @@ export function AssignAssessmentPage() {
     fetchJobs();
   }, []);
 
+  // Pre-fill the job + candidates when navigated here from the Candidate page.
+  useEffect(() => {
+    if (preselectAppliedRef.current) return;
+    const navState = location.state as { jobPrefix?: string; emails?: string[] } | null;
+    if (navState?.jobPrefix) {
+      preselectAppliedRef.current = true;
+      pendingEmailsRef.current = navState.emails ?? null;
+      setSelectedPrefix(navState.jobPrefix);
+    }
+  }, [location.state, setSelectedPrefix]);
+
   useEffect(() => {
     if (selectedPrefix) {
       fetchCandidates();
     } else {
       setCandidates([]);
     }
-    setSelectedEmails(new Set());
-  }, [selectedPrefix]);
+    // Only on a real job change. On mount this effect also runs, and clearing
+    // there would throw away the very selection that was just restored from the
+    // last visit — the bug this screen is being fixed for.
+    if (mountedPrefixRef.current) {
+      setSelectedEmailList([]);
+    }
+    mountedPrefixRef.current = true;
+  }, [selectedPrefix, setSelectedEmailList]);
+
+  /**
+   * Prompt types configured for a job, upper-cased.
+   *
+   * Throws if the read fails, so each caller can decide what a failure means —
+   * the label below treats it as "none", while the generate guard treats it as
+   * "don't block". Collapsing those into one silent empty set would make a
+   * network blip look like a missing prompt.
+   */
+  const fetchPromptTypes = useCallback(async (prefix: string): Promise<Set<string>> => {
+    const res = await promptService.getByJob(prefix, { silent: true });
+    // Tolerate both a raw array and an { data: [...] } envelope; normalize case.
+    const body = res.data as unknown;
+    let list: Array<{ promptType?: string }> = [];
+    if (Array.isArray(body)) {
+      list = body;
+    } else if (Array.isArray((body as { data?: unknown })?.data)) {
+      list = (body as { data: Array<{ promptType?: string }> }).data;
+    }
+    return new Set(list.map((p) => String(p.promptType ?? '').toUpperCase()).filter(Boolean));
+  }, []);
+
+  // Track which prompts this job already has, to label the button Edit vs Create.
+  const refreshConfiguredPrompts = useCallback(
+    async (prefix: string) => {
+      if (!prefix) {
+        setConfiguredPromptTypes(new Set());
+        return;
+      }
+      try {
+        setConfiguredPromptTypes(await fetchPromptTypes(prefix));
+      } catch {
+        setConfiguredPromptTypes(new Set());
+      }
+    },
+    [fetchPromptTypes]
+  );
+
+  useEffect(() => {
+    refreshConfiguredPrompts(selectedPrefix);
+  }, [selectedPrefix, refreshConfiguredPrompts]);
+
+  // Re-check when returning to this tab (e.g. after configuring on the Prompts screen).
+  useEffect(() => {
+    const onFocus = () => refreshConfiguredPrompts(selectedPrefix);
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [selectedPrefix, refreshConfiguredPrompts]);
+
+  // Go to the Prompts screen (with this job selected) to reuse/create/edit a prompt.
+  function goToPromptScreen() {
+    if (!selectedPrefix) {
+      showToast(MESSAGES.admin.common.selectJobFirst, 'warning');
+      return;
+    }
+    navigate(ROUTES.ADMIN.PROMPTS, {
+      state: {
+        jobPrefix: selectedPrefix,
+        // Hand the context back so returning restores the job and selection.
+        from: {
+          label: 'Assign Assessment',
+          path: ROUTES.ADMIN.ASSESSMENTS_ASSIGN,
+          state: { jobPrefix: selectedPrefix, emails: Array.from(selectedEmails) },
+        },
+      },
+    });
+  }
+
+  // Apply the pending pre-selection once the candidate list has loaded.
+  useEffect(() => {
+    if (!pendingEmailsRef.current || candidates.length === 0) return;
+    const wanted = new Set(pendingEmailsRef.current);
+    const toSelect = new Set<string>();
+    candidates.forEach((c) => {
+      if (wanted.has(c.email) || (c.userEmail && wanted.has(c.userEmail))) {
+        toSelect.add(c.email);
+      }
+    });
+    if (toSelect.size > 0) setSelectedEmailList(Array.from(toSelect));
+    pendingEmailsRef.current = null;
+  }, [candidates, setSelectedEmailList]);
 
   // Clear file when checkbox unchecked
   useEffect(() => {
@@ -68,6 +434,38 @@ export function AssignAssessmentPage() {
   useEffect(() => {
     if (!codingChecked) setCodingFile({ file: null, source: null });
   }, [codingChecked]);
+
+  // Count each paper as it arrives so the admin sees the total exam time change
+  // with the paper rather than having to work it out.
+  useEffect(() => {
+    const file = aptitudeFile.file;
+    if (!file) {
+      setAptitudeCount(null);
+      return;
+    }
+    let cancelled = false;
+    countQuestionsInPaper(file).then((count) => {
+      if (!cancelled) setAptitudeCount(count);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [aptitudeFile.file]);
+
+  useEffect(() => {
+    const file = codingFile.file;
+    if (!file) {
+      setCodingCount(null);
+      return;
+    }
+    let cancelled = false;
+    countQuestionsInPaper(file).then((count) => {
+      if (!cancelled) setCodingCount(count);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [codingFile.file]);
 
   async function fetchJobs() {
     setLoadingJobs(true);
@@ -86,8 +484,14 @@ export function AssignAssessmentPage() {
     setLoadingCandidates(true);
     try {
       const res = await jobApplicationService.getByPrefix(selectedPrefix);
-      const eligible = (res.data ?? []).filter((c) => c.status === 'RECONFIRMED');
+      const eligible = (res.data ?? []).filter((c) => ASSIGNABLE_STATUSES.has(c.status));
       setCandidates(eligible);
+      // A selection restored from an earlier visit can name someone who has
+      // since been assigned and dropped off this list. They would be invisible
+      // on screen and still go out in the payload, so keep only who the fresh
+      // list still offers.
+      const offered = new Set(eligible.map((c) => c.email));
+      setSelectedEmailList((prev) => prev.filter((email) => offered.has(email)));
     } catch {
       // Error toast auto-handled by interceptor
     } finally {
@@ -96,63 +500,101 @@ export function AssignAssessmentPage() {
   }
 
   function toggleEmail(email: string) {
-    setSelectedEmails((prev) => {
-      const next = new Set(prev);
-      if (next.has(email)) next.delete(email);
-      else next.add(email);
-      return next;
-    });
+    setSelectedEmailList((prev) =>
+      prev.includes(email) ? prev.filter((e) => e !== email) : [...prev, email]
+    );
   }
 
   function toggleAll() {
     if (selectedEmails.size === candidates.length) {
-      setSelectedEmails(new Set());
+      setSelectedEmailList([]);
     } else {
-      setSelectedEmails(new Set(candidates.map((c) => c.email)));
+      setSelectedEmailList(candidates.map((c) => c.email));
+    }
+  }
+
+  /**
+   * Whether this job has a prompt of the given type, checked before generating.
+   *
+   * Generation is driven by a per-job prompt; without one the server 404s and
+   * the admin is told the "requested item couldn't be found", which names
+   * neither the prompt nor the screen that fixes it. Asking first turns that
+   * into a specific instruction — and avoids a pointless AI call.
+   *
+   * Best-effort: if the lookup itself fails we return true and let the
+   * generate attempt proceed, so a blip in this check never blocks real work.
+   */
+  async function hasPromptFor(promptType: 'APTITUDE' | 'CODING'): Promise<boolean> {
+    try {
+      // Read fresh rather than trusting `configuredPromptTypes` — that is
+      // refreshed on job change and window focus, so a prompt created in
+      // another tab without refocusing this one would read as missing and
+      // block a generate that would have worked.
+      const types = await fetchPromptTypes(selectedPrefix);
+      setConfiguredPromptTypes(types);
+      return types.has(promptType);
+    } catch {
+      return true;
     }
   }
 
   async function handleGenerateAptitude() {
     if (!selectedPrefix) {
-      showToast('Please select a job first', 'warning');
+      showToast(MESSAGES.admin.common.selectJobFirst, 'warning');
       return;
     }
-    setGeneratingAptitude(true);
+    if (generation.aptitude) return;
+    generation.aptitude = true;
+    notifyGeneration();
     try {
+      if (!(await hasPromptFor('APTITUDE'))) {
+        showToast(MESSAGES.admin.assign.promptMissing('aptitude'), 'warning');
+        return;
+      }
       const res = await assessmentService.generateQuestions(selectedPrefix);
       const json = JSON.stringify(res.data, null, 2);
       const blob = new Blob([json], { type: 'application/json' });
       const file = new File([blob], `${selectedPrefix}_aptitude_questions.json`, {
         type: 'application/json',
       });
-      setAptitudeFile({ file, source: 'ai' });
-      showToast('Aptitude questions generated successfully!', 'success');
+      // Into the cache, not only this component's state: the admin may have left.
+      paperCache.aptitude = { file, source: 'ai' };
+      showToast(MESSAGES.admin.assign.aptitudeGenerated, 'success');
     } catch {
-      // Error toast auto-handled by interceptor
+      // Error toast auto-handled by interceptor. If the prompt isn't configured,
+      // the admin can click "Create Prompt" to set it up on the Prompts screen.
     } finally {
-      setGeneratingAptitude(false);
+      generation.aptitude = false;
+      notifyGeneration();
     }
   }
 
   async function handleGenerateCoding() {
     if (!selectedPrefix) {
-      showToast('Please select a job first', 'warning');
+      showToast(MESSAGES.admin.common.selectJobFirst, 'warning');
       return;
     }
-    setGeneratingCoding(true);
+    if (generation.coding) return;
+    generation.coding = true;
+    notifyGeneration();
     try {
+      if (!(await hasPromptFor('CODING'))) {
+        showToast(MESSAGES.admin.assign.promptMissing('coding'), 'warning');
+        return;
+      }
       const res = await assessmentService.generateCodingQuestions(selectedPrefix);
       const json = JSON.stringify(res.data, null, 2);
       const blob = new Blob([json], { type: 'application/json' });
       const file = new File([blob], `${selectedPrefix}_coding_questions.json`, {
         type: 'application/json',
       });
-      setCodingFile({ file, source: 'ai' });
-      showToast('Coding questions generated successfully!', 'success');
+      paperCache.coding = { file, source: 'ai' };
+      showToast(MESSAGES.admin.assign.codingGenerated, 'success');
     } catch {
-      // Error toast auto-handled by interceptor
+      // Error toast auto-handled by interceptor.
     } finally {
-      setGeneratingCoding(false);
+      generation.coding = false;
+      notifyGeneration();
     }
   }
 
@@ -183,31 +625,57 @@ export function AssignAssessmentPage() {
 
   async function handleSubmit() {
     if (!selectedPrefix) {
-      showToast('Please select a job', 'warning');
+      showToast(MESSAGES.admin.common.selectJob, 'warning');
       return;
     }
     if (!aptitudeChecked && !codingChecked) {
-      showToast('Please select at least one assessment type', 'warning');
+      showToast(MESSAGES.admin.assign.selectAssessmentType, 'warning');
       return;
     }
     if (aptitudeChecked && !aptitudeFile.file) {
-      showToast('Please upload or generate an aptitude question paper', 'warning');
+      showToast(MESSAGES.admin.assign.aptitudePaperRequired, 'warning');
       return;
     }
     if (codingChecked && !codingFile.file) {
-      showToast('Please upload or generate a coding question paper', 'warning');
+      showToast(MESSAGES.admin.assign.codingPaperRequired, 'warning');
       return;
     }
     if (selectedEmails.size === 0) {
-      showToast('Please select at least one candidate', 'warning');
+      showToast(MESSAGES.admin.common.selectCandidate, 'warning');
+      return;
+    }
+    // Catch a mistyped allowance here rather than silently clamping it — the
+    // number decides how long every candidate gets.
+    const minPerQ = APP_CONFIG.EXAM_MIN_MINUTES_PER_QUESTION;
+    const maxPerQ = APP_CONFIG.EXAM_MAX_MINUTES_PER_QUESTION;
+    const outOfRange = (minutes: number) => minutes < minPerQ || minutes > maxPerQ;
+    if (
+      (aptitudeChecked && outOfRange(aptitudeMinutes)) ||
+      (codingChecked && outOfRange(codingMinutes))
+    ) {
+      showToast(MESSAGES.admin.assign.minutesPerQuestionInvalid(minPerQ, maxPerQ), 'warning');
       return;
     }
     if (!startTime) {
-      showToast('Please set a start time', 'warning');
+      showToast(MESSAGES.admin.assign.startTimeRequired, 'warning');
       return;
     }
     if (!deadline) {
-      showToast('Please set a deadline', 'warning');
+      showToast(MESSAGES.admin.assign.deadlineRequired, 'warning');
+      return;
+    }
+    // Reject past date/time and an out-of-order window before saving.
+    const now = Date.now();
+    if (new Date(startTime).getTime() < now) {
+      showToast(MESSAGES.admin.assign.startInPast, 'warning');
+      return;
+    }
+    if (new Date(deadline).getTime() < now) {
+      showToast(MESSAGES.admin.assign.deadlineInPast, 'warning');
+      return;
+    }
+    if (new Date(deadline).getTime() <= new Date(startTime).getTime()) {
+      showToast(MESSAGES.admin.assign.deadlineBeforeStart, 'warning');
       return;
     }
 
@@ -222,22 +690,34 @@ export function AssignAssessmentPage() {
 
       if (aptitudeChecked && aptitudeFile.file) {
         formData.append('aptitudeQuestionPaper', aptitudeFile.file);
+        appendTiming(formData, 'aptitude', aptitudeMinutes, aptitudeCount, aptitudeCountManual);
+        formData.append('aptitudePassPercentage', String(parsePassMark(aptitudePassMark)));
       }
       if (codingChecked && codingFile.file) {
         formData.append('codingQuestionPaper', codingFile.file);
+        appendTiming(formData, 'coding', codingMinutes, codingCount, codingCountManual);
+        formData.append('codingPassPercentage', String(parsePassMark(codingPassMark)));
       }
 
       await assessmentService.assignMultipart(formData);
-      showToast('Assessment assigned successfully!', 'success');
+      showToast(MESSAGES.admin.assign.assigned, 'success');
 
-      // Reset form
-      setSelectedEmails(new Set());
+      // Reset form — including everything retained for the trip to another
+      // module, so the next assign does not open pre-filled with the last one.
+      clearPaperCache();
+      setSelectedEmailList([]);
       setStartTime('');
       setDeadline('');
       setAptitudeChecked(false);
       setCodingChecked(false);
       setAptitudeFile({ file: null, source: null });
       setCodingFile({ file: null, source: null });
+      setAptitudeMinutes(defaultMinutesPerQuestion('APTITUDE'));
+      setCodingMinutes(defaultMinutesPerQuestion('CODING'));
+      setAptitudePassMark(String(DEFAULT_PASS_PERCENTAGE));
+      setCodingPassMark(String(DEFAULT_PASS_PERCENTAGE));
+      setAptitudeCountManual('');
+      setCodingCountManual('');
 
       // Refresh candidate list so assigned candidates (now EXAM_SENT) disappear
       if (selectedPrefix) fetchCandidates();
@@ -265,8 +745,11 @@ export function AssignAssessmentPage() {
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
+      {/* Shown only when another screen sent us here */}
+      <BackLink />
+
       <div>
-        <h1 className="text-3xl font-bold text-[var(--text)]">Assign Assessment</h1>
+        <h1 className="text-2xl sm:text-3xl font-bold text-[var(--text)]">Assign Assessment</h1>
         <p className="text-[var(--textSecondary)] mt-1">
           Select a job, choose candidates, and assign an assessment
         </p>
@@ -285,6 +768,8 @@ export function AssignAssessmentPage() {
             <Select
               label="Job"
               options={jobOptions}
+              searchable
+              searchPlaceholder="Search by job title or prefix..."
               value={selectedPrefix}
               onChange={(e) => setSelectedPrefix(e.target.value)}
             />
@@ -322,17 +807,56 @@ export function AssignAssessmentPage() {
                 <h3 className="text-sm font-semibold text-[var(--text)]">
                   Aptitude Question Paper
                 </h3>
-                <div className="flex flex-wrap gap-3">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleGenerateAptitude}
-                    isLoading={generatingAptitude}
-                    leftIcon={!generatingAptitude ? <Sparkles size={14} /> : undefined}
-                    disabled={submitting}
-                  >
-                    Generate via AI
-                  </Button>
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleGenerateAptitude}
+                      isLoading={generatingAptitude}
+                      leftIcon={!generatingAptitude ? <Sparkles size={14} /> : undefined}
+                      disabled={submitting}
+                    >
+                      Generate via AI
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => (selectedPrefix ? setBankPicker('APTITUDE') : showToast(MESSAGES.admin.common.selectJobFirst, 'warning'))}
+                      leftIcon={<Library size={14} />}
+                      disabled={submitting || generatingAptitude}
+                      title="Pick questions that already exist — no waiting for the AI"
+                    >
+                      Choose from Question Bank
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => (selectedPrefix ? setReusePrompts(true) : showToast(MESSAGES.admin.common.selectJobFirst, 'warning'))}
+                      leftIcon={<Library size={14} />}
+                      disabled={submitting}
+                      title="Copy another job's prompts to this job"
+                    >
+                      Reuse prompts
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={goToPromptScreen}
+                      leftIcon={<FileCog size={14} />}
+                      disabled={submitting}
+                      title="Reuse another job's prompt or create/edit this job's prompt"
+                    >
+                      {configuredPromptTypes.has('APTITUDE') ? 'Edit Prompt' : 'Create Prompt'}
+                    </Button>
+                  </div>
+
+                  <div className="flex items-center gap-3 text-xs text-[var(--textTertiary)]">
+                    <span className="h-px flex-1 bg-[var(--border)]" />
+                    or
+                    <span className="h-px flex-1 bg-[var(--border)]" />
+                  </div>
+
                   <Button
                     variant="outline"
                     size="sm"
@@ -340,7 +864,7 @@ export function AssignAssessmentPage() {
                     leftIcon={<Upload size={14} />}
                     disabled={generatingAptitude || submitting}
                   >
-                    Upload from Local
+                    Upload from Local System
                   </Button>
                   <input
                     ref={aptitudeInputRef}
@@ -358,15 +882,28 @@ export function AssignAssessmentPage() {
                       {aptitudeFile.file.name}
                     </span>
                     <span className="text-xs text-[var(--textSecondary)] flex-shrink-0">
-                      {aptitudeFile.source === 'ai' ? '(AI Generated)' : '(Uploaded)'}
+                      {aptitudeFile.source === 'ai' ? '(AI Generated)' : aptitudeFile.source === 'bank' ? '(From Question Bank)' : '(Uploaded)'}
                     </span>
                     <button
                       type="button"
                       onClick={() => viewFile(aptitudeFile.file!)}
                       className="p-1 hover:bg-[var(--surface2)] rounded text-[var(--primary)]"
-                      title="View file"
+                      title="View raw file"
                     >
                       <Eye size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExporting({
+                          file: aptitudeFile.file!,
+                          title: `${selectedPrefix} — Aptitude Question Paper`,
+                        })
+                      }
+                      className="p-1 hover:bg-[var(--surface2)] rounded text-[var(--primary)]"
+                      title="Download as PDF, Word or JSON"
+                    >
+                      <Download size={14} />
                     </button>
                     <button
                       type="button"
@@ -378,6 +915,23 @@ export function AssignAssessmentPage() {
                     </button>
                   </div>
                 )}
+
+                <ExamDurationFields
+                  type="APTITUDE"
+                  minutesPerQuestion={aptitudeMinutes}
+                  onMinutesPerQuestionChange={setAptitudeMinutes}
+                  detectedCount={aptitudeCount}
+                  manualCount={aptitudeCountManual}
+                  onManualCountChange={setAptitudeCountManual}
+                  disabled={submitting}
+                />
+
+                <PassMarkField
+                  type="APTITUDE"
+                  value={aptitudePassMark}
+                  onChange={setAptitudePassMark}
+                  disabled={submitting}
+                />
               </div>
             )}
 
@@ -387,17 +941,56 @@ export function AssignAssessmentPage() {
                 <h3 className="text-sm font-semibold text-[var(--text)]">
                   Coding Question Paper
                 </h3>
-                <div className="flex flex-wrap gap-3">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleGenerateCoding}
-                    isLoading={generatingCoding}
-                    leftIcon={!generatingCoding ? <Sparkles size={14} /> : undefined}
-                    disabled={submitting}
-                  >
-                    Generate via AI
-                  </Button>
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleGenerateCoding}
+                      isLoading={generatingCoding}
+                      leftIcon={!generatingCoding ? <Sparkles size={14} /> : undefined}
+                      disabled={submitting}
+                    >
+                      Generate via AI
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => (selectedPrefix ? setBankPicker('CODING') : showToast(MESSAGES.admin.common.selectJobFirst, 'warning'))}
+                      leftIcon={<Library size={14} />}
+                      disabled={submitting || generatingCoding}
+                      title="Pick questions that already exist — no waiting for the AI"
+                    >
+                      Choose from Question Bank
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => (selectedPrefix ? setReusePrompts(true) : showToast(MESSAGES.admin.common.selectJobFirst, 'warning'))}
+                      leftIcon={<Library size={14} />}
+                      disabled={submitting}
+                      title="Copy another job's prompts to this job"
+                    >
+                      Reuse prompts
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={goToPromptScreen}
+                      leftIcon={<FileCog size={14} />}
+                      disabled={submitting}
+                      title="Reuse another job's prompt or create/edit this job's prompt"
+                    >
+                      {configuredPromptTypes.has('CODING') ? 'Edit Prompt' : 'Create Prompt'}
+                    </Button>
+                  </div>
+
+                  <div className="flex items-center gap-3 text-xs text-[var(--textTertiary)]">
+                    <span className="h-px flex-1 bg-[var(--border)]" />
+                    or
+                    <span className="h-px flex-1 bg-[var(--border)]" />
+                  </div>
+
                   <Button
                     variant="outline"
                     size="sm"
@@ -405,7 +998,7 @@ export function AssignAssessmentPage() {
                     leftIcon={<Upload size={14} />}
                     disabled={generatingCoding || submitting}
                   >
-                    Upload from Local
+                    Upload from Local System
                   </Button>
                   <input
                     ref={codingInputRef}
@@ -423,15 +1016,28 @@ export function AssignAssessmentPage() {
                       {codingFile.file.name}
                     </span>
                     <span className="text-xs text-[var(--textSecondary)] flex-shrink-0">
-                      {codingFile.source === 'ai' ? '(AI Generated)' : '(Uploaded)'}
+                      {codingFile.source === 'ai' ? '(AI Generated)' : codingFile.source === 'bank' ? '(From Question Bank)' : '(Uploaded)'}
                     </span>
                     <button
                       type="button"
                       onClick={() => viewFile(codingFile.file!)}
                       className="p-1 hover:bg-[var(--surface2)] rounded text-[var(--primary)]"
-                      title="View file"
+                      title="View raw file"
                     >
                       <Eye size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setExporting({
+                          file: codingFile.file!,
+                          title: `${selectedPrefix} — Coding Question Paper`,
+                        })
+                      }
+                      className="p-1 hover:bg-[var(--surface2)] rounded text-[var(--primary)]"
+                      title="Download as PDF, Word or JSON"
+                    >
+                      <Download size={14} />
                     </button>
                     <button
                       type="button"
@@ -443,22 +1049,47 @@ export function AssignAssessmentPage() {
                     </button>
                   </div>
                 )}
+
+                <ExamDurationFields
+                  type="CODING"
+                  minutesPerQuestion={codingMinutes}
+                  onMinutesPerQuestionChange={setCodingMinutes}
+                  detectedCount={codingCount}
+                  manualCount={codingCountManual}
+                  onManualCountChange={setCodingCountManual}
+                  disabled={submitting}
+                />
+
+                <PassMarkField
+                  type="CODING"
+                  value={codingPassMark}
+                  onChange={setCodingPassMark}
+                  disabled={submitting}
+                />
               </div>
             )}
 
-            {/* Date/Time Pickers */}
+            {/* Exam window. Picker-only, so `min` cannot be typed past; the
+                errors still catch a window that went stale while the form sat
+                open, or one walked backwards with the arrow keys. */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Input
+              <DateTimeInput
                 label="Start Time"
-                type="datetime-local"
+                required
+                min={minDateTime}
                 value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
+                onChange={setStartTime}
+                helperText={startInPast ? undefined : 'Pick from the calendar — cannot be in the past'}
+                error={startInPast ? 'Start time cannot be in the past' : undefined}
               />
-              <Input
+              <DateTimeInput
                 label="Deadline"
-                type="datetime-local"
+                required
+                min={startTime || minDateTime}
                 value={deadline}
-                onChange={(e) => setDeadline(e.target.value)}
+                onChange={setDeadline}
+                helperText={deadlineInvalid ? undefined : 'Must be after the start time'}
+                error={deadlineInvalid ? 'Deadline must be after the start time' : undefined}
               />
             </div>
 
@@ -510,6 +1141,14 @@ export function AssignAssessmentPage() {
                             {c.email}
                           </p>
                         </div>
+                        {/* Says which of these candidates is on their second
+                            paper, so an admin assigning coding does not wonder
+                            why someone who has already sat aptitude is listed. */}
+                        {hasExamAlready(c.status) && (
+                          <Badge variant="info" size="sm" className="flex-shrink-0">
+                            {c.status === 'EXAM_COMPLETED' ? 'Exam done' : 'Exam sent'}
+                          </Badge>
+                        )}
                       </label>
                     ))}
                   </div>
@@ -530,6 +1169,35 @@ export function AssignAssessmentPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Format picker for downloading a generated paper */}
+      <ReusePromptDialog
+        isOpen={reusePrompts}
+        onClose={() => setReusePrompts(false)}
+        targetPrefix={selectedPrefix}
+        jobs={jobs}
+        onCopied={() => void refreshConfiguredPrompts(selectedPrefix)}
+      />
+
+      <QuestionBankPicker
+        isOpen={bankPicker !== null}
+        onClose={() => setBankPicker(null)}
+        jobPrefix={selectedPrefix}
+        type={bankPicker ?? 'APTITUDE'}
+        onUse={(file) => {
+          if (bankPicker === 'CODING') setCodingFile({ file, source: 'bank' });
+          else setAptitudeFile({ file, source: 'bank' });
+          showToast('Question paper built from the question bank.', 'success');
+        }}
+      />
+
+      {exporting && (
+        <QuestionPaperExportDialog
+          file={exporting.file}
+          title={exporting.title}
+          onClose={() => setExporting(null)}
+        />
+      )}
     </div>
   );
 }

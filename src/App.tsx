@@ -1,11 +1,13 @@
+import { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
-import { useRbac } from '@/hooks/useRbac';
-import { Layout, PublicLayout } from '@/components/layout/Layout';
+import { Layout } from '@/components/layout/Layout';
 import { ExamLayout } from '@/components/layout/ExamLayout';
 import { InterviewLayout } from '@/components/layout/InterviewLayout';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
+import { PublicOnlyRoute } from '@/components/auth/PublicOnlyRoute';
 import { ROUTES } from '@/config/routes';
+import { useAuth } from '@/contexts/AuthContext';
+import { recordingSync } from '@/services/recording-sync.service';
 
 // Auth pages
 import { LoginPage } from '@/pages/auth/LoginPage';
@@ -16,9 +18,12 @@ import { ChangePasswordPage } from '@/pages/auth/ChangePasswordPage';
 
 // Admin pages
 import { AdminDashboardPage } from '@/pages/admin/AdminDashboardPage';
+import { AdminJobsPage } from '@/pages/admin/AdminJobsPage';
 import { JobPostFormPage } from '@/pages/admin/JobPostFormPage';
 import { CandidateDetailsPage } from '@/pages/admin/CandidateDetailsPage';
 import { UserListPage } from '@/pages/admin/UserListPage';
+import { QuestionBankPage } from '@/pages/admin/QuestionBankPage';
+import { UserDetailsPage } from '@/pages/admin/UserDetailsPage';
 import { AtsScreeningPage } from '@/pages/admin/AtsScreeningPage';
 import { AtsBatchPage } from '@/pages/admin/AtsBatchPage';
 import { AssignAssessmentPage } from '@/pages/admin/AssignAssessmentPage';
@@ -27,7 +32,15 @@ import { ResultsPage } from '@/pages/admin/ResultsPage';
 import { CandidateResultDetailPage } from '@/pages/admin/CandidateResultDetailPage';
 import { InterviewSchedulerPage } from '@/pages/admin/InterviewSchedulerPage';
 import { InterviewResultsPage } from '@/pages/admin/InterviewResultsPage';
+import { InterviewCandidateResultPage } from '@/pages/admin/InterviewCandidateResultPage';
 import { JobPromptPage } from '@/pages/admin/JobPromptPage';
+
+// Test Mode — admin sandbox that rehearses the candidate journey (see
+// config/test-mode.ts). Nothing these pages do reaches the backend as a write.
+import { TestModeHubPage } from '@/pages/admin/testmode/TestModeHubPage';
+import { TestModeAptitudePage } from '@/pages/admin/testmode/TestModeAptitudePage';
+import { TestModeCodingPage } from '@/pages/admin/testmode/TestModeCodingPage';
+import { TestModeInterviewPage } from '@/pages/admin/testmode/TestModeInterviewPage';
 
 // Candidate pages
 import { CandidateDashboardPage } from '@/pages/candidate/CandidateDashboardPage';
@@ -45,7 +58,7 @@ import { InterviewPage } from '@/pages/candidate/InterviewPage';
 import { InterviewSummaryPage } from '@/pages/candidate/InterviewSummaryPage';
 import { ResultsListPage } from '@/pages/candidate/ResultsListPage';
 import { ResultDetailPage } from '@/pages/candidate/ResultDetailPage';
-
+import MobileConnect from './pages/candidate/MobileConnect';
 // Public pages
 import { HomePage } from '@/pages/public/HomePage';
 import { AboutPage } from '@/pages/public/AboutPage';
@@ -58,28 +71,46 @@ import { UnauthorizedPage } from '@/pages/errors/UnauthorizedPage';
 
 function App() {
   const { isAuthenticated } = useAuth();
-  const { hasAnyRole } = useRbac();
 
-  const getDefaultDashboard = () => {
-    if (hasAnyRole(['ADMIN', 'SUPER_ADMIN'])) return ROUTES.ADMIN.DASHBOARD;
-    return ROUTES.CANDIDATE.DASHBOARD;
-  };
+  // Finish any interview recording an earlier page left behind — a tab closed
+  // or reloaded mid-interview, a laptop that slept before the upload was done.
+  // It needs the candidate signed in, so it waits for that and runs on every
+  // app start.
+  useEffect(() => {
+    if (isAuthenticated) void recordingSync.resume();
+  }, [isAuthenticated]);
 
   return (
     <Routes>
-      {/* Public routes */}
-      <Route path={ROUTES.PUBLIC.HOME} element={<HomePage />} />
+      {/* Public routes. Home is signed-out only — a logged-in user landing on
+          "/" goes straight to the dashboard for their role. */}
+      <Route
+        path={ROUTES.PUBLIC.HOME}
+        element={
+          <PublicOnlyRoute>
+            <HomePage />
+          </PublicOnlyRoute>
+        }
+      />
       <Route path={ROUTES.PUBLIC.ABOUT} element={<AboutPage />} />
       <Route path={ROUTES.PUBLIC.CONTACT} element={<ContactPage />} />
-
+      <Route path="/mobile-connect" element={<MobileConnect />} />
       {/* Auth routes (redirect if already authenticated) */}
       <Route
         path={ROUTES.PUBLIC.LOGIN}
-        element={isAuthenticated ? <Navigate to={getDefaultDashboard()} /> : <LoginPage />}
+        element={
+          <PublicOnlyRoute>
+            <LoginPage />
+          </PublicOnlyRoute>
+        }
       />
       <Route
         path={ROUTES.PUBLIC.REGISTER}
-        element={isAuthenticated ? <Navigate to={getDefaultDashboard()} /> : <RegisterPage />}
+        element={
+          <PublicOnlyRoute>
+            <RegisterPage />
+          </PublicOnlyRoute>
+        }
       />
       <Route path={ROUTES.PUBLIC.FORGOT_PASSWORD} element={<ForgotPasswordPage />} />
       <Route path={ROUTES.PUBLIC.RESET_PASSWORD} element={<ResetPasswordPage />} />
@@ -95,9 +126,13 @@ function App() {
       >
         <Route index element={<Navigate to="dashboard" replace />} />
         <Route path="dashboard" element={<AdminDashboardPage />} />
+        <Route path="jobs" element={<AdminJobsPage />} />
         <Route path="jobs/create" element={<JobPostFormPage />} />
+        <Route path="jobs/:jobPrefix/edit" element={<JobPostFormPage />} />
         <Route path="candidates" element={<CandidateDetailsPage />} />
         <Route path="users" element={<UserListPage />} />
+        <Route path="question-bank" element={<QuestionBankPage />} />
+        <Route path="users/:email" element={<UserDetailsPage />} />
         <Route path="ats" element={<AtsScreeningPage />} />
         <Route path="ats/batch" element={<AtsBatchPage />} />
         <Route path="assessments/assign" element={<AssignAssessmentPage />} />
@@ -106,9 +141,29 @@ function App() {
         <Route path="assessments/results/:jobPrefix/:email" element={<CandidateResultDetailPage />} />
         <Route path="interviews/schedule" element={<InterviewSchedulerPage />} />
         <Route path="interviews/results" element={<InterviewResultsPage />} />
+        {/* Declared after the list so the bare path still matches it. */}
+        <Route
+          path="interviews/results/:jobPrefix/:email"
+          element={<InterviewCandidateResultPage />}
+        />
         <Route path="prompts" element={<JobPromptPage />} />
+        <Route path="test-mode" element={<TestModeHubPage />} />
+        <Route path="test-mode/aptitude" element={<TestModeAptitudePage />} />
+        <Route path="test-mode/coding" element={<TestModeCodingPage />} />
+        {/* Phase is a prop, not a URL param: only these two phases are
+            rehearsable, and a typo in the path should 404 rather than render an
+            interview with no script. */}
+        <Route
+          path="test-mode/interview/technical"
+          element={<TestModeInterviewPage phase="TECHNICAL" />}
+        />
+        <Route
+          path="test-mode/interview/behavioral"
+          element={<TestModeInterviewPage phase="BEHAVIORAL" />}
+        />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="change-password" element={<ChangePasswordPage />} />
+
       </Route>
 
       {/* Exam routes (no sidebar/navbar — lockdown mode) */}
@@ -154,6 +209,8 @@ function App() {
         <Route path="events" element={<EventsPage />} />
         <Route path="applications" element={<MyApplicationsPage />} />
         <Route path="apply" element={<JobApplicationPage />} />
+        {/* Shareable per-job apply link (loads the job by prefix from the URL) */}
+        <Route path="apply/:jobPrefix" element={<JobApplicationPage />} />
         <Route path="assessments" element={<AssessmentListPage />} />
         <Route path="instructions" element={<ExamInstructionsPage />} />
         <Route path="interviews" element={<InterviewListPage />} />

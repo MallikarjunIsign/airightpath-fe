@@ -14,6 +14,7 @@ import {
   Phone,
   Mail,
   Tag,
+  UserPlus,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { jobApplicationService } from '@/services/job-application.service';
@@ -21,10 +22,14 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/ui/Modal';
 import { ROUTES } from '@/config/routes';
 import { formatDate } from '@/utils/format.utils';
-import type { JobApplicationDTO, JobApplicationStatus } from '@/types/job.types';
+import { usePersistentState } from '@/hooks/usePersistentState';
+import { hasReferral } from '@/utils/referral.utils';
+import { ReferralFields } from '@/components/application/ReferralFields';
+import type { JobApplicationDTO } from '@/types/job.types';
 
 const STATUS_CONFIG: Record<
   string,
@@ -54,8 +59,8 @@ export function MyApplicationsPage() {
 
   const [applications, setApplications] = useState<JobApplicationDTO[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
+  const [searchQuery, setSearchQuery] = usePersistentState('myApplications:searchQuery', '');
+  const [filterStatus, setFilterStatus] = usePersistentState('myApplications:filterStatus', '');
   const [selectedApp, setSelectedApp] = useState<JobApplicationDTO | null>(null);
 
   useEffect(() => {
@@ -136,18 +141,17 @@ export function MyApplicationsPage() {
           />
         </div>
         <div className="sm:w-48">
-          <select
-            className="w-full px-4 py-2 rounded-lg appearance-none bg-[var(--inputBg)] border border-[var(--inputBorder)] text-[var(--text)] focus:outline-none focus:ring-2 focus:ring-[var(--inputFocus)] focus:border-transparent transition-all duration-200"
+          <Select
+            options={[
+              { value: '', label: 'All Statuses' },
+              ...statuses.map((status) => ({
+                value: status,
+                label: STATUS_CONFIG[status]?.label ?? status,
+              })),
+            ]}
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
-          >
-            <option value="">All Statuses</option>
-            {statuses.map((status) => (
-              <option key={status} value={status}>
-                {STATUS_CONFIG[status]?.label ?? status}
-              </option>
-            ))}
-          </select>
+          />
         </div>
       </div>
 
@@ -220,6 +224,14 @@ export function MyApplicationsPage() {
                       <div className="flex items-center gap-2 text-sm text-[var(--textSecondary)]">
                         <FileText size={14} className="flex-shrink-0" />
                         <span className="truncate">Resume: {app.resumeFileName}</span>
+                      </div>
+                    )}
+                    {hasReferral(app.referralName, app.referralId) && (
+                      <div className="flex items-center gap-2 text-sm text-[var(--textSecondary)]">
+                        <UserPlus size={14} className="flex-shrink-0" />
+                        <span className="truncate">
+                          Referral: {app.referralName?.trim() || app.referralId?.trim()}
+                        </span>
                       </div>
                     )}
                   </div>
@@ -339,6 +351,11 @@ export function MyApplicationsPage() {
                     <p className="text-[var(--text)] font-medium">{selectedApp.jobRole}</p>
                   </div>
                 </div>
+                <ReferralFields
+                  referralName={selectedApp.referralName}
+                  referralId={selectedApp.referralId}
+                  alwaysShow
+                />
               </div>
             </div>
 

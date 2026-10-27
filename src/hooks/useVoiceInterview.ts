@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { interviewWsService } from "@/services/interview-ws.service";
 import { aiService } from "@/services/ai.service";
+import { getAccessToken } from "@/services/api.service";
 import { APP_CONFIG } from "@/config/app.config";
 import { useAudioStreaming } from "./useAudioStreaming";
 import { useAudioPlayback } from "./useAudioPlayback";
@@ -18,15 +19,60 @@ import type {
   WordTimestamp,
 } from "@/types/interview.types";
 
+/**
+ * The restored transcript, ending on the question now being asked.
+ *
+ * The server's history already ends with that question in the ordinary case —
+ * the candidate was cut off while thinking — so it is replaced rather than
+ * appended to, or the candidate sees it twice. Where the reload landed after an
+ * answer but before the reply reached them, the history ends on their answer
+ * and the new question genuinely belongs on the end.
+ *
+ * `currentTurn` is preferred over the stored copy because it carries the coding
+ * flag and is the exact text being spoken aloud.
+ */
+function withCurrentTurn(
+  history: ConversationEntry[] | null,
+  currentTurn: ConversationEntry,
+): ConversationEntry[] {
+  if (!history?.length) return [currentTurn];
+  const lastWasQuestion = history[history.length - 1].role === "interviewer";
+  return lastWasQuestion
+    ? [...history.slice(0, -1), currentTurn]
+    : [...history, currentTurn];
+}
+
 export function useVoiceInterview() {
   // State
   const [state, setState] = useState<VoiceInterviewState>("pre-start");
   const [scheduleId, setScheduleId] = useState<number | null>(null);
+  /**
+   * The same id, readable from a callback that was built before it arrived.
+   *
+   * Every STOMP destination in this hook embeds the schedule id, and the id
+   * only exists after `startInterview` has answered — so a callback memoised on
+   * the first render captures `null` and publishes to
+   * `/app/interview/null/submit-answer`, which matches no `@MessageMapping`.
+   * The message is dropped without a reply, the UI waits in `processing`, and
+   * the candidate is told "Response timed out" however many times they try.
+   * Reading through a ref keeps the destination correct no matter when the
+   * callback was created.
+   */
+  const scheduleIdRef = useRef<number | null>(null);
   const [interviewerName, setInterviewerName] = useState("Sarah");
   const [conversation, setConversation] = useState<ConversationEntry[]>([]);
   const [questionsAsked, setQuestionsAsked] = useState(0);
   const [streamingText, setStreamingText] = useState("");
   const [isWsConnected, setIsWsConnected] = useState(false);
+  /**
+   * Whether the interview socket has ever been up.
+   *
+   * The "Connection lost" banner keys off this. Without it the banner shows
+   * from the moment the interview screen renders — including when the real
+   * failure was the start call, which has nothing to do with the network.
+   */
+  const [hasEverConnected, setHasEverConnected] = useState(false);
+  const [reconnectAttempts, setReconnectAttempts] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [evaluation, setEvaluation] = useState<VoiceEvaluationResult | null>(
     null,
@@ -41,14 +87,31 @@ export function useVoiceInterview() {
     null,
   );
   const [lastQuestionText, setLastQuestionText] = useState<string | null>(null);
+  /**
+   * The spoken question, chunk by chunk, for the replay control.
+   *
+   * A ref rather than state: it is written on every audio frame and read only
+   * when the candidate asks to hear the question again, so re-rendering the
+   * interview on each chunk would cost a great deal and change nothing.
+   */
+  const questionAudioRef = useRef<Map<number, string>>(new Map());
 
   // Coding question state
   const [isCodingQuestion, setIsCodingQuestion] = useState(false);
   const [codeContent, setCodeContent] = useState("");
   const [codeLanguage, setCodeLanguage] = useState("java");
+  /**
+   * What the candidate's code printed the last time they ran it.
+   *
+   * Lives here rather than in the page because it has to travel with the answer:
+   * the Compile & Run output used to be page-local state, so the interviewer was
+   * sent the source and never learned whether it worked.
+   */
+  const [codeOutput, setCodeOutput] = useState("");
 
   // Audio hooks
-  const audioStreaming = useAudioStreaming();
+  // Takes the id only; the email was being passed and silently discarded.
+  const audioStreaming = useAudioStreaming(scheduleId);
   const audioPlayback = useAudioPlayback();
 
   // Stable refs for audio playback functions (avoid recreating callbacks on every render)
@@ -77,236 +140,289 @@ export function useVoiceInterview() {
     [],
   );
 
+  /**
+   * Publish to one of this interview's destinations.
+   *
+   * Deliberately takes only the action, so no caller can assemble a destination
+   * with a stale or missing id, and refuses to send at all before the id is
+   * known — a dropped message with a warning beats one silently addressed to
+   * `null`.
+   */
+  const sendToInterview = useCallback(
+    (action: string, body: Record<string, unknown>) => {
+      const id = scheduleIdRef.current;
+      if (id === null) {
+        console.warn(`Ignoring "${action}" — the interview has not started yet.`);
+        return;
+      }
+      interviewWsService.send(`/app/interview/${id}/${action}`, body);
+    },
+    [],
+  );
+
   // Subscribe to WebSocket topics
-  const setupSubscriptions = useCallback(() => {
-    // Real-time transcription from Whisper
-    interviewWsService.subscribe(
-      "transcription",
-      (msg: TranscriptionMessage) => {
-        transcriptRef.current += (transcriptRef.current ? " " : "") + msg.text;
-        setCurrentTranscript(transcriptRef.current);
-        if (msg.words) {
-          wordTimestampsRef.current.push(...msg.words);
-        }
-      },
-    );
-
-    // AI response tokens (streaming)
-    interviewWsService.subscribe("ai-token", (msg: AITokenMessage) => {
-      if (msg.done) {
-        const rawText = msg.fullText || streamingTextRef.current;
-        streamingTextRef.current = "";
-        setStreamingText("");
-
-        // Detect and strip question type tags
-        const { cleanText: fullText, isCoding } =
-          detectAndCleanCodingTag(rawText);
-
-        setIsCodingQuestion(isCoding);
-
-        // Always reset editor when question changes
-        setCodeContent("");
-
-        if (!isCoding) {
-          setCodeLanguage("java"); // optional reset
-        }
-
-        // Item 14: Store last question for repeat
-        setLastQuestionText(fullText);
-
-        setConversation((prev) => {
-          const filtered = prev.filter((e) => !e.isStreaming);
-          return [
-            ...filtered,
-            {
-              role: "interviewer" as const,
-              content: fullText,
-              timestamp: new Date().toISOString(),
-              isCodingQuestion: isCoding,
-            },
-          ];
-        });
-      } else {
-        streamingTextRef.current += msg.token;
-        setStreamingText(streamingTextRef.current);
-
-        setConversation((prev) => {
-          const filtered = prev.filter((e) => !e.isStreaming);
-          return [
-            ...filtered,
-            {
-              role: "interviewer" as const,
-              content: streamingTextRef.current,
-              timestamp: new Date().toISOString(),
-              isStreaming: true,
-            },
-          ];
-        });
-      }
-    });
-
-    // TTS audio chunks - Item 14: Store for repeat
-    interviewWsService.subscribe("tts-audio", (msg: TTSAudioMessage) => {
-      if (msg.isLast || msg.chunkIndex === 0) {
-        setLastQuestionAudio(msg.audio);
-      }
-      enqueueAudioRef.current(msg.audio, msg.text, msg.isLast);
-    });
-
-    // TTS fallback (browser TTS)
-    interviewWsService.subscribe("tts-fallback", (msg: TTSFallbackMessage) => {
-      playBrowserTTSRef.current(msg.text);
-    });
-
-    // Filler messages
-    interviewWsService.subscribe("filler", (msg: FillerMessage) => {
-      setConversation((prev) => [
-        ...prev,
-        {
-          role: "filler" as const,
-          content: msg.text,
-          timestamp: new Date().toISOString(),
+  const setupSubscriptions = useCallback(
+    (id: number) => {
+      // Real-time transcription from Whisper
+      interviewWsService.subscribe(
+        `/topic/interview/${id}/transcription`,
+        (msg: TranscriptionMessage) => {
+          transcriptRef.current +=
+            (transcriptRef.current ? " " : "") + msg.text;
+          setCurrentTranscript(transcriptRef.current);
+          if (msg.words) {
+            wordTimestampsRef.current.push(...msg.words);
+          }
         },
-      ]);
-    });
+      );
 
-    // // Response complete
-    // interviewWsService.subscribe(
-    //   "response-complete",
-    //   (msg: ResponseCompleteMessage) => {
-    //     // Clear processing timeout — response arrived
-    //     if (processingTimeoutRef.current) {
-    //       clearTimeout(processingTimeoutRef.current);
-    //       processingTimeoutRef.current = null;
-    //     }
+      // AI response tokens (streaming)
+      interviewWsService.subscribe(
+        `/topic/interview/${id}/ai-token`,
+        (msg: AITokenMessage) => {
+          if (msg.done) {
+            const rawText = msg.fullText || streamingTextRef.current;
+            streamingTextRef.current = "";
+            setStreamingText("");
 
-    //     if (msg.error) {
-    //       setState("active");
-    //       setError(
-    //         "Something went wrong processing your answer. Please try again.",
-    //       );
-    //       return;
-    //     }
+            // Detect and strip question type tags
+            const { cleanText: fullText, isCoding } =
+              detectAndCleanCodingTag(rawText);
 
-    //     setQuestionsAsked(msg.questionsAsked);
-
-    //     if (msg.isComplete || msg.terminated) {
-    //       setState("completed");
-    //     } else {
-    //       setState("active");
-    //     }
-    //   },
-    // );
-
-    // In useVoiceInterview.ts - response-complete subscription
-    interviewWsService.subscribe(
-      "response-complete",
-      (msg: ResponseCompleteMessage) => {
-        if (processingTimeoutRef.current) {
-          clearTimeout(processingTimeoutRef.current);
-          processingTimeoutRef.current = null;
-        }
-
-        if (msg.error) {
-          setState((prev) => (prev === "completed" ? prev : "active"));
-          setError(
-            "Something went wrong processing your answer. Please try again.",
-          );
-          return;
-        }
-
-        if (msg.response) {
-          const responseText = msg.response;
-          // 1. Handle retry message (language warning)
-          if (responseText.startsWith("RETRY:")) {
-            const retryMessage = responseText.replace("RETRY:", "").trim();
-            setConversation((prev) => [
-              ...prev,
-              {
-                role: "system",
-                content: retryMessage,
-                timestamp: new Date().toISOString(),
-              },
-            ]);
-            // Stay in active state – same question remains
-            setState("active");
-            return;
-          }
-
-          // 2. Check if this is the final summary (no "FEEDBACK:" prefix)
-          if (!responseText.startsWith("FEEDBACK:")) {
-            // Final summary
-            setConversation((prev) => [
-              ...prev,
-              {
-                role: "interviewer",
-                content: responseText,
-                timestamp: new Date().toISOString(),
-              },
-            ]);
-            setState("completed");
-            return;
-          }
-
-          // 3. Normal feedback + next question
-          const feedbackMatch = responseText.match(
-            /FEEDBACK:\s*(.*?)\s*NEXT QUESTION:\s*(.*)/s,
-          );
-          if (feedbackMatch) {
-            const feedback = feedbackMatch[1].trim();
-            const nextQuestion = feedbackMatch[2].trim();
-
-            // Add feedback as a system message
-            setConversation((prev) => [
-              ...prev,
-              {
-                role: "system",
-                content: feedback,
-                timestamp: new Date().toISOString(),
-              },
-            ]);
-
-            // Add the next question as interviewer message
-            const { cleanText: nextQuestionClean, isCoding } =
-              detectAndCleanCodingTag(nextQuestion);
             setIsCodingQuestion(isCoding);
+
+            // Always reset editor when question changes
             setCodeContent("");
-            setLastQuestionText(nextQuestionClean);
+
+            if (!isCoding) {
+              setCodeLanguage("java"); // optional reset
+            }
+
+            // Item 14: Store last question for repeat
+            setLastQuestionText(fullText);
+
+            setConversation((prev) => {
+              const filtered = prev.filter((e) => !e.isStreaming);
+              return [
+                ...filtered,
+                {
+                  role: "interviewer" as const,
+                  content: fullText,
+                  timestamp: new Date().toISOString(),
+                  isCodingQuestion: isCoding,
+                },
+              ];
+            });
+          } else {
+            streamingTextRef.current += msg.token;
+            setStreamingText(streamingTextRef.current);
+
+            setConversation((prev) => {
+              const filtered = prev.filter((e) => !e.isStreaming);
+              return [
+                ...filtered,
+                {
+                  role: "interviewer" as const,
+                  content: streamingTextRef.current,
+                  timestamp: new Date().toISOString(),
+                  isStreaming: true,
+                },
+              ];
+            });
+          }
+        },
+      );
+
+      // TTS audio chunks, kept so the question can be replayed.
+      //
+      // Every chunk, not one of them. A question is spoken as several sentence
+      // batches, and only chunk 0 or the last chunk used to be stored — so
+      // "say it again" replayed a fragment of the question rather than the
+      // question. Keyed by index because replaying them out of order would be
+      // worse than not replaying at all.
+      interviewWsService.subscribe(
+        `/topic/interview/${id}/tts-audio`,
+        (msg: TTSAudioMessage) => {
+          if (msg.chunkIndex === 0) {
+            questionAudioRef.current.clear();
+          }
+          if (msg.audio) {
+            questionAudioRef.current.set(msg.chunkIndex, msg.audio);
+          }
+          enqueueAudioRef.current(msg.audio, msg.text, msg.isLast);
+        },
+      );
+
+      // TTS fallback (browser TTS)
+      interviewWsService.subscribe(
+        `/topic/interview/${id}/tts-fallback`,
+        (msg: TTSFallbackMessage) => {
+          playBrowserTTSRef.current(msg.text);
+        },
+      );
+
+      // Filler messages
+      interviewWsService.subscribe(
+        `/topic/interview/${id}/filler`,
+        (msg: FillerMessage) => {
+          setConversation((prev) => [
+            ...prev,
+            {
+              role: "filler" as const,
+              content: msg.text,
+              timestamp: new Date().toISOString(),
+            },
+          ]);
+        },
+      );
+
+      // // Response complete
+      // interviewWsService.subscribe(
+      //   "response-complete",
+      //   (msg: ResponseCompleteMessage) => {
+      //     // Clear processing timeout — response arrived
+      //     if (processingTimeoutRef.current) {
+      //       clearTimeout(processingTimeoutRef.current);
+      //       processingTimeoutRef.current = null;
+      //     }
+
+      //     if (msg.error) {
+      //       setState("active");
+      //       setError(
+      //         "Something went wrong processing your answer. Please try again.",
+      //       );
+      //       return;
+      //     }
+
+      //     setQuestionsAsked(msg.questionsAsked);
+
+      //     if (msg.isComplete || msg.terminated) {
+      //       setState("completed");
+      //     } else {
+      //       setState("active");
+      //     }
+      //   },
+      // );
+
+      // In useVoiceInterview.ts - response-complete subscription
+      interviewWsService.subscribe(
+        `/topic/interview/${id}/response-complete`,
+        (msg: ResponseCompleteMessage) => {
+          if (processingTimeoutRef.current) {
+            clearTimeout(processingTimeoutRef.current);
+            processingTimeoutRef.current = null;
+          }
+
+          if (msg.error) {
+            setState((prev) => (prev === "completed" ? prev : "active"));
+            setError(
+              "Something went wrong processing your answer. Please try again.",
+            );
+            return;
+          }
+
+          if (msg.response) {
+            const responseText = msg.response;
+            // 1. Handle retry message (language warning)
+            if (responseText.startsWith("RETRY:")) {
+              const retryMessage = responseText.replace("RETRY:", "").trim();
+              setConversation((prev) => [
+                ...prev,
+                {
+                  role: "system",
+                  content: retryMessage,
+                  timestamp: new Date().toISOString(),
+                },
+              ]);
+              // Stay in active state – same question remains
+              setState("active");
+              return;
+            }
+
+            // 2. The interviewer's turn.
+            //
+            // Whether the interview is over is decided by msg.isComplete
+            // below, never by the shape of this text. It used to be inferred
+            // from the absence of a "FEEDBACK:" prefix, which was true of the
+            // old fixed-question protocol and became true of every reply once
+            // questions were generated — so the interview "completed" the
+            // moment the candidate answered the first question.
+            const { cleanText, isCoding } = detectAndCleanCodingTag(responseText);
+
+            setIsCodingQuestion(isCoding);
+            if (isCoding) {
+              setCodeContent("");
+              // Cleared with the editor: output from the previous problem would
+              // otherwise be submitted as evidence for this one.
+              setCodeOutput("");
+            }
+            setLastQuestionText(cleanText);
+            // The previous question's audio must not outlive it: a turn that is
+            // never spoken (a code-explanation question skips TTS) would
+            // otherwise leave "say it again" replaying the question before it.
+            questionAudioRef.current.clear();
 
             setConversation((prev) => [
               ...prev,
               {
                 role: "interviewer",
-                content: nextQuestionClean,
+                content: cleanText,
                 timestamp: new Date().toISOString(),
                 isCodingQuestion: isCoding,
               },
             ]);
           }
-        }
 
-        setQuestionsAsked(msg.questionsAsked);
+          setQuestionsAsked(msg.questionsAsked);
 
-        if (msg.isComplete || msg.terminated) {
-          setState("completed");
-        } else {
-          setState((prev) => (prev === "completed" ? prev : "active"));
-        }
-      },
-    );
+          if (msg.isComplete || msg.terminated) {
+            setState("completed");
+          } else {
+            setState((prev) => (prev === "completed" ? prev : "active"));
+          }
+        },
+      );
 
-    // Transcription errors
-    interviewWsService.subscribe(
-      "transcription-error",
-      (msg: { error: string }) => {
-        console.error("Transcription error:", msg.error);
-        setTranscriptionError(msg.error);
-        setTimeout(() => setTranscriptionError(null), 5000);
-      },
-    );
-  }, []);
+      // Transcription errors
+      interviewWsService.subscribe(
+        `/topic/interview/${id}/transcription-error`,
+        (msg: { error: string }) => {
+          console.error("Transcription error:", msg.error);
+          setTranscriptionError(msg.error);
+          setTimeout(() => setTranscriptionError(null), 5000);
+        },
+      );
+    },
+    [detectAndCleanCodingTag],
+  );
 
   // Start interview
+  /**
+   * The transcript the server has for this interview, or null if it cannot be
+   * read.
+   *
+   * <p>Null rather than throwing: a resumed interview with no history on screen
+   * is a poor experience, but an interview that refuses to restart because a
+   * history fetch failed is a lost one. The candidate carries on either way.</p>
+   */
+  const loadConversationHistory = useCallback(
+    async (id: number): Promise<ConversationEntry[] | null> => {
+      try {
+        const { data } = await aiService.resumeVoiceInterview(id);
+        if (!data?.hasActiveSession || !data.conversationHistory?.length) return null;
+        return data.conversationHistory.map((entry) => ({
+          role: entry.role === "candidate" ? "candidate" : "interviewer",
+          content: detectAndCleanCodingTag(entry.content).cleanText,
+          timestamp: entry.timestamp,
+        }));
+      } catch (err) {
+        console.warn("Could not load the earlier transcript", err);
+        return null;
+      }
+    },
+    [detectAndCleanCodingTag],
+  );
+
   const startInterview = useCallback(
     async (request: StartInterviewRequest) => {
       try {
@@ -315,6 +431,7 @@ export function useVoiceInterview() {
 
         const { data: response } = await aiService.startVoiceInterview(request);
         setScheduleId(response.scheduleId);
+        scheduleIdRef.current = response.scheduleId;
         setInterviewerName(response.interviewerName);
 
         // Detect and strip question type tags from first question
@@ -324,6 +441,7 @@ export function useVoiceInterview() {
         setIsCodingQuestion(isCoding);
         if (isCoding) {
           setCodeContent("");
+          setCodeOutput("");
         }
 
         // Item 14: Store first question for repeat
@@ -332,27 +450,53 @@ export function useVoiceInterview() {
           setLastQuestionAudio(response.firstQuestionAudio);
         }
 
-        // Add first question to conversation
-        setConversation([
-          {
-            role: "interviewer",
-            content: firstQuestion,
-            timestamp: new Date().toISOString(),
-            isCodingQuestion: isCoding,
-          },
-        ]);
+        // The turn they are being asked now — the tail of the transcript on a
+        // resume, the whole of it on a fresh start.
+        const currentTurn: ConversationEntry = {
+          role: "interviewer",
+          content: firstQuestion,
+          timestamp: new Date().toISOString(),
+          isCodingQuestion: isCoding,
+        };
 
-        // Connect WebSocket
-        interviewWsService.connect(
-          response.scheduleId,
-          () => {
+        if (response.resumed) {
+          // Everything said before the interruption, put back on screen. The
+          // server kept it all along; only this browser had lost it, and a
+          // candidate coming back to a blank screen has no way to know that.
+          const history = await loadConversationHistory(response.scheduleId);
+          setConversation(withCurrentTurn(history, currentTurn));
+          setQuestionsAsked(response.questionsAsked ?? 0);
+        } else {
+          setConversation([currentTurn]);
+          setQuestionsAsked(0);
+        }
+
+        interviewWsService.disconnect();
+        // Connect WebSocket with both scheduleId and JWT token
+        const token = getAccessToken();
+
+        if (!token) {
+          console.error("❌ No JWT token found. WebSocket connection blocked.");
+          return;
+        }
+
+        interviewWsService.connect({
+          scheduleId: response.scheduleId,
+          token: token, // REQUIRED
+          email: request.email,
+          mobileToken: request.mobileToken || undefined, 
+      
+          onConnect: () => {
             setIsWsConnected(true);
-            setupSubscriptions();
+            setHasEverConnected(true);
+            setReconnectAttempts(0);
+            setupSubscriptions(response.scheduleId);
           },
-          () => {
+          onDisconnect: () => {
             setIsWsConnected(false);
           },
-        );
+          onReconnectAttempt: setReconnectAttempts,
+        });
 
         // Play first question audio
         if (response.firstQuestionAudio) {
@@ -366,6 +510,10 @@ export function useVoiceInterview() {
         }
 
         setState("active");
+        // Returned rather than exposed as state: the caller is already awaiting
+        // this, and a flag it has to watch for separately is a flag it can miss.
+        return { resumed: !!response.resumed, expiresAt: response.expiresAt };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
         console.error("Failed to start interview:", err);
         setError(
@@ -374,9 +522,10 @@ export function useVoiceInterview() {
             "Failed to start interview",
         );
         setState("error");
+        return null;
       }
     },
-    [setupSubscriptions],
+    [setupSubscriptions, loadConversationHistory, detectAndCleanCodingTag],
   );
 
   // Start answering (recording)
@@ -387,11 +536,11 @@ export function useVoiceInterview() {
 
     // Interrupt any playing audio
     audioPlayback.stopPlayback();
-    interviewWsService.send("interrupt", { reason: "candidate_speaking" });
+    sendToInterview("interrupt", { reason: "candidate_speaking" });
 
     await audioStreaming.startRecording();
     setState("answering");
-  }, [audioStreaming, audioPlayback]);
+  }, [audioStreaming, audioPlayback, sendToInterview]);
 
   // Submit answer — stops recording, waits for final transcription, then sends
   const submitAnswer = useCallback(
@@ -417,7 +566,26 @@ export function useVoiceInterview() {
       }
 
       const transcript = manualTranscript || transcriptRef.current;
-      if (!transcript.trim()) {
+
+      // Code counts as an answer on its own. A coding question can be answered
+      // entirely in the editor, and requiring speech as well left a candidate
+      // with a working solution no way to submit it.
+      if (!transcript.trim() && !codeContent.trim()) {
+        // Say so. This used to return to "active" in silence: the candidate had
+        // spoken, nothing was transcribed, no question advanced and no reason
+        // was given — which reads exactly like an interview stuck on its first
+        // question. The turn is not sent, because an empty answer would be
+        // graded as one.
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content:
+              "We did not catch that — nothing was recorded. Check your microphone, then press the mic and answer again.",
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+        setError("Your answer was not recorded. Please try again.");
         setState("active");
         return;
       }
@@ -425,16 +593,20 @@ export function useVoiceInterview() {
       // Capture current code state before resetting
       const submittedCode = codeContent;
       const submittedLanguage = codeLanguage;
+      const submittedOutput = codeOutput;
 
       // Add candidate answer to conversation
       setConversation((prev) => [
         ...prev,
         {
           role: "candidate",
-          content: transcript,
+          // The bubble needs words. An empty string renders as a blank box,
+          // which reads as a failed submission rather than a code-only answer.
+          content: transcript.trim() || "(Submitted code without a spoken explanation)",
           timestamp: new Date().toISOString(),
           codeContent: submittedCode || undefined,
           codeLanguage: submittedCode ? submittedLanguage : undefined,
+          codeOutput: submittedCode ? submittedOutput || undefined : undefined,
         },
       ]);
 
@@ -446,9 +618,15 @@ export function useVoiceInterview() {
       if (submittedCode) {
         payload.codeContent = submittedCode;
         payload.codeLanguage = submittedLanguage;
+        // Sent only when they actually ran it. The server reads an absent value
+        // as "never run" and tells the model so explicitly.
+        if (submittedOutput.trim()) {
+          payload.codeOutput = submittedOutput;
+        }
       }
-      interviewWsService.send("submit-answer", payload);
+      sendToInterview("submit-answer", payload);
 
+      setError(null);
       setState("processing");
 
       // Start safety timeout — if response-complete never arrives, recover the UI
@@ -459,13 +637,14 @@ export function useVoiceInterview() {
         setError("Response timed out. Please try answering again.");
       }, APP_CONFIG.INTERVIEW_PROCESSING_TIMEOUT_MS);
     },
-    [audioStreaming, codeContent, codeLanguage],
+    [audioStreaming, codeContent, codeLanguage, codeOutput, sendToInterview],
   );
 
   // Skip question — sends a skipped answer bypassing the empty-transcript guard
   const skipQuestion = useCallback(() => {
     setIsCodingQuestion(false);
     setCodeContent("");
+    setCodeOutput("");
 
     setConversation((prev) => [
       ...prev,
@@ -477,7 +656,7 @@ export function useVoiceInterview() {
     ]);
 
     // Send only the answer (empty) with skip flag
-    interviewWsService.send("submit-answer", {
+    sendToInterview("submit-answer", {
       transcript: "",
       wordTimestamps: [],
       skipped: true,
@@ -492,23 +671,68 @@ export function useVoiceInterview() {
       setState("active");
       setError("Response timed out. Please try answering again.");
     }, APP_CONFIG.INTERVIEW_PROCESSING_TIMEOUT_MS);
-  }, []);
+  }, [sendToInterview]);
 
   // Send proctoring event
-  const sendProctoringEvent = useCallback((type: string, details: string) => {
-    interviewWsService.send("proctoring-event", { type, details });
-  }, []);
+  //
+  // Queued until it can actually go. The socket's `send` drops a message
+  // silently when the connection is not up yet, and the events fired in the
+  // first moments of an interview — what recording the deployment requires,
+  // that the camera started — are exactly the ones that run before it is. They
+  // never reached the reviewer's log, which is how a recording audit came to
+  // have a screen line and no camera line.
+  const pendingEventsRef = useRef<{ type: string; details: string }[]>([]);
+  const eventRetryRef = useRef<number | null>(null);
+
+  const flushProctoringEvents = useCallback(() => {
+    if (scheduleIdRef.current === null || !interviewWsService.connected) return false;
+    while (pendingEventsRef.current.length > 0) {
+      const next = pendingEventsRef.current.shift()!;
+      sendToInterview("proctoring-event", next);
+    }
+    return true;
+  }, [sendToInterview]);
+
+  const sendProctoringEvent = useCallback(
+    (type: string, details: string) => {
+      pendingEventsRef.current.push({ type, details });
+      if (flushProctoringEvents()) return;
+      if (eventRetryRef.current !== null) return;
+      let attempts = 0;
+      eventRetryRef.current = window.setInterval(() => {
+        attempts += 1;
+        if (flushProctoringEvents() || attempts >= 60) {
+          window.clearInterval(eventRetryRef.current!);
+          eventRetryRef.current = null;
+        }
+      }, 1000);
+    },
+    [flushProctoringEvents],
+  );
 
   // End interview
   const endInterview = useCallback(async () => {
-    await audioStreaming.stopRecording();
+    // The last answer's audio is flushed, but only for so long. The server is
+    // told the interview is over whether or not this finishes: an audio flush
+    // that hung used to hold back the one call that marks the interview
+    // complete, leaving it IN PROGRESS until the server's own timeout.
+    await Promise.race([
+      audioStreaming.stopRecording(),
+      new Promise((resolve) => setTimeout(resolve, 3000)),
+    ]);
     audioPlayback.stopPlayback();
 
     if (scheduleId !== null) {
-      try {
-        await aiService.endVoiceInterview(scheduleId);
-      } catch (err) {
-        console.error("Error ending interview:", err);
+      // Retried: this is the submission, and one dropped request must not
+      // leave a finished interview looking unfinished.
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          await aiService.endVoiceInterview(scheduleId);
+          break;
+        } catch (err) {
+          console.error(`Error ending interview (attempt ${attempt} of 3):`, err);
+          if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
+        }
       }
     }
 
@@ -516,13 +740,35 @@ export function useVoiceInterview() {
   }, [scheduleId, audioStreaming, audioPlayback]);
 
   // Item 14: Repeat last question
+  /**
+   * Say the current question again, on demand.
+   *
+   * Prefers the interviewer's own recorded voice, replayed in chunk order so
+   * the candidate hears the whole question. Falls back to the browser's speech
+   * synthesis reading the question text, which covers the case where TTS was
+   * unavailable and the question only ever existed as text — better a
+   * synthetic voice than a control that does nothing.
+   */
   const repeatQuestion = useCallback(() => {
+    audioPlayback.stopPlayback();
+
+    const chunks = [...questionAudioRef.current.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([, audio]) => audio);
+
+    if (chunks.length > 0) {
+      chunks.forEach((audio, index) =>
+        enqueueAudioRef.current(audio, index === 0 ? lastQuestionText || "" : "", index === chunks.length - 1),
+      );
+      return;
+    }
+
     if (lastQuestionAudio) {
       enqueueAudioRef.current(lastQuestionAudio, lastQuestionText || "", true);
     } else if (lastQuestionText) {
       playBrowserTTSRef.current(lastQuestionText);
     }
-  }, [lastQuestionAudio, lastQuestionText]);
+  }, [audioPlayback, lastQuestionAudio, lastQuestionText]);
 
   // Fetch evaluation with polling (async generation may not be ready immediately)
   const fetchEvaluation = useCallback(async () => {
@@ -545,6 +791,7 @@ export function useVoiceInterview() {
           setEvaluation(result);
           return result;
         }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } catch (err: any) {
         if (err.response?.status !== 404) {
           console.error(
@@ -585,6 +832,8 @@ export function useVoiceInterview() {
     questionsAsked,
     streamingText,
     isWsConnected,
+    hasEverConnected,
+    reconnectAttempts,
     error,
     evaluation,
     currentTranscript,
@@ -594,6 +843,8 @@ export function useVoiceInterview() {
     isCodingQuestion,
     codeContent,
     codeLanguage,
+    codeOutput,
+    setCodeOutput,
     setCodeContent,
     setCodeLanguage,
 
@@ -602,6 +853,18 @@ export function useVoiceInterview() {
     isPlaying: audioPlayback.isPlaying,
     amplitude: audioPlayback.amplitude,
     audioLevel: audioStreaming.audioLevel,
+    /**
+     * The interviewer's spoken voice, for mixing into the screen recording so
+     * a reviewer hears both halves of the conversation rather than a
+     * candidate answering silence.
+     */
+    getInterviewerAudioStream: audioPlayback.getInterviewerAudioStream,
+    /**
+     * Record the next answer from this stream rather than the device
+     * microphone. Pass null to go back to the device. Takes effect on the next
+     * answer, never mid-recording.
+     */
+    setExternalAudioSource: audioStreaming.setExternalAudioSource,
 
     // Actions
     startInterview,

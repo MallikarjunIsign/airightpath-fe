@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   Loader2,
   ArrowLeft,
@@ -15,56 +15,394 @@ import {
   FileCode,
   AlertTriangle,
   Award,
-  Zap,
+  FileText,
+  ListChecks,
+  HelpCircle,
+  Percent,
+  TrendingDown,
+  Terminal,
+  Download,
+  History,
+  Eye,
 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import { ROUTES } from '@/config/routes';
+import type { NavOrigin } from '@/components/ui/BackLink';
 import { assessmentService } from '@/services/assessment.service';
+import { extractApiError } from '@/services/api.service';
 import { compilerService } from '@/services/compiler.service';
-import type { Result } from '@/types/result.types';
+import {
+  RadialScore,
+  SummaryStat,
+  SkillBar,
+  FilterChips,
+  MiniButton,
+  OutcomeIcon,
+} from '@/components/admin/result/ResultPrimitives';
+import { AptitudeBandCards, CodingBandCards } from '@/components/admin/result/BandCards';
+import { CodeBlock, IOBlock } from '@/components/admin/result/CodeBlock';
+import { TestCaseCard, PlannedTestCaseCard } from '@/components/admin/result/TestCaseCard';
+import {
+  AptitudePaperModal,
+  CodingPaperModal,
+  SubmittedCodeModal,
+  TestOutputModal,
+} from '@/components/admin/result/ResultModals';
+import { ProctoringCaptures } from '@/components/admin/result/ProctoringCaptures';
+import { AnswerSheetExportDialog } from '@/components/admin/result/AnswerSheetExportDialog';
+import { ResumeViewerModal } from '@/components/admin/ResumeViewerModal';
+import { useResumeViewer } from '@/hooks/useResumeViewer';
+import { QuestionPaperExportDialog } from '@/components/admin/QuestionPaperExportDialog';
+import type { AnswerSheetData } from '@/utils/answer-sheet.utils';
+import {
+  statusVariant,
+  aptitudeScorePercent,
+  codingScorePercent,
+  overallScorePercent,
+  OUTCOME,
+  answerOutcome,
+  codingOutcome,
+  formatDurationBetween,
+  buildCodingRows,
+  summarizeCoding,
+  summarizeAptitude,
+  groupAptitudeByBand,
+  groupCodingByBand,
+  codingAreasToImprove,
+  aptitudeAreasToImprove,
+  isAnswered,
+  isRowSolved,
+  isRowAttempted,
+  testsOf,
+  passedTestCount,
+  rowTitle,
+  rowLanguage,
+  codeOf,
+  normalizeBand,
+  splitResultsJson,
+  orderedAttempts,
+  orderedAssessments,
+  assessmentForAttempt,
+  submissionsForAttempt,
+  attemptWindow,
+  attemptTime,
+  groupRounds,
+} from '@/utils/result.utils';
+import { toAssessmentList } from '@/utils/assessment.utils';
+import { formatDateTime } from '@/utils/format.utils';
+import { SubmissionInfo } from '@/components/result/SubmissionInfo';
+import type { CodingRow, AttemptWindow } from '@/utils/result.utils';
+import type { Result, AptitudeAnswer, CodingAnswer, SubmissionMeta } from '@/types/result.types';
 import type { CodeSubmissionResponse } from '@/types/compiler.types';
+import type { Assessment, RawCodingQuestion, RawQuestion } from '@/types/assessment.types';
+
+// ── Attempts ───────────────────────────────────────────────────────────
+
+/**
+ * Lets the reviewer move between attempts when an exam was assigned more than
+ * once. Renders nothing for the single-attempt case, which is nearly every
+ * candidate — a picker offering one choice is just clutter.
+ *
+ * Attempt 1 is the paper sat first. The latest is selected by default, since
+ * that is the result the pipeline and the results table act on, but the earlier
+ * ones stay reachable: a re-sit is usually granted for a reason, and the
+ * original is part of that record.
+ */
+function AttemptPicker({
+  attempts,
+  selected,
+  onSelect,
+}: {
+  attempts: Result[];
+  selected?: Result;
+  onSelect: (index: number) => void;
+}) {
+  if (attempts.length < 2) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-[var(--warning)] bg-[var(--warningMuted,rgba(245,158,11,0.08))] px-3 py-2">
+      <span className="text-sm text-[var(--text)]">
+        This exam was assigned <strong>{attempts.length} times</strong> — showing:
+      </span>
+      {attempts.map((attempt, index) => {
+        const isSelected = attempt === selected;
+        const when = attempt.submittedAt
+          ? new Date(attempt.submittedAt).toLocaleDateString()
+          : 'not submitted';
+        return (
+          <button
+            key={attempt.id ?? index}
+            type="button"
+            onClick={() => onSelect(index)}
+            className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
+              isSelected
+                ? 'bg-[var(--primary)] text-white'
+                : 'bg-[var(--surface1)] text-[var(--textSecondary)] hover:bg-[var(--surface2)]'
+            }`}
+          >
+            Attempt {index + 1}
+            <span className={`ml-1.5 font-normal ${isSelected ? 'text-white/80' : ''}`}>
+              {when}
+            </span>
+          </button>
+        );
+      })}
+      {attempts.length > 1 && selected === attempts[attempts.length - 1] && (
+        <span className="text-xs text-[var(--textSecondary)]">(latest)</span>
+      )}
+    </div>
+  );
+}
+
+/** One module's attempt, with the figure the cards quote for it. */
+interface AttemptSummary {
+  type: 'APTITUDE' | 'CODING';
+  result: Result;
+  /** Position in that module's own attempt list — what the pickers index by. */
+  index: number;
+  score: number | null;
+}
+
+/** How much of one round is on screen. */
+type RoundState = 'full' | 'partial' | 'none';
+
+/**
+ * Fill and border per state. The selected round is filled, not merely outlined:
+ * "which of these am I reading" is the only question these cards exist to
+ * answer, and an outline alone does not carry across a row of them.
+ */
+const ROUND_TONE: Record<RoundState, string> = {
+  full: 'border-[var(--primary)] bg-[var(--primaryLight)] ring-1 ring-[var(--primary)]',
+  partial: 'border-[var(--primary)] bg-[var(--primaryMuted)]',
+  none: 'border-[var(--borderMuted,var(--border))] bg-[var(--surface1)] hover:bg-[var(--surface2)] hover:border-[var(--primary)]',
+};
+
+/** The day a round was sat, taken from the first module submitted in it. */
+function roundDate(round: AttemptSummary[]): string | null {
+  const stamps = round
+    .map((entry) => entry.result.submittedAt)
+    .filter((stamp): stamp is string => !!stamp);
+  if (stamps.length === 0) return null;
+  return new Date(stamps.sort()[0]).toLocaleDateString();
+}
+
+/**
+ * What each attempt at this exam consisted of.
+ *
+ * A re-assignment is rarely the whole exam again — a candidate is far more
+ * often given just the coding paper a second time — so "attempt 2" means
+ * different things for different modules, and the per-module pickers on the
+ * tabs cannot show that. This is the one place the reviewer can see the shape
+ * of the whole history: which papers each round held, how each one went, and
+ * which of them the page is currently showing.
+ *
+ * Hidden for a single round, where there is no history to explain.
+ */
+function AttemptRounds({
+  rounds,
+  selected,
+  onSelect,
+}: {
+  rounds: AttemptSummary[][];
+  /** The attempt index on screen for each module. */
+  selected: Partial<Record<'APTITUDE' | 'CODING', number>>;
+  onSelect: (type: 'APTITUDE' | 'CODING', index: number) => void;
+}) {
+  if (rounds.length < 2) return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2.5">
+          <div
+            className="w-8 h-8 rounded-lg flex items-center justify-center"
+            style={{ background: 'var(--warningMuted, rgba(245,158,11,0.12))' }}
+          >
+            <History size={16} style={{ color: 'var(--warning)' }} />
+          </div>
+          <CardTitle>Attempts ({rounds.length})</CardTitle>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+          {rounds.map((round, idx) => {
+            const when = roundDate(round);
+            const isLatest = idx === rounds.length - 1;
+
+            // Which of this round's papers the page is currently showing. A
+            // candidate who re-sat coding alone leaves the screen on a mix —
+            // aptitude from the first round, coding from the second — and a
+            // card that claimed to be "the" selected one would be lying about
+            // half the page.
+            const showing = round.filter((entry) => selected[entry.type] === entry.index);
+            let state: RoundState = 'none';
+            if (showing.length === round.length) state = 'full';
+            else if (showing.length > 0) state = 'partial';
+
+            return (
+              <button
+                key={round.map((e) => `${e.type}-${e.result.id}`).join('|')}
+                type="button"
+                aria-pressed={state === 'full'}
+                title={
+                  state === 'full'
+                    ? `Attempt ${idx + 1} is the one on screen`
+                    : `Show attempt ${idx + 1}`
+                }
+                onClick={() => round.forEach((entry) => onSelect(entry.type, entry.index))}
+                className={`w-full text-left rounded-xl border p-3 space-y-2.5 transition-colors ${ROUND_TONE[state]}`}
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--textTertiary)]">
+                    Attempt {idx + 1}
+                    {isLatest && rounds.length > 1 && (
+                      <span className="ml-1.5 font-medium normal-case tracking-normal text-[var(--textQuaternary)]">
+                        (latest)
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-xs text-[var(--textSecondary)]">{when ?? 'not submitted'}</p>
+                </div>
+
+                {/* One chip per paper sat in this round, so "aptitude and
+                    coding" reads differently from "coding again". */}
+                <div className="flex flex-wrap gap-1.5">
+                  {round.map((entry) => {
+                    const label = entry.type === 'APTITUDE' ? 'Aptitude' : 'Coding';
+                    return (
+                      <span
+                        key={`${entry.type}-${entry.result.id}`}
+                        className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-[var(--borderMuted,var(--border))] bg-[var(--cardBg)] text-xs"
+                      >
+                        {entry.type === 'APTITUDE' ? (
+                          <BookOpen size={12} style={{ color: 'var(--info)' }} />
+                        ) : (
+                          <Code2 size={12} style={{ color: '#a855f7' }} />
+                        )}
+                        <span className="font-semibold text-[var(--textSecondary)]">{label}</span>
+                        <span className="font-bold text-[var(--text)]">
+                          {entry.score !== null ? `${entry.score}%` : '--'}
+                        </span>
+                        {entry.result.status && (
+                          <Badge variant={statusVariant(entry.result.status)} size="sm">
+                            {entry.result.status}
+                          </Badge>
+                        )}
+                      </span>
+                    );
+                  })}
+                </div>
+
+                {/* Says in words what the fill says in colour, since "which
+                    summary am I reading" is the whole question this answers. */}
+                <p className="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--primary)] min-h-[16px]">
+                  {state === 'full' && (
+                    <>
+                      <Eye size={12} />
+                      Showing this attempt below
+                    </>
+                  )}
+                  {state === 'partial' && (
+                    <>
+                      <Eye size={12} />
+                      Showing {showing.map((e) => (e.type === 'APTITUDE' ? 'aptitude' : 'coding')).join(' + ')} from this attempt
+                    </>
+                  )}
+                  {state === 'none' && (
+                    <span className="text-[var(--textTertiary)] font-medium">Click to show</span>
+                  )}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 // ── Types ──────────────────────────────────────────────────────────────
 
-interface AptitudeQuestion {
-  questionId?: number;
-  questionText?: string;
-  question?: string;
-  selectedAnswer?: string;
-  correctAnswer?: string;
-  isCorrect?: boolean;
-  marks?: number;
-  Difficulty?: string;
-  category?: string;
-}
-
 type DetailTab = 'overview' | 'aptitude' | 'coding';
+type AptitudeFilter = 'all' | 'correct' | 'incorrect' | 'unanswered';
+type CodingFilter = 'all' | 'solved' | 'failed' | 'skipped';
 
-// ── Helpers ────────────────────────────────────────────────────────────
-
-function scoreColor(score: number): string {
-  if (score >= 80) return 'var(--success)';
-  if (score >= 60) return 'var(--warning)';
-  return 'var(--error)';
+/** Timing pulled off the assessment record, per assessment type. */
+interface ExamWindows {
+  aptitude?: string | null;
+  coding?: string | null;
 }
 
-function statusVariant(status?: string): 'success' | 'error' | 'warning' {
-  if (status === 'PASSED') return 'success';
-  if (status === 'FAILED') return 'error';
-  return 'warning';
+/**
+ * Every assessment record this candidate holds for the job, per type, oldest
+ * first — one per attempt.
+ *
+ * Each re-assignment brings its own question paper, its own window and its own
+ * proctoring captures, so the screen cannot hold a single paper or a single id:
+ * which one is right depends on the attempt being viewed.
+ */
+interface AssessmentsByType {
+  aptitude: Assessment[];
+  coding: Assessment[];
+}
+
+const ALL_BANDS = '__all__';
+
+/** Best-effort parse of a `resultsJson` / question-paper payload into an array. */
+function parseArray<T>(raw: unknown): T[] {
+  if (!raw) return [];
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 // ── Main Page ──────────────────────────────────────────────────────────
 
 export function CandidateResultDetailPage() {
   const { jobPrefix, email } = useParams<{ jobPrefix: string; email: string }>();
+  const location = useLocation();
+
+  /**
+   * Where "back" goes. This page is reachable from the results list and, for a
+   * candidate past the exam, straight from the Candidates pipeline — sending
+   * everyone to the results list would strand the second group on a screen they
+   * never opened. Falls back to the list when nothing recorded an origin.
+   */
+  const back: NavOrigin = (location.state as { from?: NavOrigin } | null)?.from ?? {
+    label: 'Assessment Results',
+    path: ROUTES.ADMIN.ASSESSMENTS_RESULTS,
+  };
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [results, setResults] = useState<Result[]>([]);
   const [codeSubmissions, setCodeSubmissions] = useState<CodeSubmissionResponse[]>([]);
+  const [assessments, setAssessments] = useState<AssessmentsByType>({
+    aptitude: [],
+    coding: [],
+  });
+  /**
+   * Question papers keyed by assessment id — one per attempt, fetched together.
+   *
+   * Keyed rather than stored as "the paper" so switching attempts is instant and
+   * cannot leave the previous attempt's questions on screen.
+   */
+  const [papersById, setPapersById] = useState<Map<number, unknown>>(new Map());
+  /** Why the assessment lookup failed, when it did — see fetchPapers. */
+  const [papersError, setPapersError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<DetailTab>('overview');
+  const [exportingSheet, setExportingSheet] = useState(false);
+  const {
+    resume,
+    loading: resumeLoading,
+    open: openResume,
+    close: closeResume,
+  } = useResumeViewer();
 
   useEffect(() => {
     if (jobPrefix && email) fetchData();
@@ -80,6 +418,7 @@ export function CandidateResultDetailPage() {
       setResults(resResults.data ?? []);
       const allCode = resCode.data ?? [];
       setCodeSubmissions(allCode.filter((c) => c.userEmail === email));
+      fetchPapers();
     } catch {
       // handled by interceptor
     } finally {
@@ -87,30 +426,246 @@ export function CandidateResultDetailPage() {
     }
   }
 
-  const aptitudeResult = results.find((r) => r.assessmentType === 'APTITUDE');
-  const codingResult = results.find((r) => r.assessmentType === 'CODING');
-
-  const aptitudeQuestions: AptitudeQuestion[] = useMemo(() => {
-    if (!aptitudeResult?.resultsJson) return [];
+  /**
+   * The question papers and the exam window live on the candidate's assessment
+   * records, not on the result, so pull them separately. Best-effort: every view
+   * degrades to what the result itself stores if this fails.
+   */
+  async function fetchPapers() {
     try {
-      return JSON.parse(aptitudeResult.resultsJson);
-    } catch {
-      return [];
-    }
-  }, [aptitudeResult]);
+      setPapersError(null);
+      // Deliberately NOT getCandidateAssessments: that endpoint filters to
+      // examAttended = false, and this page only exists because the candidate
+      // sat the exam. It returned an empty list every time, which read as
+      // "no assessment record" and cost us both the paper and the captures.
+      const res = await assessmentService.getAllAssessmentsForCandidate(email!);
+      // Tolerate both a bare array and an { data: [...] } envelope — calling
+      // .filter on an envelope throws, and the catch below would then report a
+      // lookup failure for what is really a shape mismatch.
+      const list = toAssessmentList(res.data);
 
-  const codingStats = useMemo(() => {
-    const totalQ = codeSubmissions.length;
-    const totalTests = codeSubmissions.reduce((s, sub) => s + (sub.testResults?.length ?? 0), 0);
-    const passedTests = codeSubmissions.reduce(
-      (s, sub) => s + (sub.testResults?.filter((t) => t.passed).length ?? 0),
-      0,
-    );
-    const qPassed = codeSubmissions.filter(
-      (s) => s.testResults?.length > 0 && s.testResults.every((t) => t.passed),
-    ).length;
-    return { totalQ, totalTests, passedTests, qPassed };
-  }, [codeSubmissions]);
+      // Every record for this job, not the first of each type: a re-assigned
+      // exam has one per attempt, and `.find()` handed all of them the paper,
+      // window and captures of whichever the candidate sat first.
+      const mine = orderedAssessments(list.filter((a) => a.jobPrefix === jobPrefix));
+      setAssessments({
+        aptitude: mine.filter((a) => a.assessmentType === 'APTITUDE'),
+        coding: mine.filter((a) => a.assessmentType === 'CODING'),
+      });
+
+      // Fetched up front and kept by id, so moving between attempts swaps the
+      // paper without a round trip. One failed paper costs only its own attempt.
+      const papers = await Promise.all(
+        mine.map((a) =>
+          assessmentService
+            .fetchQuestions(a.id)
+            .then((res) => [a.id, res.data?.questions] as const)
+            .catch(() => [a.id, null] as const),
+        ),
+      );
+      setPapersById(new Map(papers.filter(([, questions]) => questions != null)));
+    } catch (err) {
+      // The papers themselves are optional context, but this same call is what
+      // supplies the assessment ids the capture cards are keyed on. Swallowing
+      // it made a failed lookup look identical to "this candidate has no
+      // assessment record", which is a different problem with a different fix.
+      setPapersError(extractApiError(err).message);
+    }
+  }
+
+  // Every attempt at each module, oldest first. A re-assigned exam adds a
+  // result rather than replacing one, so `.find()` here was showing whichever
+  // the API returned first — usually the original, never the re-sit.
+  const aptitudeAttempts = useMemo(() => orderedAttempts(results, 'APTITUDE'), [results]);
+  const codingAttempts = useMemo(() => orderedAttempts(results, 'CODING'), [results]);
+
+  // Which attempt is on screen. -1 means "the latest", so the page keeps
+  // following the most recent attempt as results load rather than pinning to a
+  // stale index the moment a new one arrives.
+  const [aptitudeAttemptIdx, setAptitudeAttemptIdx] = useState(-1);
+  const [codingAttemptIdx, setCodingAttemptIdx] = useState(-1);
+
+  const pickAttempt = (attempts: Result[], index: number): Result | undefined =>
+    attempts[index] ?? attempts[attempts.length - 1];
+
+  const aptitudeResult = pickAttempt(aptitudeAttempts, aptitudeAttemptIdx);
+  const codingResult = pickAttempt(codingAttempts, codingAttemptIdx);
+
+  // The assessment record behind the attempt on screen. Everything that is a
+  // property of the paper rather than of the answers — the questions, the exam
+  // window, the captures — hangs off this and so follows the picker.
+  const aptitudeAssessment = useMemo(
+    () => assessmentForAttempt(assessments.aptitude, aptitudeResult, aptitudeAttemptIdx),
+    [assessments.aptitude, aptitudeResult, aptitudeAttemptIdx],
+  );
+  const codingAssessment = useMemo(
+    () => assessmentForAttempt(assessments.coding, codingResult, codingAttemptIdx),
+    [assessments.coding, codingResult, codingAttemptIdx],
+  );
+
+  const aptitudePaper = useMemo(
+    () => parseArray<RawQuestion>(aptitudeAssessment && papersById.get(aptitudeAssessment.id)),
+    [papersById, aptitudeAssessment],
+  );
+  const codingQuestions = useMemo(
+    () => parseArray<RawCodingQuestion>(codingAssessment && papersById.get(codingAssessment.id)),
+    [papersById, codingAssessment],
+  );
+
+  /**
+   * The window as the recruiter scheduled it.
+   *
+   * Shown as typed rather than converted: `startTime` and `deadline` are the
+   * wall-clock an admin entered and are stored exactly as entered, so putting
+   * them through a timezone would move a window nobody moved.
+   */
+  const examSchedules: ExamWindows = useMemo(() => {
+    const describe = (record?: Assessment) =>
+      record?.startTime && record?.deadline
+        ? `${formatDateTime(record.startTime)} → ${formatDateTime(record.deadline)}`
+        : null;
+    return {
+      aptitude: describe(aptitudeAssessment),
+      coding: describe(codingAssessment),
+    };
+  }, [aptitudeAssessment, codingAssessment]);
+
+  const examWindows: ExamWindows = useMemo(
+    () => ({
+      aptitude: formatDurationBetween(aptitudeAssessment?.startTime, aptitudeAssessment?.deadline),
+      coding: formatDurationBetween(codingAssessment?.startTime, codingAssessment?.deadline),
+    }),
+    [aptitudeAssessment, codingAssessment],
+  );
+
+  // When each attempt was live. Everything it produced that is filed per
+  // candidate rather than per attempt — the code runs, the pre-exam captures —
+  // is picked out by these.
+  const aptitudeWindow = useMemo(
+    () => attemptWindow(aptitudeAttempts, aptitudeResult),
+    [aptitudeAttempts, aptitudeResult],
+  );
+  const codingWindow = useMemo(
+    () => attemptWindow(codingAttempts, codingResult),
+    [codingAttempts, codingResult],
+  );
+
+  // Only the runs made during this attempt — the endpoint returns every run the
+  // candidate made on the job, and a re-sit repeats the same question ids, so an
+  // unfiltered list scored attempt 2 on attempt 1's code.
+  const attemptSubmissions = useMemo(
+    () => submissionsForAttempt(codeSubmissions, codingAttempts, codingResult, codingAssessment?.id),
+    [codeSubmissions, codingAttempts, codingResult, codingAssessment],
+  );
+
+  /**
+   * Every attempt at either module, scored the same way the tab that owns it
+   * scores it — each against its own paper and, for coding, its own runs.
+   *
+   * Computed for all of them, not only the two on screen, so the attempt cards
+   * can state what each round came to without the reviewer having to click
+   * through them one at a time.
+   */
+  const attemptSummaries = useMemo(() => {
+    const summarize = (
+      type: 'APTITUDE' | 'CODING',
+      attempts: Result[],
+      records: Assessment[],
+    ): AttemptSummary[] =>
+      attempts.map((result, index) => {
+        const record = assessmentForAttempt(records, result, index);
+        const questions = record ? papersById.get(record.id) : undefined;
+
+        if (type === 'APTITUDE') {
+          const { answers } = splitResultsJson<AptitudeAnswer>(result.resultsJson);
+          return {
+            type,
+            result,
+            index,
+            score: aptitudeScorePercent(result, answers, parseArray<RawQuestion>(questions)),
+          };
+        }
+
+        const { answers } = splitResultsJson<CodingAnswer>(result.resultsJson);
+        const rows = buildCodingRows(
+          parseArray<RawCodingQuestion>(questions),
+          submissionsForAttempt(codeSubmissions, attempts, result, record?.id),
+          answers,
+        );
+        return { type, result, index, score: codingScorePercent(rows, result) };
+      });
+
+    return [
+      ...summarize('APTITUDE', aptitudeAttempts, assessments.aptitude),
+      ...summarize('CODING', codingAttempts, assessments.coding),
+    ];
+  }, [aptitudeAttempts, codingAttempts, assessments, papersById, codeSubmissions]);
+
+  /**
+   * The attempts grouped into rounds — attempt 1, attempt 2 — as a reviewer
+   * counts them, rather than per module.
+   */
+  const attemptRounds = useMemo(
+    () =>
+      groupRounds(
+        attemptSummaries,
+        (entry) => entry.type,
+        (entry) => attemptTime(entry.result),
+      ),
+    [attemptSummaries],
+  );
+
+  /** Which attempt of each module is on screen, by its own index. */
+  const selectedAttempts = useMemo(
+    () => ({
+      APTITUDE: aptitudeResult
+        ? aptitudeAttempts.findIndex((a) => a.id === aptitudeResult.id)
+        : undefined,
+      CODING: codingResult
+        ? codingAttempts.findIndex((c) => c.id === codingResult.id)
+        : undefined,
+    }),
+    [aptitudeAttempts, codingAttempts, aptitudeResult, codingResult],
+  );
+
+  const selectAttempt = (type: 'APTITUDE' | 'CODING', index: number) => {
+    if (type === 'APTITUDE') setAptitudeAttemptIdx(index);
+    else setCodingAttemptIdx(index);
+  };
+
+  // `resultsJson` holds the answers plus, at the end, the record of how the
+  // attempt was submitted — split so the metadata is never scored as an answer.
+  const aptitudeParsed = useMemo(
+    () => splitResultsJson<AptitudeAnswer>(aptitudeResult?.resultsJson),
+    [aptitudeResult],
+  );
+  const aptitudeAnswers = aptitudeParsed.answers;
+
+  // The CODING result carries one entry per question on the paper — including
+  // the ones never opened — so it, not the compiler submissions, defines the list.
+  const codingParsed = useMemo(
+    () => splitResultsJson<CodingAnswer>(codingResult?.resultsJson),
+    [codingResult],
+  );
+  const codingAnswers = codingParsed.answers;
+
+  const codingRows = useMemo(
+    () => buildCodingRows(codingQuestions, attemptSubmissions, codingAnswers),
+    [codingQuestions, attemptSubmissions, codingAnswers],
+  );
+
+  // Counted off the question paper so unattempted questions are part of the
+  // totals, not just the ones that were submitted.
+  const codingStats = useMemo(() => summarizeCoding(codingRows), [codingRows]);
+
+  /**
+   * When this candidate submitted, from whichever module they sat.
+   *
+   * Reading only the aptitude result showed "--" for anyone assigned coding
+   * alone — they had submitted, the page just looked in one place. The answer
+   * sheet export already fell back like this; the screen did not.
+   */
+  const submittedAt = aptitudeResult?.submittedAt ?? codingResult?.submittedAt;
 
   const overallStatus = (() => {
     const a = aptitudeResult?.status;
@@ -120,16 +675,77 @@ export function CandidateResultDetailPage() {
     return 'PENDING';
   })();
 
-  const overallScore = (() => {
-    const scores: number[] = [];
-    if (aptitudeResult) scores.push(aptitudeResult.score);
-    if (codingResult) scores.push(codingResult.score);
-    if (scores.length === 0) return 0;
-    return Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+  // `Result.score` is raw marks for aptitude and a hard-coded 0 for coding, so
+  // both modules are converted to real percentages before anything is averaged
+  // — see the scoring notes in result.utils.ts.
+  const aptitudeScore = useMemo(
+    () => aptitudeScorePercent(aptitudeResult, aptitudeAnswers, aptitudePaper),
+    [aptitudeResult, aptitudeAnswers, aptitudePaper],
+  );
+  const codingScore = useMemo(
+    () => codingScorePercent(codingRows, codingResult),
+    [codingRows, codingResult],
+  );
+  const overallScore = overallScorePercent([aptitudeScore, codingScore]);
+
+  // Spelling out what went into the average keeps it reconcilable with the tabs.
+  const overallBasis = (() => {
+    const parts: string[] = [];
+    if (aptitudeScore !== null) parts.push('Aptitude');
+    if (codingScore !== null) parts.push('Coding');
+    if (parts.length === 0) return 'No scored modules';
+    return `Average of ${parts.join(' + ')}`;
   })();
 
   const hasAptitude = !!aptitudeResult;
-  const hasCoding = !!codingResult || codeSubmissions.length > 0;
+  const hasCoding = !!codingResult || codingRows.length > 0;
+
+  // Everything the export needs, assembled from what the tabs already render so
+  // the file and the screen can never disagree.
+  const answerSheet: AnswerSheetData = useMemo(
+    () => ({
+      candidateEmail: email ?? '',
+      jobPrefix: jobPrefix ?? '',
+      submittedAt,
+      overallStatus,
+      overallScore,
+      aptitude: aptitudeResult
+        ? {
+            score: aptitudeScore,
+            status: aptitudeResult.status,
+            marksLabel: `${aptitudeResult.score}${aptitudeResult.totalMarks ? `/${aptitudeResult.totalMarks}` : ''} marks`,
+            answers: aptitudeAnswers,
+            paper: aptitudePaper,
+            submission: aptitudeParsed.submission,
+          }
+        : undefined,
+      coding: hasCoding
+        ? {
+            score: codingScore,
+            status: codingResult?.status,
+            rows: codingRows,
+            submission: codingParsed.submission,
+          }
+        : undefined,
+    }),
+    [
+      email,
+      jobPrefix,
+      aptitudeResult,
+      codingResult,
+      submittedAt,
+      overallStatus,
+      overallScore,
+      aptitudeScore,
+      aptitudeAnswers,
+      aptitudeParsed.submission,
+      aptitudePaper,
+      hasCoding,
+      codingScore,
+      codingRows,
+      codingParsed.submission,
+    ],
+  );
 
   if (loading) {
     return (
@@ -143,36 +759,43 @@ export function CandidateResultDetailPage() {
     <div className="space-y-8 pb-10">
       {/* ── Back nav ──────────────────────────────────────────────────── */}
       <button
-        onClick={() => navigate(ROUTES.ADMIN.ASSESSMENTS_RESULTS)}
+        type="button"
+        onClick={() => navigate(back.path, { state: back.state })}
         className="inline-flex items-center gap-2 text-sm font-medium text-[var(--textSecondary)] hover:text-[var(--primary)] transition-colors"
       >
         <ArrowLeft size={16} />
-        Back to Assessment Results
+        Back to {back.label}
       </button>
 
       {/* ── Candidate Header ─────────────────────────────────────────── */}
       <Card variant="elevated">
         <CardContent>
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-5">
-            <div className="flex items-center gap-4">
+            <div className="flex items-start gap-3 sm:gap-4 min-w-0">
               <div
-                className="w-14 h-14 rounded-2xl flex items-center justify-center text-white text-xl font-bold flex-shrink-0 shadow-sm"
+                className="w-11 h-11 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center text-white text-lg sm:text-xl font-bold flex-shrink-0 shadow-sm"
                 style={{ background: 'linear-gradient(135deg, var(--primary), var(--accent))' }}
               >
                 {(email ?? '?')[0].toUpperCase()}
               </div>
-              <div>
-                <h1 className="text-2xl font-bold text-[var(--text)] font-heading">{email}</h1>
-                <div className="flex items-center gap-3 mt-1">
+              <div className="min-w-0">
+                {/* break-all, because an email has no spaces to wrap at and
+                    would otherwise push the whole card wider than the phone. */}
+                <h1 className="text-lg sm:text-2xl font-bold text-[var(--text)] font-heading break-all">
+                  {email}
+                </h1>
+                {/* Wraps to two lines on a phone; the divider is a desktop-only
+                    flourish and is dropped rather than left dangling. */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-1">
                   <span className="text-sm text-[var(--textSecondary)]">
                     Job: <span className="font-semibold text-[var(--text)]">{jobPrefix}</span>
                   </span>
-                  <span className="text-[var(--borderStrong)]">|</span>
+                  <span className="hidden sm:inline text-[var(--borderStrong)]">|</span>
                   <span className="text-sm text-[var(--textSecondary)]">
                     Submitted:{' '}
                     <span className="font-medium text-[var(--text)]">
-                      {aptitudeResult?.submittedAt
-                        ? new Date(aptitudeResult.submittedAt).toLocaleDateString('en-US', {
+                      {submittedAt
+                        ? new Date(submittedAt).toLocaleDateString('en-US', {
                             year: 'numeric',
                             month: 'short',
                             day: 'numeric',
@@ -183,9 +806,34 @@ export function CandidateResultDetailPage() {
                 </div>
               </div>
             </div>
-            <Badge variant={statusVariant(overallStatus)} size="lg">
-              {overallStatus}
-            </Badge>
+            <div className="flex flex-wrap items-center gap-3 flex-shrink-0">
+              {/* The record of what the candidate actually wrote — for a hiring
+                  decision, or for answering a disputed score. */}
+              <Button
+                variant="secondary"
+                size="sm"
+                leftIcon={<Download size={15} />}
+                onClick={() => setExportingSheet(true)}
+                disabled={!hasAptitude && !hasCoding}
+              >
+                Download Answer Sheet
+              </Button>
+              {/* The CV the candidate applied with — read next to the score,
+                  and downloadable the same way the answer sheet is. */}
+              <Button
+                variant="secondary"
+                size="sm"
+                leftIcon={<FileText size={15} />}
+                onClick={() => openResume(email)}
+                isLoading={resumeLoading}
+                disabled={!email}
+              >
+                Resume
+              </Button>
+              <Badge variant={statusVariant(overallStatus)} size="lg">
+                {overallStatus}
+              </Badge>
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -196,15 +844,32 @@ export function CandidateResultDetailPage() {
           icon={<Award size={20} />}
           iconColor="var(--primary)"
           label="Overall Score"
-          chart={<RadialScore score={overallScore} size={80} stroke={8} />}
+          hint={overallBasis}
+          chart={
+            overallScore !== null ? (
+              <RadialScore score={overallScore} size={80} stroke={8} status={overallStatus} />
+            ) : (
+              <KpiPlaceholder text="N/A" />
+            )
+          }
         />
         <KpiTile
           icon={<BookOpen size={20} />}
           iconColor="var(--info)"
           label="Aptitude"
+          hint={
+            aptitudeResult
+              ? `${aptitudeResult.score}${aptitudeResult.totalMarks ? `/${aptitudeResult.totalMarks}` : ''} marks`
+              : undefined
+          }
           chart={
-            aptitudeResult ? (
-              <RadialScore score={aptitudeResult.score} size={80} stroke={8} />
+            aptitudeScore !== null ? (
+              <RadialScore
+                score={aptitudeScore}
+                size={80}
+                stroke={8}
+                status={aptitudeResult?.status}
+              />
             ) : (
               <KpiPlaceholder text="N/A" />
             )
@@ -214,11 +879,21 @@ export function CandidateResultDetailPage() {
           icon={<Code2 size={20} />}
           iconColor="#a855f7"
           label="Coding"
+          hint={
+            codingScore !== null
+              ? `${codingStats.passedTests}/${codingStats.totalTests} test cases`
+              : undefined
+          }
           chart={
-            codingResult ? (
-              <RadialScore score={codingResult.score} size={80} stroke={8} />
-            ) : codeSubmissions.length > 0 ? (
-              <KpiValue value={`${codingStats.qPassed}/${codingStats.totalQ}`} sub="Q Passed" />
+            codingScore !== null ? (
+              <RadialScore
+                score={codingScore}
+                size={80}
+                stroke={8}
+                status={codingResult?.status}
+              />
+            ) : codingRows.length > 0 ? (
+              <KpiValue value={`${codingStats.solved}/${codingStats.totalQ}`} sub="Q Solved" />
             ) : (
               <KpiPlaceholder text="N/A" />
             )
@@ -239,18 +914,14 @@ export function CandidateResultDetailPage() {
           chart={
             <KpiValue
               value={
-                aptitudeResult?.submittedAt
-                  ? new Date(aptitudeResult.submittedAt).toLocaleDateString('en-US', {
+                submittedAt
+                  ? new Date(submittedAt).toLocaleDateString('en-US', {
                       month: 'short',
                       day: 'numeric',
                     })
                   : '--'
               }
-              sub={
-                aptitudeResult?.submittedAt
-                  ? new Date(aptitudeResult.submittedAt).getFullYear().toString()
-                  : ''
-              }
+              sub={submittedAt ? new Date(submittedAt).getFullYear().toString() : ''}
             />
           }
         />
@@ -275,14 +946,14 @@ export function CandidateResultDetailPage() {
               key={tab}
               disabled={disabled}
               onClick={() => setActiveTab(tab)}
-              className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-xl transition-all duration-200
+              className={`flex-1 min-w-0 flex items-center justify-center gap-1.5 sm:gap-2 px-2 sm:px-4 py-2.5 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200
                 ${isActive ? 'bg-[var(--primary)] text-white shadow-sm' : ''}
                 ${!isActive && !disabled ? 'text-[var(--textSecondary)] hover:text-[var(--text)] hover:bg-[var(--bgMuted)]' : ''}
                 ${disabled ? 'text-[var(--textQuaternary)] cursor-not-allowed' : ''}
               `}
             >
-              {icon}
-              <span className="capitalize">{tab}</span>
+              <span className="flex-shrink-0">{icon}</span>
+              <span className="capitalize truncate">{tab}</span>
             </button>
           );
         })}
@@ -293,19 +964,126 @@ export function CandidateResultDetailPage() {
         <OverviewTab
           aptitude={aptitudeResult}
           coding={codingResult}
-          aptitudeQuestions={aptitudeQuestions}
+          aptitudeScore={aptitudeScore}
+          codingScore={codingScore}
+          aptitudeAnswers={aptitudeAnswers}
+          aptitudeSubmission={aptitudeParsed.submission}
+          codingSubmission={codingParsed.submission}
+          codingRows={codingRows}
           codingStats={codingStats}
-          submissions={codeSubmissions}
+          rounds={attemptRounds}
+          selectedAttempts={selectedAttempts}
+          onSelectAttempt={selectAttempt}
+          onOpenTab={setActiveTab}
         />
       )}
       {activeTab === 'aptitude' && aptitudeResult && (
-        <AptitudeTab result={aptitudeResult} questions={aptitudeQuestions} />
+        <>
+        <AttemptPicker
+          attempts={aptitudeAttempts}
+          selected={aptitudeResult}
+          onSelect={setAptitudeAttemptIdx}
+        />
+        <AptitudeTab
+          key={aptitudeResult.id ?? aptitudeAttemptIdx}
+          result={aptitudeResult}
+          score={aptitudeScore}
+          answers={aptitudeAnswers}
+          paper={aptitudePaper}
+          examWindow={examWindows.aptitude}
+          examSchedule={examSchedules.aptitude}
+          assessmentId={aptitudeAssessment?.id}
+          attemptWindow={aptitudeWindow}
+          candidateEmail={email}
+          lookupError={papersError}
+          jobPrefix={jobPrefix ?? ''}
+        />
+        </>
       )}
       {activeTab === 'coding' && (
-        <CodingTab result={codingResult} submissions={codeSubmissions} />
+        <>
+        <AttemptPicker
+          attempts={codingAttempts}
+          selected={codingResult}
+          onSelect={setCodingAttemptIdx}
+        />
+        <CodingTab
+          key={codingResult?.id ?? codingAttemptIdx}
+          result={codingResult}
+          score={codingScore}
+          rows={codingRows}
+          examWindow={examWindows.coding}
+          examSchedule={examSchedules.coding}
+          assessmentId={codingAssessment?.id}
+          attemptWindow={codingWindow}
+          candidateEmail={email}
+          lookupError={papersError}
+          paper={codingQuestions}
+          jobPrefix={jobPrefix ?? ''}
+        />
+        </>
       )}
+
+      {exportingSheet && (
+        <AnswerSheetExportDialog data={answerSheet} onClose={() => setExportingSheet(false)} />
+      )}
+
+      {resume && <ResumeViewerModal resume={resume} onClose={closeResume} />}
     </div>
   );
+}
+
+/**
+ * Wraps a parsed question paper back into a File so it can go through the same
+ * export dialog the Assign screen uses — one download flow, one set of formats.
+ */
+function paperAsFile(paper: unknown[], name: string): File {
+  const json = JSON.stringify(paper, null, 2);
+  return new File([new Blob([json], { type: 'application/json' })], `${name}.json`, {
+    type: 'application/json',
+  });
+}
+
+/**
+ * The aptitude paper as stored, or a reconstruction from the result when the
+ * original could not be loaded.
+ *
+ * The result rows carry the question text, the correct answer and the marks —
+ * everything except the answer options, which are only in the paper. That is a
+ * worse document than the real paper, but it is a usable one, and it matches
+ * what the "View Question Paper" modal already falls back to. A dead download
+ * button next to a working preview is just confusing.
+ */
+function aptitudePaperForExport(paper: RawQuestion[], answers: AptitudeAnswer[]): RawQuestion[] {
+  if (paper.length > 0) return paper;
+  return answers.map((answer, i) => ({
+    id: answer.questionId ?? i + 1,
+    question: answer.questionText || answer.question || '',
+    // Empty rather than absent: the parser reads "has options" as "is aptitude".
+    options: {},
+    correctAnswer: answer.correctAnswer,
+    Difficulty: answer.Difficulty || answer.category,
+    marks: answer.marks,
+  }));
+}
+
+/** The coding paper as stored, else rebuilt from the merged per-question rows. */
+function codingPaperForExport(
+  paper: RawCodingQuestion[],
+  rows: CodingRow[],
+): RawCodingQuestion[] {
+  if (paper.length > 0) return paper;
+  return rows.map((row, i) => ({
+    id: row.question?.id ?? i + 1,
+    title: rowTitle(row),
+    description: row.question?.description ?? '',
+    sampleInput: row.question?.sampleInput,
+    sampleOutput: row.question?.sampleOutput,
+    // Present (even if empty) so the parser treats this as a coding paper.
+    testCases: row.question?.testCases ?? [],
+    Difficulty: row.question?.Difficulty,
+    marks: row.question?.marks,
+  }));
 }
 
 // ── KPI Tile ──────────────────────────────────────────────────────────
@@ -315,20 +1093,28 @@ function KpiTile({
   iconColor,
   label,
   chart,
+  hint,
 }: {
   icon: React.ReactNode;
   iconColor: string;
   label: string;
   chart: React.ReactNode;
+  /** Small caption spelling out what the number is derived from. */
+  hint?: string;
 }) {
   return (
     <Card>
       <CardContent>
         <div className="flex flex-col items-center gap-3 py-2">
           {chart}
-          <div className="flex items-center gap-1.5">
-            <span style={{ color: iconColor }}>{icon}</span>
-            <span className="text-xs font-semibold text-[var(--textSecondary)]">{label}</span>
+          <div className="text-center">
+            <div className="flex items-center justify-center gap-1.5">
+              <span style={{ color: iconColor }}>{icon}</span>
+              <span className="text-xs font-semibold text-[var(--textSecondary)]">{label}</span>
+            </div>
+            {hint && (
+              <p className="text-[10px] text-[var(--textTertiary)] mt-1 leading-tight">{hint}</p>
+            )}
           </div>
         </div>
       </CardContent>
@@ -353,51 +1139,68 @@ function KpiValue({ value, sub }: { value: string; sub: string }) {
   );
 }
 
-// ── Radial Score Component (SVG donut) ─────────────────────────────────
+// ── Areas to improve ───────────────────────────────────────────────────
 
-function RadialScore({
-  score,
-  size = 80,
-  stroke = 8,
-}: {
-  score: number;
-  size?: number;
-  stroke?: number;
-}) {
-  const radius = (size - stroke) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (Math.min(score, 100) / 100) * circumference;
-  const color = scoreColor(score);
+function AreasToImprove({ areas, suffix }: { areas: string[]; suffix: string }) {
+  if (areas.length === 0) {
+    return (
+      <div className="flex items-center gap-2 text-xs">
+        <CheckCircle size={14} style={{ color: 'var(--success)' }} />
+        <span className="text-[var(--textSecondary)]">
+          No weak areas — every difficulty band is above the 60% mark.
+        </span>
+      </div>
+    );
+  }
 
   return (
-    <div className="relative" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className="-rotate-90">
-        {/* Background track */}
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke="var(--bgWash)"
-          strokeWidth={stroke}
-        />
-        {/* Score arc */}
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          fill="none"
-          stroke={color}
-          strokeWidth={stroke}
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          strokeLinecap="round"
-          className="transition-all duration-700 ease-out"
-          style={{ filter: `drop-shadow(0 0 4px ${color})` }}
-        />
-      </svg>
-      <div className="absolute inset-0 flex items-center justify-center">
-        <span className="text-lg font-bold text-[var(--text)]">{score}%</span>
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-[var(--textTertiary)]">
+        <TrendingDown size={13} />
+        Areas to improve
+      </span>
+      {areas.map((area) => (
+        <Badge key={area} variant="error" size="sm">
+          {area} {suffix}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
+/** Score + status block reused by both summary headers. */
+function SummaryScore({
+  score,
+  status,
+  caption,
+  detail,
+}: {
+  /** Percentage, or null/undefined when the module has nothing to score. */
+  score?: number | null;
+  status?: string;
+  caption: string;
+  /** Raw figure the percentage came from, e.g. "19/30 marks". */
+  detail?: string;
+}) {
+  return (
+    <div className="flex items-center gap-4">
+      {score !== undefined && score !== null ? (
+        <RadialScore score={score} size={76} stroke={8} status={status} />
+      ) : (
+        <div className="w-[76px] h-[76px] rounded-full border-[7px] border-[var(--borderMuted)] flex items-center justify-center flex-shrink-0">
+          <span className="text-xs font-semibold text-[var(--textTertiary)]">N/A</span>
+        </div>
+      )}
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--textTertiary)]">
+          {caption}
+        </p>
+        {detail && <p className="text-xs text-[var(--textSecondary)] mt-1">{detail}</p>}
+        {status && (
+          <div className="mt-1.5">
+            <Badge variant={statusVariant(status)} size="md">{status}</Badge>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -408,171 +1211,193 @@ function RadialScore({
 function OverviewTab({
   aptitude,
   coding,
-  aptitudeQuestions,
+  aptitudeScore,
+  codingScore,
+  aptitudeAnswers,
+  aptitudeSubmission,
+  codingSubmission,
+  codingRows,
   codingStats,
-  submissions,
+  rounds,
+  selectedAttempts,
+  onSelectAttempt,
+  onOpenTab,
 }: {
   aptitude?: Result;
   coding?: Result;
-  aptitudeQuestions: AptitudeQuestion[];
-  codingStats: { totalQ: number; totalTests: number; passedTests: number; qPassed: number };
-  submissions: CodeSubmissionResponse[];
+  aptitudeScore: number | null;
+  codingScore: number | null;
+  aptitudeAnswers: AptitudeAnswer[];
+  /** How each module's attempt ended — recorded per result, so one each. */
+  aptitudeSubmission?: SubmissionMeta;
+  codingSubmission?: SubmissionMeta;
+  codingRows: CodingRow[];
+  codingStats: ReturnType<typeof summarizeCoding>;
+  /** Every attempt at this exam, grouped into rounds. */
+  rounds: AttemptSummary[][];
+  selectedAttempts: Partial<Record<'APTITUDE' | 'CODING', number>>;
+  onSelectAttempt: (type: 'APTITUDE' | 'CODING', index: number) => void;
+  onOpenTab: (tab: DetailTab) => void;
 }) {
-  const categoryBreakdown = useMemo(() => {
-    if (aptitudeQuestions.length === 0) return [];
-    const cats = new Map<string, { total: number; correct: number }>();
-    for (const q of aptitudeQuestions) {
-      const cat = q.Difficulty || q.category || 'General';
-      if (!cats.has(cat)) cats.set(cat, { total: 0, correct: 0 });
-      const c = cats.get(cat)!;
-      c.total++;
-      if (q.isCorrect) c.correct++;
-    }
-    return Array.from(cats.entries()).map(([name, { total, correct }]) => ({
-      name,
-      total,
-      correct,
-      pct: Math.round((correct / total) * 100),
-    }));
-  }, [aptitudeQuestions]);
+  const aptitudeBands = useMemo(() => groupAptitudeByBand(aptitudeAnswers), [aptitudeAnswers]);
+  const codingBands = useMemo(() => groupCodingByBand(codingRows), [codingRows]);
+  const aptStats = useMemo(() => summarizeAptitude(aptitudeAnswers), [aptitudeAnswers]);
 
   const languageBreakdown = useMemo(() => {
     const langs = new Map<string, number>();
-    for (const s of submissions) {
-      const lang = s.language || 'Unknown';
+    for (const row of codingRows) {
+      const lang = rowLanguage(row);
+      if (!lang) continue;
       langs.set(lang, (langs.get(lang) ?? 0) + 1);
     }
     return Array.from(langs.entries());
-  }, [submissions]);
+  }, [codingRows]);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div className="space-y-6">
+      {/* What each round of this exam consisted of — only when there was more
+          than one, since a single attempt has no history to explain. */}
+      <AttemptRounds
+        rounds={rounds}
+        selected={selectedAttempts}
+        onSelect={onSelectAttempt}
+      />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       {/* Aptitude Summary Card */}
       {aptitude && (
         <Card>
           <CardHeader>
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'var(--infoMuted, rgba(6,182,212,0.12))' }}>
-                <BookOpen size={16} style={{ color: 'var(--info)' }} />
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className="w-8 h-8 rounded-lg flex items-center justify-center"
+                  style={{ background: 'var(--infoMuted, rgba(6,182,212,0.12))' }}
+                >
+                  <BookOpen size={16} style={{ color: 'var(--info)' }} />
+                </div>
+                <CardTitle>Aptitude Summary</CardTitle>
               </div>
-              <CardTitle>Aptitude Summary</CardTitle>
+              <MiniButton onClick={() => onOpenTab('aptitude')}>Details</MiniButton>
             </div>
           </CardHeader>
           <CardContent>
             <div className="space-y-5">
-              {/* Score + status row */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <RadialScore score={aptitude.score} size={64} stroke={7} />
-                  <div>
-                    <p className="text-xl font-bold text-[var(--text)]">{aptitude.score}%</p>
-                    <Badge variant={statusVariant(aptitude.status)} size="sm">
-                      {aptitude.status}
-                    </Badge>
-                  </div>
-                </div>
+              <div className="flex items-center justify-between gap-4">
+                <SummaryScore
+                  score={aptitudeScore}
+                  status={aptitude.status}
+                  caption="Aptitude score"
+                  detail={`${aptitude.score}${aptitude.totalMarks ? `/${aptitude.totalMarks}` : ''} marks`}
+                />
                 <div className="text-right">
-                  <p className="text-xs text-[var(--textTertiary)] uppercase tracking-wider font-medium">Questions</p>
-                  <p className="text-2xl font-bold text-[var(--text)]">{aptitudeQuestions.length}</p>
+                  <p className="text-xs text-[var(--textTertiary)] uppercase tracking-wider font-medium">
+                    Questions
+                  </p>
+                  <p className="text-2xl font-bold text-[var(--text)]">{aptStats.total}</p>
                 </div>
               </div>
 
-              {/* Stat pills */}
-              <div className="flex gap-3">
-                <StatPill
-                  value={aptitudeQuestions.filter((q) => q.isCorrect).length}
-                  label="Correct"
-                  variant="success"
-                />
-                <StatPill
-                  value={aptitudeQuestions.filter((q) => !q.isCorrect).length}
-                  label="Incorrect"
-                  variant="error"
-                />
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <SummaryStat value={aptStats.correct} label="Correct" tone="success" />
+                <SummaryStat value={aptStats.incorrect} label="Incorrect" tone="error" />
+                <SummaryStat value={aptStats.answered} label="Answered" tone="info" />
+                <SummaryStat value={aptStats.unanswered} label="Skipped" tone="warning" />
               </div>
 
-              {/* Category bars */}
-              {categoryBreakdown.length > 0 && (
+              {aptitudeBands.length > 0 && (
                 <div className="space-y-3 pt-1">
                   <p className="text-[10px] font-bold text-[var(--textTertiary)] uppercase tracking-widest">
-                    Performance by Category
+                    Performance by difficulty
                   </p>
-                  {categoryBreakdown.map((cat) => (
-                    <SkillBar key={cat.name} label={cat.name} percentage={cat.pct} detail={`${cat.correct}/${cat.total}`} />
+                  {aptitudeBands.map((band) => (
+                    <SkillBar
+                      key={band.name}
+                      label={band.name}
+                      percentage={band.pct}
+                      detail={`${band.correct}/${band.total}`}
+                    />
                   ))}
                 </div>
               )}
+
+              <SubmissionInfo
+                meta={aptitudeSubmission}
+                submittedAt={aptitude.submittedAt}
+                className="pt-1"
+              />
+
+              <AreasToImprove areas={aptitudeAreasToImprove(aptitudeBands)} suffix="Aptitude" />
             </div>
           </CardContent>
         </Card>
       )}
 
       {/* Coding Summary Card */}
-      {(coding || submissions.length > 0) && (
+      {(coding || codingRows.length > 0) && (
         <Card>
           <CardHeader>
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'rgba(168,85,247,0.12)' }}>
-                <Code2 size={16} style={{ color: '#a855f7' }} />
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className="w-8 h-8 rounded-lg flex items-center justify-center"
+                  style={{ background: 'rgba(168,85,247,0.12)' }}
+                >
+                  <Code2 size={16} style={{ color: '#a855f7' }} />
+                </div>
+                <CardTitle>Programming Summary</CardTitle>
               </div>
-              <CardTitle>Coding Summary</CardTitle>
+              <MiniButton onClick={() => onOpenTab('coding')}>Details</MiniButton>
             </div>
           </CardHeader>
           <CardContent>
             <div className="space-y-5">
-              {/* Score + status row */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  {coding ? (
-                    <RadialScore score={coding.score} size={64} stroke={7} />
-                  ) : (
-                    <div className="w-16 h-16 rounded-full border-[5px] border-[var(--borderMuted)] flex items-center justify-center">
-                      <Code2 size={22} className="text-[var(--textTertiary)]" />
-                    </div>
-                  )}
-                  <div>
-                    {coding ? (
-                      <>
-                        <p className="text-xl font-bold text-[var(--text)]">{coding.score}%</p>
-                        <Badge variant={statusVariant(coding.status)} size="sm">
-                          {coding.status}
-                        </Badge>
-                      </>
-                    ) : (
-                      <p className="text-sm font-semibold text-[var(--text)]">Submitted</p>
-                    )}
-                  </div>
-                </div>
+              <div className="flex items-center justify-between gap-4">
+                <SummaryScore
+                  score={codingScore}
+                  status={coding?.status}
+                  caption="Coding score"
+                  detail={`${codingStats.passedTests}/${codingStats.totalTests} test cases passed`}
+                />
                 <div className="text-right">
-                  <p className="text-xs text-[var(--textTertiary)] uppercase tracking-wider font-medium">Questions</p>
+                  <p className="text-xs text-[var(--textTertiary)] uppercase tracking-wider font-medium">
+                    Questions
+                  </p>
                   <p className="text-2xl font-bold text-[var(--text)]">{codingStats.totalQ}</p>
                 </div>
               </div>
 
-              {/* Stat pills */}
-              <div className="flex gap-3">
-                <StatPill value={codingStats.qPassed} label="Q Passed" variant="success" />
-                <StatPill
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <SummaryStat value={codingStats.solved} label="Solved" tone="success" />
+                <SummaryStat value={codingStats.unsolved} label="Unsolved" tone="error" />
+                <SummaryStat
                   value={`${codingStats.passedTests}/${codingStats.totalTests}`}
-                  label="Test Cases"
-                  variant="info"
+                  label="Test cases"
+                  tone="info"
                 />
-                <StatPill
-                  value={
-                    codingStats.totalTests > 0
-                      ? `${Math.round((codingStats.passedTests / codingStats.totalTests) * 100)}%`
-                      : '0%'
-                  }
-                  label="Pass Rate"
-                  variant="primary"
-                />
+                <SummaryStat value={`${codingStats.passRate}%`} label="Pass rate" tone="primary" />
               </div>
 
-              {/* Language breakdown */}
+              {codingBands.length > 0 && (
+                <div className="space-y-3 pt-1">
+                  <p className="text-[10px] font-bold text-[var(--textTertiary)] uppercase tracking-widest">
+                    Test cases by difficulty
+                  </p>
+                  {codingBands.map((band) => (
+                    <SkillBar
+                      key={band.name}
+                      label={band.name}
+                      percentage={band.pct}
+                      detail={`${band.testsPassed}/${band.testsTotal}`}
+                    />
+                  ))}
+                </div>
+              )}
+
               {languageBreakdown.length > 0 && (
                 <div className="space-y-2.5 pt-1">
                   <p className="text-[10px] font-bold text-[var(--textTertiary)] uppercase tracking-widest">
-                    Languages Used
+                    Languages used
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {languageBreakdown.map(([lang, count]) => (
@@ -584,101 +1409,17 @@ function OverviewTab({
                 </div>
               )}
 
-              {/* Per-question quick grid */}
-              {submissions.length > 0 && (
-                <div className="space-y-2.5 pt-1">
-                  <p className="text-[10px] font-bold text-[var(--textTertiary)] uppercase tracking-widest">
-                    Question Results
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {submissions.map((sub, idx) => {
-                      const allPass =
-                        sub.testResults?.length > 0 && sub.testResults.every((t) => t.passed);
-                      return (
-                        <div
-                          key={sub.questionId ?? idx}
-                          className="w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold border transition-colors"
-                          style={{
-                            background: allPass
-                              ? 'var(--successMuted, rgba(16,185,129,0.12))'
-                              : 'var(--errorMuted, rgba(239,68,68,0.12))',
-                            borderColor: allPass ? 'var(--success)' : 'var(--error)',
-                            color: allPass ? 'var(--success)' : 'var(--error)',
-                            opacity: 0.9,
-                          }}
-                          title={`Q${sub.questionId ?? idx + 1}: ${allPass ? 'Passed' : 'Failed'}`}
-                        >
-                          Q{sub.questionId ?? idx + 1}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+              <SubmissionInfo
+                meta={codingSubmission}
+                submittedAt={coding?.submittedAt}
+                className="pt-1"
+              />
+
+              <AreasToImprove areas={codingAreasToImprove(codingBands)} suffix="Programming" />
             </div>
           </CardContent>
         </Card>
       )}
-    </div>
-  );
-}
-
-// ── Stat Pill ─────────────────────────────────────────────────────────
-
-function StatPill({
-  value,
-  label,
-  variant,
-}: {
-  value: number | string;
-  label: string;
-  variant: 'success' | 'error' | 'info' | 'primary' | 'warning';
-}) {
-  const colorMap: Record<string, { bg: string; text: string }> = {
-    success: { bg: 'var(--successMuted, rgba(16,185,129,0.12))', text: 'var(--success)' },
-    error: { bg: 'var(--errorMuted, rgba(239,68,68,0.12))', text: 'var(--error)' },
-    info: { bg: 'var(--infoMuted, rgba(6,182,212,0.12))', text: 'var(--info)' },
-    primary: { bg: 'var(--primaryMuted, rgba(16,185,129,0.12))', text: 'var(--primary)' },
-    warning: { bg: 'var(--warningMuted, rgba(245,158,11,0.12))', text: 'var(--warning)' },
-  };
-  const colors = colorMap[variant];
-
-  return (
-    <div
-      className="flex-1 text-center py-3 px-2 rounded-xl border transition-colors"
-      style={{
-        background: colors.bg,
-        borderColor: 'transparent',
-      }}
-    >
-      <p className="text-lg font-bold" style={{ color: colors.text }}>
-        {value}
-      </p>
-      <p className="text-[10px] font-semibold mt-0.5" style={{ color: colors.text, opacity: 0.7 }}>
-        {label}
-      </p>
-    </div>
-  );
-}
-
-// ── Skill Bar ──────────────────────────────────────────────────────────
-
-function SkillBar({ label, percentage, detail }: { label: string; percentage: number; detail: string }) {
-  const color = scoreColor(percentage);
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-1.5">
-        <span className="text-sm font-medium text-[var(--text)]">{label}</span>
-        <span className="text-xs font-semibold" style={{ color }}>
-          {percentage}%{' '}
-          <span className="text-[var(--textTertiary)] font-normal">({detail})</span>
-        </span>
-      </div>
-      <div className="h-2 rounded-full bg-[var(--bgWash)] overflow-hidden">
-        <div
-          className="h-full rounded-full transition-all duration-700 ease-out"
-          style={{ width: `${percentage}%`, backgroundColor: color }}
-        />
       </div>
     </div>
   );
@@ -686,11 +1427,79 @@ function SkillBar({ label, percentage, detail }: { label: string; percentage: nu
 
 // ── Aptitude Tab ───────────────────────────────────────────────────────
 
-function AptitudeTab({ result, questions }: { result: Result; questions: AptitudeQuestion[] }) {
-  const correct = questions.filter((q) => q.isCorrect).length;
-  const incorrect = questions.length - correct;
+function AptitudeTab({
+  result,
+  score,
+  answers,
+  paper,
+  examWindow,
+  examSchedule,
+  assessmentId,
+  attemptWindow,
+  candidateEmail,
+  lookupError,
+  jobPrefix,
+}: Readonly<{
+  result: Result;
+  score: number | null;
+  answers: AptitudeAnswer[];
+  paper: RawQuestion[];
+  examWindow?: string | null;
+  /** The scheduled window itself, e.g. "Aug 23, 2026 11:10 → Aug 24, 2026 12:06". */
+  examSchedule?: string | null;
+  /** Attempt these proctoring captures belong to. */
+  assessmentId?: number;
+  /** When that attempt was live, so a re-sit shows its own captures. */
+  attemptWindow?: AttemptWindow;
+  /** The candidate, so captures can be looked up across all their attempts. */
+  candidateEmail?: string;
+  /** Set when the assessment lookup failed, so absence isn't reported as fact. */
+  lookupError?: string | null;
+  jobPrefix: string;
+}>) {
+  const [filter, setFilter] = useState<AptitudeFilter>('all');
+  const [band, setBand] = useState<string>(ALL_BANDS);
+  const [paperOpen, setPaperOpen] = useState(false);
+  const [paperDownload, setPaperDownload] = useState(false);
+  const [highlight, setHighlight] = useState<number | null>(null);
 
-  if (questions.length === 0) {
+  const stats = useMemo(() => summarizeAptitude(answers), [answers]);
+  const bands = useMemo(() => groupAptitudeByBand(answers), [answers]);
+  const exportPaper = useMemo(() => aptitudePaperForExport(paper, answers), [paper, answers]);
+
+  // Chips in the band cards jump straight to the question they describe.
+  const jumpToQuestion = useCallback((index: number) => {
+    setFilter('all');
+    setBand(ALL_BANDS);
+    setHighlight(index);
+    requestAnimationFrame(() => {
+      document
+        .getElementById(`apt-q-${index}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  }, []);
+
+  useEffect(() => {
+    if (highlight === null) return;
+    const timer = setTimeout(() => setHighlight(null), 2000);
+    return () => clearTimeout(timer);
+  }, [highlight]);
+
+  const visible = useMemo(
+    () =>
+      answers
+        .map((q, index) => ({ q, index }))
+        .filter(({ q }) => {
+          if (band !== ALL_BANDS && normalizeBand(q.Difficulty || q.category) !== band) return false;
+          if (filter === 'correct') return !!q.isCorrect;
+          if (filter === 'incorrect') return !q.isCorrect && isAnswered(q);
+          if (filter === 'unanswered') return !isAnswered(q);
+          return true;
+        }),
+    [answers, filter, band],
+  );
+
+  if (answers.length === 0) {
     return (
       <Card>
         <CardContent>
@@ -704,129 +1513,234 @@ function AptitudeTab({ result, questions }: { result: Result; questions: Aptitud
 
   return (
     <div className="space-y-5">
-      {/* Header stats */}
+      {/* Summary */}
       <Card variant="elevated">
         <CardContent>
-          <div className="flex flex-wrap items-center gap-6">
-            <div className="flex items-center gap-4">
-              <RadialScore score={result.score} size={56} stroke={7} />
-              <div>
-                <p className="text-xl font-bold text-[var(--text)]">{result.score}%</p>
-                <Badge variant={statusVariant(result.status)} size="sm">{result.status}</Badge>
+          <div className="space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <SummaryScore
+                score={score}
+                status={result.status}
+                caption="Aptitude summary"
+                detail={`${result.score}${result.totalMarks ? `/${result.totalMarks}` : ''} marks · ${stats.correct}/${stats.total} correct`}
+              />
+              {/* Stacked and full-width on a phone — see the coding tab. */}
+              <div className="flex flex-col items-stretch sm:items-end gap-1.5 w-full sm:w-auto">
+                <div className="flex flex-col sm:flex-row flex-wrap gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    leftIcon={<FileText size={15} />}
+                    onClick={() => setPaperOpen(true)}
+                  >
+                    View Question Paper
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    leftIcon={<Download size={15} />}
+                    disabled={exportPaper.length === 0}
+                    onClick={() => setPaperDownload(true)}
+                  >
+                    Download Paper
+                  </Button>
+                </div>
+                {/* Say when the download is a reconstruction, not the original. */}
+                {paper.length === 0 && exportPaper.length > 0 && (
+                  <p className="text-[11px] text-[var(--textTertiary)] text-left sm:text-right sm:max-w-xs">
+                    Original paper unavailable — rebuilt from the stored result, without the
+                    answer options.
+                  </p>
+                )}
               </div>
             </div>
-            <div className="h-10 w-px bg-[var(--borderMuted)]" />
-            <div className="flex flex-wrap gap-5 text-sm">
-              <span className="text-[var(--textSecondary)]">
-                Total: <strong className="text-[var(--text)]">{questions.length}</strong>
-              </span>
-              <span style={{ color: 'var(--success)' }}>
-                Correct: <strong>{correct}</strong>
-              </span>
-              <span style={{ color: 'var(--error)' }}>
-                Incorrect: <strong>{incorrect}</strong>
-              </span>
-              <span className="text-[var(--textSecondary)]">
-                Accuracy:{' '}
-                <strong className="text-[var(--text)]">
-                  {Math.round((correct / questions.length) * 100)}%
-                </strong>
-              </span>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+              <SummaryStat icon={<ListChecks size={13} />} value={stats.total} label="Total questions" />
+              <SummaryStat icon={<CheckCircle size={13} />} value={stats.correct} label="Correct" tone="success" />
+              <SummaryStat icon={<XCircle size={13} />} value={stats.incorrect} label="Incorrect" tone="error" />
+              <SummaryStat icon={<HelpCircle size={13} />} value={stats.answered} label="Answered" tone="info" />
+              <SummaryStat icon={<AlertTriangle size={13} />} value={stats.unanswered} label="Unanswered" tone="warning" />
+              <SummaryStat
+                icon={<Percent size={13} />}
+                value={`${stats.accuracy}%`}
+                label="Accuracy"
+                tone="primary"
+              />
             </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <AreasToImprove areas={aptitudeAreasToImprove(bands)} suffix="Aptitude" />
+              {examWindow && (
+                <span
+                  className="inline-flex items-center gap-1.5 text-xs text-[var(--textSecondary)]"
+                  title={examSchedule ?? undefined}
+                >
+                  <Clock size={13} className="text-[var(--textTertiary)]" />
+                  Exam window: <strong className="text-[var(--text)]">{examWindow}</strong>
+                  {examSchedule && (
+                    <span className="text-[var(--textTertiary)]">({examSchedule})</span>
+                  )}
+                </span>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Who sat this exam, and the room they sat it in */}
+      <ProctoringCaptures
+        attemptWindow={attemptWindow}
+        candidateEmail={candidateEmail}
+        jobPrefix={jobPrefix}
+        assessmentId={assessmentId}
+        lookupError={lookupError}
+        moduleLabel="Aptitude"
+      />
+
+      {/* Difficulty bands */}
+      <AptitudeBandCards bands={bands} onSelectQuestion={jumpToQuestion} />
+
+      {/* Filters */}
+      <Card>
+        <CardContent>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+            <FilterChips<AptitudeFilter>
+              active={filter}
+              onChange={setFilter}
+              chips={[
+                { value: 'all', label: 'All', count: stats.total },
+                { value: 'correct', label: 'Correct', count: stats.correct, tone: 'success' },
+                {
+                  value: 'incorrect',
+                  label: 'Incorrect',
+                  count: answers.filter((q) => !q.isCorrect && isAnswered(q)).length,
+                  tone: 'error',
+                },
+                {
+                  value: 'unanswered',
+                  label: 'Unanswered',
+                  count: stats.unanswered,
+                  tone: 'warning',
+                },
+              ]}
+            />
+            {bands.length > 1 && (
+              <FilterChips<string>
+                active={band}
+                onChange={setBand}
+                chips={[
+                  { value: ALL_BANDS, label: 'All levels' },
+                  ...bands.map((b) => ({ value: b.name, label: b.name, count: b.total })),
+                ]}
+              />
+            )}
           </div>
         </CardContent>
       </Card>
 
       {/* Question list */}
       <div className="space-y-3">
-        {questions.map((q, idx) => (
-          <Card key={q.questionId ?? idx}>
+        {visible.length === 0 && (
+          <Card>
             <CardContent>
-              <div className="flex items-start gap-4">
-                {/* Number badge */}
-                <div
-                  className="w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold flex-shrink-0"
-                  style={{
-                    background: q.isCorrect
-                      ? 'var(--successMuted, rgba(16,185,129,0.12))'
-                      : 'var(--errorMuted, rgba(239,68,68,0.12))',
-                    color: q.isCorrect ? 'var(--success)' : 'var(--error)',
-                  }}
-                >
-                  {idx + 1}
-                </div>
-
-                {/* Content */}
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-[var(--text)] leading-relaxed">
-                    {q.questionText || q.question || `Question ${idx + 1}`}
-                  </p>
-
-                  <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[var(--textTertiary)]">Selected:</span>
-                      <span
-                        className="font-semibold px-2.5 py-1 rounded-lg"
-                        style={{
-                          background: q.isCorrect
-                            ? 'var(--successMuted, rgba(16,185,129,0.12))'
-                            : 'var(--errorMuted, rgba(239,68,68,0.12))',
-                          color: q.isCorrect ? 'var(--success)' : 'var(--error)',
-                        }}
-                      >
-                        {q.selectedAnswer ?? '--'}
-                      </span>
-                    </div>
-
-                    {!q.isCorrect && (
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[var(--textTertiary)]">Correct:</span>
-                        <span
-                          className="font-semibold px-2.5 py-1 rounded-lg"
-                          style={{
-                            background: 'var(--successMuted, rgba(16,185,129,0.12))',
-                            color: 'var(--success)',
-                          }}
-                        >
-                          {q.correctAnswer ?? '--'}
-                        </span>
-                      </div>
-                    )}
-
-                    {q.marks !== undefined && (
-                      <span className="text-[var(--textTertiary)]">
-                        Marks: <strong className="text-[var(--text)]">{q.marks}</strong>
-                      </span>
-                    )}
-
-                    {(q.Difficulty || q.category) && (
-                      <Badge variant="primary" size="sm">
-                        {q.Difficulty || q.category}
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-
-                {/* Status icon */}
-                <div
-                  className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
-                  style={{
-                    background: q.isCorrect
-                      ? 'var(--successMuted, rgba(16,185,129,0.12))'
-                      : 'var(--errorMuted, rgba(239,68,68,0.12))',
-                  }}
-                >
-                  {q.isCorrect ? (
-                    <CheckCircle size={16} style={{ color: 'var(--success)' }} />
-                  ) : (
-                    <XCircle size={16} style={{ color: 'var(--error)' }} />
-                  )}
-                </div>
-              </div>
+              <p className="text-center text-[var(--textSecondary)] py-8">
+                No questions match the current filter.
+              </p>
             </CardContent>
           </Card>
-        ))}
+        )}
+
+        {visible.map(({ q, index }) => {
+          const outcome = answerOutcome(q.isCorrect, isAnswered(q));
+          const style = OUTCOME[outcome];
+          const isHighlighted = highlight === index;
+
+          return (
+            <div key={q.questionId ?? index} id={`apt-q-${index}`}>
+              <Card
+                className={isHighlighted ? 'ring-2 ring-[var(--primary)] ring-offset-2 ring-offset-[var(--background)]' : ''}
+              >
+                <CardContent>
+                  <div className="flex items-start gap-4">
+                    <div
+                      className="w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold flex-shrink-0"
+                      style={{ background: style.bg, color: style.color }}
+                    >
+                      {index + 1}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-[var(--text)] leading-relaxed">
+                        {q.questionText || q.question || `Question ${index + 1}`}
+                      </p>
+
+                      <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[var(--textTertiary)]">Selected:</span>
+                          <span
+                            className="font-semibold px-2.5 py-1 rounded-lg"
+                            style={{ background: style.bg, color: style.color }}
+                          >
+                            {(q.selectedAnswer ?? '').toString().trim() || 'Not answered'}
+                          </span>
+                        </div>
+
+                        {!q.isCorrect && (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[var(--textTertiary)]">Correct:</span>
+                            <span
+                              className="font-semibold px-2.5 py-1 rounded-lg"
+                              style={{
+                                background: OUTCOME.pass.bg,
+                                color: OUTCOME.pass.color,
+                              }}
+                            >
+                              {q.correctAnswer ?? '--'}
+                            </span>
+                          </div>
+                        )}
+
+                        {q.marks !== undefined && (
+                          <span className="text-[var(--textTertiary)]">
+                            Marks: <strong className="text-[var(--text)]">{q.marks}</strong>
+                          </span>
+                        )}
+
+                        <Badge variant="primary" size="sm">
+                          {normalizeBand(q.Difficulty || q.category)}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <div
+                      className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0"
+                      style={{ background: style.bg, color: style.color }}
+                    >
+                      <OutcomeIcon outcome={outcome} size={16} />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          );
+        })}
       </div>
+
+      <AptitudePaperModal
+        isOpen={paperOpen}
+        onClose={() => setPaperOpen(false)}
+        paper={paper}
+        answers={answers}
+      />
+
+      {paperDownload && (
+        <QuestionPaperExportDialog
+          file={paperAsFile(exportPaper, `${jobPrefix}_aptitude_questions`)}
+          title={`${jobPrefix} — Aptitude Question Paper`}
+          onClose={() => setPaperDownload(false)}
+        />
+      )}
     </div>
   );
 }
@@ -835,14 +1749,57 @@ function AptitudeTab({ result, questions }: { result: Result; questions: Aptitud
 
 function CodingTab({
   result,
-  submissions,
-}: {
+  score,
+  rows,
+  examWindow,
+  examSchedule,
+  assessmentId,
+  attemptWindow,
+  candidateEmail,
+  lookupError,
+  paper,
+  jobPrefix,
+}: Readonly<{
   result?: Result;
-  submissions: CodeSubmissionResponse[];
-}) {
+  score: number | null;
+  rows: CodingRow[];
+  examWindow?: string | null;
+  /** The scheduled window itself, e.g. "Aug 23, 2026 11:10 → Aug 24, 2026 12:06". */
+  examSchedule?: string | null;
+  /** Attempt these proctoring captures belong to. */
+  assessmentId?: number;
+  /** When that attempt was live, so a re-sit shows its own captures. */
+  attemptWindow?: AttemptWindow;
+  /** The candidate, so captures can be looked up across all their attempts. */
+  candidateEmail?: string;
+  /** Set when the assessment lookup failed, so absence isn't reported as fact. */
+  lookupError?: string | null;
+  paper: RawCodingQuestion[];
+  jobPrefix: string;
+}>) {
   const [expandedQ, setExpandedQ] = useState<string | null>(null);
+  const [filter, setFilter] = useState<CodingFilter>('all');
+  const [paperOpen, setPaperOpen] = useState(false);
+  const [paperDownload, setPaperDownload] = useState(false);
+  const [codeRow, setCodeRow] = useState<CodingRow | null>(null);
+  const [outputRow, setOutputRow] = useState<CodingRow | null>(null);
 
-  if (submissions.length === 0) {
+  const stats = useMemo(() => summarizeCoding(rows), [rows]);
+  const bands = useMemo(() => groupCodingByBand(rows), [rows]);
+  const exportPaper = useMemo(() => codingPaperForExport(paper, rows), [paper, rows]);
+
+  const visible = useMemo(
+    () =>
+      rows.filter((row) => {
+        if (filter === 'solved') return isRowSolved(row);
+        if (filter === 'failed') return !isRowSolved(row) && isRowAttempted(row);
+        if (filter === 'skipped') return !isRowAttempted(row);
+        return true;
+      }),
+    [rows, filter],
+  );
+
+  if (rows.length === 0) {
     return (
       <Card>
         <CardContent>
@@ -854,42 +1811,83 @@ function CodingTab({
     );
   }
 
-  const totalTests = submissions.reduce((s, sub) => s + (sub.testResults?.length ?? 0), 0);
-  const passedTests = submissions.reduce(
-    (s, sub) => s + (sub.testResults?.filter((t) => t.passed).length ?? 0),
-    0,
-  );
-  const passRate = totalTests > 0 ? Math.round((passedTests / totalTests) * 100) : 0;
-
   return (
     <div className="space-y-5">
-      {/* Header stats */}
+      {/* Summary */}
       <Card variant="elevated">
         <CardContent>
-          <div className="flex flex-wrap items-center gap-6">
-            {result && (
-              <>
-                <div className="flex items-center gap-4">
-                  <RadialScore score={result.score} size={56} stroke={7} />
-                  <div>
-                    <p className="text-xl font-bold text-[var(--text)]">{result.score}%</p>
-                    <Badge variant={statusVariant(result.status)} size="sm">{result.status}</Badge>
-                  </div>
+          <div className="space-y-5">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <SummaryScore
+                score={score}
+                status={result?.status}
+                caption="Programming summary"
+                detail={`${stats.passedTests}/${stats.totalTests} test cases · ${stats.solved}/${stats.totalQ} solved`}
+              />
+              {/* Left-aligned and full-width on a phone: two right-aligned
+                  buttons with long labels overflowed the card. */}
+              <div className="flex flex-col items-stretch sm:items-end gap-1.5 w-full sm:w-auto">
+                <div className="flex flex-col sm:flex-row flex-wrap gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    leftIcon={<FileText size={15} />}
+                    onClick={() => setPaperOpen(true)}
+                  >
+                    View Programming Question Paper
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    leftIcon={<Download size={15} />}
+                    disabled={exportPaper.length === 0}
+                    onClick={() => setPaperDownload(true)}
+                  >
+                    Download Paper
+                  </Button>
                 </div>
-                <div className="h-10 w-px bg-[var(--borderMuted)]" />
-              </>
-            )}
-            <div className="flex flex-wrap gap-5 text-sm">
-              <span className="text-[var(--textSecondary)]">
-                Questions: <strong className="text-[var(--text)]">{submissions.length}</strong>
-              </span>
-              <span style={{ color: 'var(--success)' }}>
-                Test Cases: <strong>{passedTests}/{totalTests}</strong>
-              </span>
-              {totalTests > 0 && (
-                <span className="text-[var(--textSecondary)]">
-                  Pass Rate:{' '}
-                  <strong style={{ color: scoreColor(passRate) }}>{passRate}%</strong>
+                {/* Say when the download is a reconstruction, not the original. */}
+                {paper.length === 0 && exportPaper.length > 0 && (
+                  <p className="text-[11px] text-[var(--textTertiary)] text-left sm:text-right sm:max-w-xs">
+                    Original paper unavailable — rebuilt from the stored result, so problem
+                    statements may be partial.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+              <SummaryStat icon={<ListChecks size={13} />} value={stats.totalQ} label="Total questions" />
+              <SummaryStat icon={<CheckCircle size={13} />} value={stats.solved} label="Solved" tone="success" />
+              <SummaryStat icon={<XCircle size={13} />} value={stats.unsolved} label="Unsolved" tone="error" />
+              <SummaryStat icon={<Code2 size={13} />} value={stats.attempted} label="Attempted" tone="info" />
+              <SummaryStat
+                icon={<AlertTriangle size={13} />}
+                value={stats.notAttempted}
+                label="Not attempted"
+                tone="warning"
+              />
+              <SummaryStat
+                icon={<Target size={13} />}
+                value={`${stats.passedTests}/${stats.totalTests}`}
+                label="Test cases"
+                tone="primary"
+                hint={`${stats.passRate}% pass rate`}
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <AreasToImprove areas={codingAreasToImprove(bands)} suffix="Programming" />
+              {examWindow && (
+                <span
+                  className="inline-flex items-center gap-1.5 text-xs text-[var(--textSecondary)]"
+                  title={examSchedule ?? undefined}
+                >
+                  <Clock size={13} className="text-[var(--textTertiary)]" />
+                  Exam window: <strong className="text-[var(--text)]">{examWindow}</strong>
+                  {examSchedule && (
+                    <span className="text-[var(--textTertiary)]">({examSchedule})</span>
+                  )}
                 </span>
               )}
             </div>
@@ -897,227 +1895,288 @@ function CodingTab({
         </CardContent>
       </Card>
 
+      {/* Who sat this exam, and the room they sat it in */}
+      <ProctoringCaptures
+        attemptWindow={attemptWindow}
+        candidateEmail={candidateEmail}
+        jobPrefix={jobPrefix}
+        assessmentId={assessmentId}
+        lookupError={lookupError}
+        moduleLabel="Coding"
+      />
+
+      {/* Difficulty bands */}
+      <CodingBandCards bands={bands} onViewCode={setCodeRow} onViewOutput={setOutputRow} />
+
+      {/* Filters */}
+      <Card>
+        <CardContent>
+          <FilterChips<CodingFilter>
+            active={filter}
+            onChange={setFilter}
+            chips={[
+              { value: 'all', label: 'All', count: stats.totalQ },
+              { value: 'solved', label: 'Solved', count: stats.solved, tone: 'success' },
+              {
+                value: 'failed',
+                label: 'Failing',
+                count: rows.filter((r) => !isRowSolved(r) && isRowAttempted(r)).length,
+                tone: 'error',
+              },
+              {
+                value: 'skipped',
+                label: 'Not attempted',
+                count: stats.notAttempted,
+                tone: 'warning',
+              },
+            ]}
+          />
+        </CardContent>
+      </Card>
+
       {/* Per-question cards */}
       <div className="space-y-3">
-        {submissions.map((sub, idx) => {
-          const qId = sub.questionId ?? `q-${idx}`;
-          const isExpanded = expandedQ === qId;
-          const tests = sub.testResults ?? [];
-          const allPass = tests.length > 0 && tests.every((t) => t.passed);
-          const passCount = tests.filter((t) => t.passed).length;
+        {visible.length === 0 && (
+          <Card>
+            <CardContent>
+              <p className="text-center text-[var(--textSecondary)] py-8">
+                No questions match the current filter.
+              </p>
+            </CardContent>
+          </Card>
+        )}
 
-          return (
-            <Card key={qId}>
-              {/* Question Header — clickable */}
-              <button
-                onClick={() => setExpandedQ(isExpanded ? null : qId)}
-                className="w-full text-left transition-colors"
-              >
-                <CardContent>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold"
-                        style={{
-                          background: allPass
-                            ? 'var(--successMuted, rgba(16,185,129,0.12))'
-                            : 'var(--errorMuted, rgba(239,68,68,0.12))',
-                          color: allPass ? 'var(--success)' : 'var(--error)',
-                        }}
-                      >
-                        Q{sub.questionId ?? idx + 1}
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-[var(--text)]">
-                          Question {sub.questionId ?? idx + 1}
-                        </p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <Badge variant="primary" size="sm">{sub.language}</Badge>
-                          <Badge variant={allPass ? 'success' : 'error'} size="sm">
-                            {passCount}/{tests.length} passed
-                          </Badge>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="w-8 h-8 rounded-full flex items-center justify-center"
-                        style={{
-                          background: allPass
-                            ? 'var(--successMuted, rgba(16,185,129,0.12))'
-                            : 'var(--errorMuted, rgba(239,68,68,0.12))',
-                        }}
-                      >
-                        {allPass ? (
-                          <CheckCircle size={16} style={{ color: 'var(--success)' }} />
-                        ) : (
-                          <XCircle size={16} style={{ color: 'var(--error)' }} />
-                        )}
-                      </div>
-                      {isExpanded ? (
-                        <ChevronUp size={18} className="text-[var(--textTertiary)]" />
-                      ) : (
-                        <ChevronDown size={18} className="text-[var(--textTertiary)]" />
-                      )}
-                    </div>
-                  </div>
-                </CardContent>
-              </button>
-
-              {/* Expanded Content */}
-              {isExpanded && (
-                <div className="px-6 pb-6 space-y-5 border-t border-[var(--borderMuted)]">
-                  {/* Code Viewer */}
-                  {sub.script && (
-                    <div className="mt-5">
-                      <div className="flex items-center justify-between mb-2.5">
-                        <p className="text-[10px] font-bold text-[var(--textTertiary)] uppercase tracking-widest">
-                          Submitted Code
-                        </p>
-                        <Badge variant="primary" size="sm">{sub.language}</Badge>
-                      </div>
-                      <div className="rounded-xl overflow-hidden border border-[var(--borderMuted)]">
-                        <div
-                          className="px-5 py-3 text-xs font-semibold flex items-center gap-2 border-b border-[var(--borderMuted)]"
-                          style={{ background: 'var(--bgSubtle)', color: 'var(--textSecondary)' }}
-                        >
-                          <Zap size={12} />
-                          {sub.language}
-                        </div>
-                        <pre
-                          className="text-[13px] leading-6 p-5 overflow-x-auto max-h-[400px] overflow-y-auto font-mono"
-                          style={{
-                            background: 'var(--bgMuted)',
-                            color: 'var(--text)',
-                          }}
-                        >
-                          <code>
-                            {sub.script.split('\n').map((line, i) => (
-                              <div key={i} className="flex hover:bg-[var(--bgSubtle)] -mx-5 px-5 transition-colors">
-                                <span
-                                  className="select-none w-10 text-right mr-5 flex-shrink-0 font-mono"
-                                  style={{ color: 'var(--textQuaternary)' }}
-                                >
-                                  {i + 1}
-                                </span>
-                                <span className="flex-1">{line || ' '}</span>
-                              </div>
-                            ))}
-                          </code>
-                        </pre>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Test Case Results */}
-                  {tests.length > 0 && (
-                    <div>
-                      <p className="text-[10px] font-bold text-[var(--textTertiary)] uppercase tracking-widest mb-3">
-                        Test Case Results
-                      </p>
-                      <div className="space-y-3">
-                        {tests.map((tc, tIdx) => (
-                          <div
-                            key={tIdx}
-                            className="rounded-xl border overflow-hidden"
-                            style={{
-                              borderColor: tc.passed ? 'var(--success)' : 'var(--error)',
-                              borderWidth: '1px',
-                            }}
-                          >
-                            {/* Test case header */}
-                            <div
-                              className="flex items-center justify-between px-4 py-3"
-                              style={{
-                                background: tc.passed
-                                  ? 'var(--successMuted, rgba(16,185,129,0.08))'
-                                  : 'var(--errorMuted, rgba(239,68,68,0.08))',
-                              }}
-                            >
-                              <div className="flex items-center gap-2.5">
-                                {tc.passed ? (
-                                  <CheckCircle size={15} style={{ color: 'var(--success)' }} />
-                                ) : (
-                                  <XCircle size={15} style={{ color: 'var(--error)' }} />
-                                )}
-                                <span className="text-sm font-semibold text-[var(--text)]">
-                                  Test Case {tIdx + 1}
-                                </span>
-                              </div>
-                              <Badge variant={tc.passed ? 'success' : 'error'} size="sm">
-                                {tc.passed ? 'PASS' : 'FAIL'}
-                              </Badge>
-                            </div>
-
-                            {/* IO details */}
-                            <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-[var(--borderMuted)]">
-                              <IOBlock label="Input" value={tc.input} />
-                              <IOBlock label="Expected Output" value={tc.expectedOutput ?? ''} />
-                              <IOBlock
-                                label="Actual Output"
-                                value={tc.actualOutput}
-                                highlight={!tc.passed}
-                              />
-                            </div>
-
-                            {/* Error info */}
-                            {tc.errorInfo && (
-                              <div
-                                className="px-4 py-3 border-t"
-                                style={{
-                                  background: 'var(--errorMuted, rgba(239,68,68,0.06))',
-                                  borderColor: 'var(--error)',
-                                }}
-                              >
-                                <div className="flex items-start gap-2 text-xs" style={{ color: 'var(--error)' }}>
-                                  <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
-                                  <div>
-                                    <span className="font-bold">{tc.errorInfo.type}</span>
-                                    {tc.errorInfo.line != null && (
-                                      <span> (line {tc.errorInfo.line})</span>
-                                    )}
-                                    <span>: {tc.errorInfo.message}</span>
-                                  </div>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </Card>
-          );
-        })}
+        {visible.map((row) => (
+          <CodingQuestionCard
+            key={row.key}
+            row={row}
+            expanded={expandedQ === row.key}
+            onToggle={() => setExpandedQ(expandedQ === row.key ? null : row.key)}
+            onViewCode={() => setCodeRow(row)}
+            onViewOutput={() => setOutputRow(row)}
+          />
+        ))}
       </div>
+
+      <CodingPaperModal isOpen={paperOpen} onClose={() => setPaperOpen(false)} rows={rows} />
+      <SubmittedCodeModal row={codeRow} onClose={() => setCodeRow(null)} />
+      <TestOutputModal row={outputRow} onClose={() => setOutputRow(null)} />
+
+      {paperDownload && (
+        <QuestionPaperExportDialog
+          file={paperAsFile(exportPaper, `${jobPrefix}_coding_questions`)}
+          title={`${jobPrefix} — Coding Question Paper`}
+          onClose={() => setPaperDownload(false)}
+        />
+      )}
     </div>
   );
 }
 
-// ── IO Block ───────────────────────────────────────────────────────────
+// ── Coding question card ───────────────────────────────────────────────
 
-function IOBlock({
-  label,
-  value,
-  highlight,
+function CodingQuestionCard({
+  row,
+  expanded,
+  onToggle,
+  onViewCode,
+  onViewOutput,
 }: {
-  label: string;
-  value: string;
-  highlight?: boolean;
+  row: CodingRow;
+  expanded: boolean;
+  onToggle: () => void;
+  onViewCode: () => void;
+  onViewOutput: () => void;
 }) {
+  const { label, question } = row;
+  const tests = testsOf(row);
+  const passCount = passedTestCount(row);
+  const title = rowTitle(row);
+  const prompt = question?.description || question?.question || '';
+  const code = codeOf(row);
+  const language = rowLanguage(row);
+  const outcome = codingOutcome(row);
+  const style = OUTCOME[outcome];
+  const hasCode = isRowAttempted(row);
+
   return (
-    <div className="px-4 py-3" style={{ background: 'var(--bgSubtle)' }}>
-      <p className="text-[10px] font-bold uppercase tracking-widest mb-1.5" style={{ color: 'var(--textTertiary)' }}>
-        {label}
-      </p>
-      <pre
-        className="text-xs whitespace-pre-wrap break-all font-mono leading-relaxed"
-        style={{ color: highlight ? 'var(--error)' : 'var(--text)' }}
-      >
-        {value || '(empty)'}
-      </pre>
-    </div>
+    <Card padding="none">
+      {/* Header — the title area toggles, the actions stay independently clickable */}
+      <div className="flex items-center justify-between gap-3 p-5">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex items-center gap-3 min-w-0 flex-1 text-left"
+        >
+          <div
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold flex-shrink-0"
+            style={{ background: style.bg, color: style.color }}
+          >
+            Q{label}
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-[var(--text)]">{title}</p>
+            {prompt && (
+              <p className="text-xs text-[var(--textSecondary)] mt-0.5 line-clamp-1">{prompt}</p>
+            )}
+            <div className="flex flex-wrap items-center gap-2 mt-1">
+              <Badge variant="primary" size="sm">{normalizeBand(question?.Difficulty)}</Badge>
+              {language && <Badge variant="secondary" size="sm">{language}</Badge>}
+              {tests.length > 0 && (
+                <Badge variant={outcome === 'pass' ? 'success' : 'error'} size="sm">
+                  {passCount}/{tests.length} passed
+                </Badge>
+              )}
+              {!hasCode && <Badge variant="warning" size="sm">Not attempted</Badge>}
+            </div>
+          </div>
+        </button>
+
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Quick actions — reach the code/output without expanding */}
+          <span className="hidden sm:flex items-center gap-1.5">
+            <MiniButton icon={<Code2 size={11} />} disabled={!code} onClick={onViewCode}>
+              Code
+            </MiniButton>
+            <MiniButton
+              tone="primary"
+              icon={<Terminal size={11} />}
+              disabled={tests.length === 0}
+              onClick={onViewOutput}
+            >
+              Output
+            </MiniButton>
+          </span>
+          <div
+            className="w-8 h-8 rounded-full flex items-center justify-center"
+            style={{ background: style.bg, color: style.color }}
+          >
+            <OutcomeIcon outcome={outcome} size={16} />
+          </div>
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-label={expanded ? 'Collapse question' : 'Expand question'}
+            className="p-1 rounded-lg text-[var(--textTertiary)] hover:text-[var(--text)] hover:bg-[var(--bgSubtle)] transition-colors"
+          >
+            {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+          </button>
+        </div>
+      </div>
+
+      {/* Expanded content */}
+      {expanded && (
+        <div className="px-5 pb-5 space-y-5 border-t border-[var(--borderMuted)]">
+          {/* The problem the candidate was asked to solve */}
+          <div className="mt-5">
+            <div className="flex flex-wrap items-center gap-2 mb-2.5">
+              <p className="text-[10px] font-bold text-[var(--textTertiary)] uppercase tracking-widest">
+                Question {label}
+              </p>
+              <Badge variant="primary" size="sm">{normalizeBand(question?.Difficulty)}</Badge>
+              {question?.marks !== undefined && (
+                <span className="text-xs text-[var(--textTertiary)]">
+                  Marks: <strong className="text-[var(--text)]">{question.marks}</strong>
+                </span>
+              )}
+            </div>
+            <div
+              className="rounded-xl border border-[var(--borderMuted)] px-5 py-4"
+              style={{ background: 'var(--bgSubtle)' }}
+            >
+              <p className="text-sm font-semibold text-[var(--text)]">{title}</p>
+              {prompt ? (
+                <p className="text-sm text-[var(--text)] leading-relaxed whitespace-pre-wrap mt-2">
+                  {prompt}
+                </p>
+              ) : (
+                <p className="text-xs text-[var(--textTertiary)] mt-2 italic">
+                  Full problem statement is not stored with this result.
+                </p>
+              )}
+              {(question?.sampleInput || question?.sampleOutput) && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+                  {question.sampleInput && (
+                    <IOBlock
+                      label="Sample Input"
+                      value={question.sampleInput}
+                      className="rounded-lg border border-[var(--borderMuted)]"
+                    />
+                  )}
+                  {question.sampleOutput && (
+                    <IOBlock
+                      label="Sample Output"
+                      value={question.sampleOutput}
+                      className="rounded-lg border border-[var(--borderMuted)]"
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Nothing came back from the candidate for this question. */}
+          {!hasCode && (
+            <div className="rounded-xl border border-dashed border-[var(--borderMuted)] px-5 py-6 text-center">
+              <p className="text-sm text-[var(--textSecondary)]">
+                {code
+                  ? 'The candidate left the starter template unchanged — this question was not attempted.'
+                  : 'No code recorded for this question — the candidate never attempted it.'}
+              </p>
+            </div>
+          )}
+
+          {/* Code viewer */}
+          {hasCode && (
+            <div>
+              <div className="flex items-center justify-between mb-2.5">
+                <p className="text-[10px] font-bold text-[var(--textTertiary)] uppercase tracking-widest">
+                  Submitted Code
+                </p>
+                {language && <Badge variant="primary" size="sm">{language}</Badge>}
+              </div>
+              <CodeBlock code={code} language={language} />
+            </div>
+          )}
+
+          {/* Test case results */}
+          {tests.length > 0 && (
+            <div>
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                <p className="text-[10px] font-bold text-[var(--textTertiary)] uppercase tracking-widest">
+                  Test Case Results
+                </p>
+                <span className="text-xs text-[var(--textSecondary)]">
+                  <strong style={{ color: 'var(--success)' }}>{passCount} passed</strong>
+                  {' · '}
+                  <strong style={{ color: 'var(--error)' }}>{tests.length - passCount} failed</strong>
+                  {' · '}
+                  {tests.length} total
+                </span>
+              </div>
+              <div className="space-y-3">
+                {tests.map((tc, tIdx) => (
+                  <TestCaseCard key={`${row.key}-tc-${tIdx}`} index={tIdx} test={tc} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Never ran — show what the answer would have been graded on. */}
+          {tests.length === 0 && (question?.testCases?.length ?? 0) > 0 && (
+            <div>
+              <p className="text-[10px] font-bold text-[var(--textTertiary)] uppercase tracking-widest mb-3">
+                Expected Test Cases ({question!.testCases!.length}) — none executed
+              </p>
+              <div className="space-y-3">
+                {question!.testCases!.map((tc, tIdx) => (
+                  <PlannedTestCaseCard key={`${row.key}-plan-${tIdx}`} index={tIdx} test={tc} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }

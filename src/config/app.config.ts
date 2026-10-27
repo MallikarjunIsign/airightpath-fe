@@ -2,6 +2,26 @@ export const APP_CONFIG = {
   HTTP_TIMEOUT_MS: 30000,
   AI_GENERATION_TIMEOUT_MS: 330000,
   ASSIGN_TIMEOUT_MS: 120000,
+  /**
+   * Derived from the server's own limits, not picked by feel. Backend config:
+   *   compiler.total-timeout-seconds = 45   (whole submission, execution only)
+   *   compiler.max-parallel-runs     = 4    (concurrent submissions)
+   *
+   * Execution is bounded at 45s, but a submission arriving when all four slots
+   * are busy waits for one — so the worst honest round trip is ~45s queued plus
+   * ~45s running. 120s covers that with headroom.
+   *
+   * The direction of the inequality is what matters: below the server's bound,
+   * this client aborts work the server is still validly doing, and the
+   * candidate gets a generic "try again" for a perfectly good program because
+   * the typed error was never read. Above it, the server's own limit always
+   * fires first and every failure arrives with a real reason attached.
+   *
+   * A client timeout cannot simply be removed — without one a request lost in
+   * transit spins forever. But if real responses ever approach 180s, that is
+   * backend capacity to fix, not a number to raise here.
+   */
+  COMPILE_TIMEOUT_MS: 120000,
   TOKEN_EXPIRY_SKEW_SECONDS: 30,
   MAX_FILE_SIZE_MB: 2,
   MAX_FILE_SIZE_BYTES: 2 * 1024 * 1024,
@@ -18,15 +38,45 @@ export const APP_CONFIG = {
     { value: "cpp", label: "C++" },
     { value: "javascript", label: "JavaScript" },
   ],
+  // Fallback exam length, used only when the question count is unknown (the
+  // paper failed to load, or a legacy assignment carries no timing config).
+  // The real duration is per-question — see the three values below.
   EXAM_TIMER_MINUTES: 120,
+  // Per-question time. The exam clock is questionCount x these minutes, so the
+  // duration follows the paper: add questions and the exam grows to match.
+  // Admins can override per assignment on the Assign Assessment screen.
+  APTITUDE_MINUTES_PER_QUESTION: 1,
+  CODING_MINUTES_PER_QUESTION: 25,
+  EXAM_MIN_MINUTES_PER_QUESTION: 1,
+  EXAM_MAX_MINUTES_PER_QUESTION: 180,
   INTERVIEW_TIMER_MINUTES: 60,
   INTERVIEW_QUESTION_TIMER_MINUTES: 5,
   FACE_DETECTION_MAX_WARNINGS: 999999,
   PROCTORING_MAX_TOTAL_WARNINGS: 9999999,
   VIDEO_CHUNK_SECONDS: 15,
+  /**
+   * Cut a recording into separate files this many minutes long. 0, the default,
+   * keeps each recording as one file for the whole interview.
+   *
+   * It used to default to ten, so that a closed tab lost minutes rather than the
+   * hour. That is now done a different way — the recording is one file, sent to
+   * storage in pieces as it is made, and a closed tab leaves those pieces to be
+   * finished — so the reviewer gets one video instead of a playlist with a gap
+   * between each part. Kept as a lever only: setting it brings the gaps back.
+   */
+  RECORDING_SEGMENT_MINUTES: Number(import.meta.env.VITE_RECORDING_SEGMENT_MINUTES ?? 0) || 0,
   AUDIO_CHUNK_SECONDS: 4,
   AUDIO_CHUNK_MIME_TYPE: "audio/webm;codecs=opus",
-  INTERVIEW_MAX_PROCTORING_WARNINGS: 999999,
+  /**
+   * Warnings before the candidate is told their conduct is being noted.
+   *
+   * A notice, not a limit: nothing in the interview ends on this number. It
+   * replaced INTERVIEW_MAX_PROCTORING_WARNINGS, which was a termination
+   * threshold set to 999999 to defuse it — leaving the candidate's screen
+   * counting towards a ceiling that did not exist while the server still
+   * ended the interview at five of its own.
+   */
+  INTERVIEW_PROCTORING_WARNING_NOTICE: 5,
   INTERVIEW_INACTIVITY_WARNING_SECONDS: 120,
   INTERVIEW_INACTIVITY_TIMEOUT_SECONDS: 180,
   FACE_DETECTION_INTERVAL_MS: 10000,

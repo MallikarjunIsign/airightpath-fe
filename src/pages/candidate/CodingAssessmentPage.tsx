@@ -14,8 +14,7 @@ import {
   Camera,
   EyeOff,
   Loader2,
-  Maximize,
-  ShieldAlert,
+  Users,
   AlertOctagon,
   TimerOff,
   GripHorizontal,
@@ -24,23 +23,48 @@ import {
   Code2,
   Lock,
   FileWarning,
+  Lightbulb,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/Toast';
 import { assessmentService } from '@/services/assessment.service';
 import { compilerService } from '@/services/compiler.service';
+import { extractApiError } from '@/services/api.service';
 import { useTimer } from '@/hooks/useTimer';
-import { useFullscreen } from '@/hooks/useFullscreen';
-import { usePageVisibility } from '@/hooks/usePageVisibility';
-import { useFaceDetection } from '@/hooks/useFaceDetection';
+import { useExamProctoring } from '@/hooks/useExamProctoring';
+import axios from 'axios';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Select } from '@/components/ui/Select';
 import { Modal } from '@/components/ui/Modal';
 import { APP_CONFIG } from '@/config/app.config';
+import { PROCTORING_CONFIG } from '@/config/proctoring.config';
+import { MESSAGES } from '@/config/messages';
+import {
+  CameraRequiredOverlay,
+  DesktopRequiredOverlay,
+  FullscreenRequiredOverlay,
+} from '@/components/exam/ExamOverlays';
+import { useIsDesktop } from '@/hooks/useIsDesktop';
 import { ROUTES } from '@/config/routes';
 import { formatTimer } from '@/utils/format.utils';
+import { parseServerInstant } from '@/utils/format.utils';
+import { computeExamMinutes } from '@/utils/exam-duration.utils';
+import { LANGUAGE_SKELETONS, isSkeletonCode } from '@/utils/code.utils';
+import { buildSubmissionMeta } from '@/utils/result.utils';
+// Shared with Test Mode's rehearsal of this screen — see exam-question.utils.ts.
+import { normalizeCodingQuestions } from '@/utils/exam-question.utils';
+import { isTestCaseRevealed, openTestCaseCount } from '@/config/coding-exam.config';
+import {
+  errorKind,
+  isGraded,
+  isPassed,
+  ranCleanly,
+  statusLabel,
+  statusTone,
+} from '@/utils/compiler.utils';
 import type { Assessment, CodingQuestion, RawCodingQuestion } from '@/types/assessment.types';
+
 import type { CodeSubmissionResponse, CodeErrorInfo } from '@/types/compiler.types';
 
 // ── Constants ────────────────────────────────────────────────────────
@@ -52,73 +76,12 @@ const MONACO_LANG_MAP: Record<string, string> = {
   javascript: 'javascript',
 };
 
-const LANGUAGE_SKELETONS: Record<string, string> = {
-  java: `import java.util.*;
-
-public class Solution {
-    public static void main(String[] args) {
-        Scanner sc = new Scanner(System.in);
-        // Write your solution here
-
-        sc.close();
-    }
-}
-`,
-  python: `def solve():
-    # Write your solution here
-    pass
-
-if __name__ == "__main__":
-    solve()
-`,
-  c: `#include <stdio.h>
-
-int main() {
-    // Write your solution here
-
-    return 0;
-}
-`,
-  cpp: `#include <iostream>
-using namespace std;
-
-int main() {
-    // Write your solution here
-
-    return 0;
-}
-`,
-  javascript: `const readline = require('readline');
-const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-});
-
-const lines = [];
-rl.on('line', (line) => lines.push(line));
-rl.on('close', () => {
-    // Write your solution here
-});
-`,
-};
-
-function isSkeletonCode(code: string): boolean {
-  return Object.values(LANGUAGE_SKELETONS).some(
-    (skeleton) => code.trim() === skeleton.trim()
-  );
-}
-
-function normalizeCodingQuestions(raw: RawCodingQuestion[]): CodingQuestion[] {
-  return raw.map((q, idx) => ({
-    id: typeof q.id === 'string' ? idx + 1 : (q.id ?? idx + 1),
-    title: q.title || `Problem ${idx + 1}`,
-    description: q.description || q.question || '',
-    sampleInput: q.sampleInput,
-    sampleOutput: q.sampleOutput,
-    testCases: q.testCases,
-    marks: q.marks,
-  }));
-}
+// LANGUAGE_SKELETONS and isSkeletonCode were duplicated here, byte-for-byte,
+// alongside the copies in utils/code.utils.ts. Two definitions of "the
+// candidate never touched this" is a hazard: the admin result view grades
+// attempted/not-attempted with that copy while the exam offered this one, so
+// any drift between the two would score a candidate against a template they
+// were never shown. One source now, imported below.
 
 type QuestionStatus = 'not_started' | 'in_progress' | 'saved' | 'submitted';
 
@@ -129,7 +92,13 @@ export function CodingAssessmentPage() {
   const { user } = useAuth();
   const { showToast } = useToast();
 
-  const assessment = (location.state as { assessment?: Assessment })?.assessment;
+  const navState = location.state as
+    | { assessment?: Assessment; durationMinutes?: number }
+    | null;
+  const assessment = navState?.assessment;
+  // The instructions screen already counted the paper and told the candidate
+  // how long they get; honour that number rather than deriving a second one.
+  const agreedDurationMinutes = navState?.durationMinutes;
 
   // Core state
   const [questions, setQuestions] = useState<CodingQuestion[]>([]);
@@ -141,12 +110,20 @@ export function CodingAssessmentPage() {
   const [running, setRunning] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
-  const [tabWarnings, setTabWarnings] = useState(0);
   const [outputHeight, setOutputHeight] = useState(256);
   const [savingQuestion, setSavingQuestion] = useState(false);
   const [submittingQuestion, setSubmittingQuestion] = useState(false);
   const [customInput, setCustomInput] = useState('');
   const [activeOutputTab, setActiveOutputTab] = useState<'output' | 'input'>('output');
+  /**
+   * Whether the next run feeds the candidate's own input instead of grading
+   * against the paper's test cases.
+   *
+   * Opt-in and explicit. Previously a question with test cases ignored the
+   * Custom Input tab entirely — anything typed there was silently discarded,
+   * which looks like the feature is broken rather than unavailable.
+   */
+  const [useCustomInput, setUseCustomInput] = useState(false);
 
   // Compiler output state — matches real BE response
   const [compilerResponse, setCompilerResponse] = useState<CodeSubmissionResponse | null>(null);
@@ -156,11 +133,25 @@ export function CodingAssessmentPage() {
   const [codePerQuestion, setCodePerQuestion] = useState<Record<number, string>>({});
   const [langPerQuestion, setLangPerQuestion] = useState<Record<number, string>>({});
   const [questionStatus, setQuestionStatus] = useState<Record<number, QuestionStatus>>({});
+  // Per-(question, language) code, so switching language loads that language's
+  // starter code (or your prior code for it) rather than keeping the old text.
+  const [codeByLang, setCodeByLang] = useState<Record<string, string>>({});
 
   // Refs
   const isSubmittingRef = useRef(false);
+  /**
+   * Re-entry guards for the three compiler actions.
+   *
+   * A button's `disabled` prop only bites after React re-renders, so two fast
+   * clicks can both enter a handler and fire two identical requests. A ref
+   * flips synchronously and closes that window.
+   */
+  const submittingQuestionRef = useRef(false);
+  const savingQuestionRef = useRef(false);
+  const runningRef = useRef(false);
+  const isDesktop = useIsDesktop();
   const initRef = useRef(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const proctoring = PROCTORING_CONFIG;
   const isDraggingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -176,48 +167,47 @@ export function CodingAssessmentPage() {
   langPerQuestionRef.current = langPerQuestion;
   questionStatusRef.current = questionStatus;
 
+  // ── Proctoring (fullscreen, tab, face/eye, camera) ───────────────────
+  const autoSubmitRef = useRef<(reason: string) => void>(() => {});
+  const proctor = useExamProctoring({
+    loading,
+    onAutoSubmit: (reason) => autoSubmitRef.current(reason),
+  });
+  const {
+    videoRef,
+    camera,
+    isFullscreen,
+    enterFullscreen,
+    exitFullscreen,
+    tabWarnings,
+    warningCount,
+    fullscreenExitCount,
+    noiseWarnings,
+    totalWarnings,
+    faceDetected,
+    multipleFaces,
+    setupCamera,
+    stopDetection,
+    begin: beginProctoring,
+    markActive,
+    markInactive,
+  } = proctor;
+
   // ── Timer ──────────────────────────────────────────────────────────
-  const { secondsLeft, start: startTimer } = useTimer({
+  // Coding papers are timed per problem (25 minutes each by default), so the
+  // real duration is only known once the paper has loaded — init resets it.
+  const { secondsLeft, start: startTimer, startAt: startTimerAt, reset: resetTimer } = useTimer({
     initialSeconds: APP_CONFIG.EXAM_TIMER_MINUTES * 60,
     autoStart: false,
     onExpire: () => handleAutoSubmit('Time is up!'),
   });
 
-  // ── Proctoring hooks ──────────────────────────────────────────────
-  const { isFullscreen, enterFullscreen, exitFullscreen, fullscreenExitCount } = useFullscreen({
-    onExitAttempt: (count) => {
-      showToast(`Warning: Fullscreen exited! (${count})`, 'warning');
-    },
-  });
-
-  usePageVisibility({
-    onHidden: () => {
-      setTabWarnings((prev) => {
-        const next = prev + 1;
-        showToast(`Warning: Tab switch detected! (${next})`, 'warning');
-        return next;
-      });
-    },
-  });
-
-  const { loadModels, startDetection, stopDetection, warningCount, faceDetected } =
-    useFaceDetection({
-      maxWarnings: APP_CONFIG.FACE_DETECTION_MAX_WARNINGS,
-      onMaxWarnings: () => handleAutoSubmit('Face not detected too many times.'),
-      onNoFace: () => {
-        showToast('Warning: Your face is not detected!', 'warning');
-      },
-    });
-
-  const totalWarnings = tabWarnings + warningCount + fullscreenExitCount;
-  const maxWarnings = APP_CONFIG.PROCTORING_MAX_TOTAL_WARNINGS;
-
-  useEffect(() => {
-    if (totalWarnings >= maxWarnings && !isSubmittingRef.current && !loading) {
-      handleAutoSubmit('Too many proctoring warnings.');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [totalWarnings]);
+  // The clock as it stood when submit ran, for the record written with the
+  // answers. Refs because handleSubmitExam is memoised and would otherwise
+  // close over the countdown as it was on the render that created it.
+  const secondsLeftRef = useRef(0);
+  secondsLeftRef.current = secondsLeft;
+  const examDurationSecondsRef = useRef(0);
 
   // ── Monaco editor helpers ─────────────────────────────────────────
   const handleEditorMount: OnMount = (editor, monaco) => {
@@ -243,8 +233,8 @@ export function CodingAssessmentPage() {
     const line = errorInfo.line ?? 1;
     const safeLine = Math.max(1, Math.min(line, model.getLineCount()));
 
-    const isCompilation = errorInfo.type?.toLowerCase().includes('compilation') ||
-                          errorInfo.type?.toLowerCase().includes('syntax');
+    const kind = errorKind(errorInfo).toLowerCase();
+    const isCompilation = kind.includes('compilation') || kind.includes('syntax');
 
     monaco.editor.setModelMarkers(model, 'compiler', [{
       startLineNumber: safeLine,
@@ -275,7 +265,7 @@ export function CodingAssessmentPage() {
       );
       if (runtimeErr) {
         const errInfo: CodeErrorInfo = {
-          type: 'RuntimeError',
+          exception: 'RuntimeError',
           message: runtimeErr.actualOutput.replace('Runtime Error: ', ''),
           fullTrace: runtimeErr.actualOutput,
         };
@@ -288,12 +278,13 @@ export function CodingAssessmentPage() {
   }, [setEditorMarkers, clearEditorMarkers]);
 
   // ── Submit entire exam ────────────────────────────────────────────
-  const handleSubmitExam = useCallback(async () => {
+  const handleSubmitExam = useCallback(async (autoSubmitReason?: string) => {
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
     setSubmitting(true);
     setShowConfirmSubmit(false);
     stopDetection();
+    markInactive();
 
     try {
       if (!assessment || !user?.email) return;
@@ -310,23 +301,36 @@ export function CodingAssessmentPage() {
         langs[currentQ.id] = language;
       }
 
+      // Recorded with the answers: whether the candidate submitted or the exam
+      // ended itself, why, and how much of the clock was still unused. The
+      // result screens can only report what the exam page knew at this moment.
+      const submission = buildSubmissionMeta({
+        reason: autoSubmitReason,
+        secondsLeft: secondsLeftRef.current,
+        durationSeconds: examDurationSecondsRef.current,
+      });
+
       await assessmentService.saveResult({
         candidateEmail: user.email,
         assessmentType: assessment.assessmentType,
         score: 0,
-        resultsJson: JSON.stringify(
-          qs.map((q) => ({
+        resultsJson: JSON.stringify([
+          ...qs.map((q) => ({
             questionId: q.id,
             title: q.title,
             code: codes[q.id] || '',
             language: langs[q.id] || 'java',
             status: statuses[q.id] || 'not_started',
-          }))
-        ),
+          })),
+          submission,
+        ]),
         jobPrefix: assessment.jobPrefix,
+        // See the aptitude page: identifies which assigned paper this is, so a
+        // re-sent exam does not close out the attempt that came before it.
+        assessmentId: assessment.id,
       });
 
-      showToast('Coding exam submitted successfully!', 'success');
+      showToast(MESSAGES.exam.codingSubmitted, 'success');
       await exitFullscreen();
       navigate(ROUTES.CANDIDATE.RESULTS);
     } catch {
@@ -334,6 +338,10 @@ export function CodingAssessmentPage() {
     } finally {
       setSubmitting(false);
       isSubmittingRef.current = false;
+      // Submit failed (or was skipped) — the exam continues, so re-arm the
+      // counters and the reload prompt. Harmless on the success path: the
+      // redirect to results has already unmounted this page.
+      markActive();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assessment, user?.email, currentIndex, code, language]);
@@ -341,12 +349,17 @@ export function CodingAssessmentPage() {
   const handleAutoSubmit = useCallback(
     (reason: string) => {
       if (isSubmittingRef.current) return;
-      showToast(`Auto-submitting: ${reason}`, 'error');
-      handleSubmitExam();
+      showToast(MESSAGES.proctoring.autoSubmitting(reason), 'error');
+      handleSubmitExam(reason);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [handleSubmitExam]
   );
+
+  // Keep the proctoring hook's auto-submit pointing at the latest handler.
+  useEffect(() => {
+    autoSubmitRef.current = handleAutoSubmit;
+  });
 
   // ── Initialize exam ───────────────────────────────────────────────
   useEffect(() => {
@@ -375,27 +388,44 @@ export function CodingAssessmentPage() {
         normalized.forEach((q) => { initialStatuses[q.id] = 'not_started'; });
         setQuestionStatus(initialStatuses);
 
-        await enterFullscreen();
+        // Now that the paper is counted, set the clock: per-question time x
+        // questions, unless the instructions screen already fixed a duration.
+        const minutes = computeExamMinutes({
+          type: assessment.assessmentType,
+          questionCount: normalized.length,
+          minutesPerQuestion: assessment.minutesPerQuestion,
+          durationMinutes: agreedDurationMinutes ?? assessment.durationMinutes,
+        });
+        examDurationSecondsRef.current = minutes * 60;
+        resetTimer(minutes * 60);
 
-        try {
-          await loadModels();
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-            videoRef.current.onloadedmetadata = () => startDetection(videoRef.current!);
-          }
-        } catch (camErr) {
-          console.warn('Face detection/camera unavailable:', camErr);
-        }
+        // Proctoring init: fullscreen → face models → camera (config-driven).
+        await beginProctoring();
 
+        let attended: Awaited<ReturnType<typeof assessmentService.markAttended>> | null = null;
         if (user?.email) {
-          await assessmentService.markAttended({
+          attended = await assessmentService.markAttended({
             assessmentId: assessment.id,
             candidateEmail: user.email,
           });
         }
 
-        startTimer();
+        // Proctoring counters go live only now — after all permission prompts.
+        markActive();
+        // The clock counts down to a fixed moment, not from a fresh
+        // duration. examStartedAt is stamped once on the server, so a reload
+        // part-way through lands on the same deadline — refreshing used to
+        // restart the countdown and hand back a whole paper's worth of time.
+        // Falls back to a plain countdown when the server does not send it,
+        // which is the behaviour this replaces rather than a new risk.
+        const startedAt = attended?.data?.examStartedAt
+          ? parseServerInstant(attended.data.examStartedAt)
+          : null;
+        if (startedAt && !Number.isNaN(startedAt.getTime())) {
+          startTimerAt(startedAt.getTime() + minutes * 60_000);
+        } else {
+          startTimer();
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load coding questions.');
       } finally {
@@ -403,16 +433,6 @@ export function CodingAssessmentPage() {
       }
     }
     initExam();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      stopDetection();
-      if (videoRef.current?.srcObject) {
-        (videoRef.current.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
-      }
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -444,14 +464,20 @@ export function CodingAssessmentPage() {
 
   // ── Language change ───────────────────────────────────────────────
   const handleLanguageChange = (newLanguage: string) => {
-    setLanguage(newLanguage);
-    if (code.trim() === '' || isSkeletonCode(code)) {
-      setCode(LANGUAGE_SKELETONS[newLanguage] || `// Write your ${newLanguage} code here\n`);
-    }
+    if (newLanguage === language) return;
     const currentQ = questions[currentIndex];
+    // Load the new language's predefined starter code (or your prior code for it)
+    // and refresh the editor. Stash the current code under its language so nothing
+    // is lost if you switch back.
     if (currentQ) {
+      setCodeByLang((prev) => ({ ...prev, [`${currentQ.id}:${language}`]: code }));
       setLangPerQuestion((prev) => ({ ...prev, [currentQ.id]: newLanguage }));
+      const saved = codeByLang[`${currentQ.id}:${newLanguage}`];
+      setCode(saved ?? LANGUAGE_SKELETONS[newLanguage] ?? `// Write your ${newLanguage} code here\n`);
+    } else {
+      setCode(LANGUAGE_SKELETONS[newLanguage] ?? `// Write your ${newLanguage} code here\n`);
     }
+    setLanguage(newLanguage);
     clearEditorMarkers();
   };
 
@@ -474,36 +500,96 @@ export function CodingAssessmentPage() {
     setCompilerResponse(null);
     setCurrentError(null);
     setCustomInput('');
+    // Reset with the input it belongs to — carrying it over would silently
+    // ungrade the first run on the next question.
+    setUseCustomInput(false);
     clearEditorMarkers();
     setActiveOutputTab('output');
   };
 
+  /**
+   * Guards every path that ships the editor's contents to the compiler.
+   *
+   * An empty script is rejected server-side, and that failure comes back as a
+   * compiler error — which reads to the candidate as "your code is broken"
+   * rather than "you haven't written any", and sends them hunting for a bug
+   * that does not exist. Saying so here is both truthful and instant.
+   */
+  const hasCodeToSend = (): boolean => {
+    if (code.trim()) return true;
+    showToast(MESSAGES.exam.codeRequired, 'warning');
+    return false;
+  };
+
   // ── Compile & Run ────────────────────────────────────────────────
   const handleCompileAndRun = async () => {
+    if (runningRef.current) return;
+    if (!hasCodeToSend()) return;
     const currentQ = questions[currentIndex];
+    runningRef.current = true;
+    // A run is either graded against the paper's test cases, or a scratch run
+    // against whatever the candidate typed — never both, since the compiler
+    // takes one stdin. `runsCustomInput` decides which, and the toolbar says so
+    // before the button is pressed.
     setRunning(true);
     setCompilerResponse(null);
     setCurrentError(null);
     clearEditorMarkers();
     setActiveOutputTab('output');
     try {
-      const hasTests = (currentQ?.testCases?.length ?? 0) > 0;
-      const res = await compilerService.runCode({
-        language,
-        script: code,
-        ...(hasTests
-          ? { testCases: currentQ!.testCases }
-          : { customInput: customInput || currentQ?.sampleInput || '' }),
-        assessmentId: assessment?.id,
-        questionId: currentQ?.id,
-        userEmail: user?.email ?? undefined,
-        jobPrefix: assessment?.jobPrefix,
-        createdAt: new Date().toISOString(),
-      });
+      const res = await compilerService.runCode(
+        {
+          language,
+          script: code,
+          ...(runsCustomInput
+            ? { customInput: customInput || currentQ?.sampleInput || '' }
+            : { testCases: currentQ!.testCases }),
+          assessmentId: assessment?.id,
+          questionId: currentQ?.id,
+          userEmail: user?.email ?? undefined,
+          jobPrefix: assessment?.jobPrefix,
+          createdAt: new Date().toISOString(),
+        },
+        { _skipErrorToast: true },
+      );
       processCompilerResponse(res.data);
-    } catch {
-      // Error toast auto-handled
+    } catch (err) {
+      // Three different failures, told apart because they need different
+      // reactions: a timeout means fix the code, an unsupported language means
+      // pick another, and an unavailable runner means wait — that last one is
+      // our infrastructure, so it must not be presented as the candidate's bug.
+      const timedOut = axios.isAxiosError(err) && err.code === 'ECONNABORTED';
+      const { code } = extractApiError(err);
+
+      let message: string = MESSAGES.exam.compileFailed;
+      let kind = 'Error';
+      let tone: 'warning' | 'error' = 'error';
+
+      if (timedOut) {
+        message = MESSAGES.exam.compileTimeout;
+        kind = 'Timeout';
+        tone = 'warning';
+      } else if (code === 'NETWORK_ERROR') {
+        // No response at all — the request never reached the server, or the
+        // reply never came back. Nothing to do with the code, and retrying is
+        // the right move, so it must not read as a compile failure.
+        message = MESSAGES.exam.compileNetworkLost;
+        kind = 'Connection';
+        tone = 'warning';
+      } else if (code === 'COMPILER_UNAVAILABLE') {
+        message = MESSAGES.exam.compilerUnavailable;
+        kind = 'Unavailable';
+        tone = 'warning';
+      } else if (code === 'COMPILER_UNSUPPORTED_LANGUAGE') {
+        message = MESSAGES.exam.compilerUnsupportedLanguage(language);
+        kind = 'Unsupported';
+        tone = 'warning';
+      }
+
+      setCurrentError({ exception: kind, message, fullTrace: message });
+      showToast(message, tone);
     } finally {
+      runningRef.current = false;
       setRunning(false);
     }
   };
@@ -512,7 +598,12 @@ export function CodingAssessmentPage() {
   const handleSaveQuestion = async () => {
     const currentQ = questions[currentIndex];
     if (!currentQ || !assessment || !user?.email) return;
+    if (savingQuestionRef.current) return;
+    // Empty only — saving an untouched template is a legitimate draft, and a
+    // save is reversible in a way a submit is not.
+    if (!hasCodeToSend()) return;
 
+    savingQuestionRef.current = true;
     setSavingQuestion(true);
     try {
       setCodePerQuestion((prev) => ({ ...prev, [currentQ.id]: code }));
@@ -530,10 +621,11 @@ export function CodingAssessmentPage() {
       });
 
       setQuestionStatus((prev) => ({ ...prev, [currentQ.id]: 'saved' }));
-      showToast(`Question ${currentIndex + 1} saved!`, 'success');
+      showToast(MESSAGES.exam.questionSaved(currentIndex + 1), 'success');
     } catch {
       // Error toast auto-handled
     } finally {
+      savingQuestionRef.current = false;
       setSavingQuestion(false);
     }
   };
@@ -542,7 +634,24 @@ export function CodingAssessmentPage() {
   const handleSubmitQuestion = async () => {
     const currentQ = questions[currentIndex];
     if (!currentQ || !assessment || !user?.email) return;
+    // Re-entry guard, not just the button's disabled state. `disabled` only
+    // takes effect after React re-renders, so two fast clicks can both enter
+    // this handler and file two submissions for the same question. A ref flips
+    // synchronously, so the second call returns immediately.
+    if (submittingQuestionRef.current) return;
+    // Already submitted — the question is locked and must never be re-sent,
+    // whatever the UI state says.
+    if (questionStatus[currentQ.id] === 'submitted') return;
+    if (!hasCodeToSend()) return;
+    // Stricter than save, because a submit locks the question: an untouched
+    // template sent by accident would leave the candidate unable to answer it
+    // at all. isSkeletonCode also covers empty, but that case was named above.
+    if (isSkeletonCode(code)) {
+      showToast(MESSAGES.exam.codeUnchanged, 'warning');
+      return;
+    }
 
+    submittingQuestionRef.current = true;
     setSubmittingQuestion(true);
     setCompilerResponse(null);
     setCurrentError(null);
@@ -564,10 +673,12 @@ export function CodingAssessmentPage() {
 
       processCompilerResponse(res.data);
       setQuestionStatus((prev) => ({ ...prev, [currentQ.id]: 'submitted' }));
-      showToast(`Question ${currentIndex + 1} submitted!`, 'success');
+      showToast(MESSAGES.exam.questionSubmitted(currentIndex + 1), 'success');
     } catch {
-      // Error toast auto-handled
+      // Error toast auto-handled. The question stays unsubmitted so a failed
+      // attempt can be retried — the ref is released either way below.
     } finally {
+      submittingQuestionRef.current = false;
       setSubmittingQuestion(false);
     }
   };
@@ -644,32 +755,66 @@ export function CodingAssessmentPage() {
   const allSubmitted = submittedCount === questions.length;
 
   // Derive error display info
+  // A question with no test cases has nothing to grade against, so custom
+  // input is the only thing a run can consume — the toggle is redundant there
+  // and the tab is always live.
+  const questionHasTests = (questions[currentIndex]?.testCases?.length ?? 0) > 0;
+  const runsCustomInput = !questionHasTests || useCustomInput;
+
+  // Only graded cases are shown: a plain Run against custom input comes back
+  // with passed: null and nothing to compare, so it is not a test result.
+  const gradedTests = (compilerResponse?.testResults ?? []).filter(isGraded);
+  /**
+   * The question's own case count, not the last run's.
+   *
+   * "The first half" has to mean the same cases every run. Counting what came
+   * back would move the line whenever a run graded fewer cases than the paper
+   * holds — a timeout part-way through would quietly re-lock a case that was
+   * open a minute ago. The paper is the authority; the run is the fallback.
+   */
+  const totalTestCases = Math.max(
+    currentQuestion?.testCases?.length ?? 0,
+    gradedTests.length,
+  );
+  /** How many of them show their input and expected output from the start. */
+  const openTestCases = openTestCaseCount(totalTestCases);
+
   const hasError = !!currentError;
-  const isCompilationError = currentError?.type?.toLowerCase().includes('compilation') ||
-                             currentError?.type?.toLowerCase().includes('syntax');
-  const isRuntimeError = currentError?.type?.toLowerCase().includes('runtime');
-  const isTimeout = currentError?.type?.toLowerCase().includes('timeout');
+  const errorName = currentError ? errorKind(currentError).toLowerCase() : '';
+  const isCompilationError = errorName.includes('compilation') || errorName.includes('syntax');
+  const isRuntimeError = errorName.includes('runtime');
+  const isTimeout = errorName.includes('timeout');
 
   return (
-    <div className="min-h-screen bg-[var(--background)] flex flex-col">
+    // h-screen, not min-h-screen: the page must be exactly the viewport so the
+    // question panel and the editor own their own scrolling. With min-h-screen
+    // the whole document grew instead, scrolling the editor and the timer out
+    // of view together and making it impossible to read the question while
+    // typing — which is the entire point of a two-pane layout.
+    <div className="h-screen overflow-hidden bg-[var(--background)] flex flex-col">
+      {/* Camera Required Overlay — blocks the exam until the camera is live */}
+      {proctoring.camera.required &&
+        !loading &&
+        (camera.status === 'denied' ||
+          camera.status === 'unavailable' ||
+          camera.status === 'error') && (
+          <CameraRequiredOverlay message={camera.message} onRetry={setupCamera} />
+        )}
+
+      {/* Sits above the others: on a phone none of the rest can be satisfied,
+          and the editor has no keyboard to type into. */}
+      {!isDesktop && <DesktopRequiredOverlay />}
+
       {/* Fullscreen overlay */}
-      {!isFullscreen && !loading && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-          <div className="text-center p-8 rounded-2xl bg-[var(--cardBg)] border border-[var(--border)] max-w-md mx-4 shadow-2xl">
-            <ShieldAlert className="w-16 h-16 text-amber-500 mx-auto mb-4" />
-            <h2 className="text-xl font-bold text-[var(--text)] mb-2">Fullscreen Required</h2>
-            <p className="text-[var(--textSecondary)] mb-6">
-              You must remain in fullscreen mode during the exam. Exiting fullscreen is recorded as a warning.
-            </p>
-            <Button onClick={enterFullscreen} leftIcon={<Maximize size={16} />}>
-              Return to Fullscreen
-            </Button>
-          </div>
-        </div>
+      {proctoring.fullscreen.enabled && !isFullscreen && !loading && (
+        <FullscreenRequiredOverlay onReturn={enterFullscreen} />
       )}
 
       {/* ── Top Bar ──────────────────────────────────────────────── */}
-      <div className="sticky top-0 z-10 bg-[var(--cardBg)] border-b border-[var(--border)] px-4 py-2">
+      {/* flex-shrink-0 so the timer and warning count keep their height when
+          the panes below are short; `sticky` is redundant now that the page
+          itself no longer scrolls. */}
+      <div className="flex-shrink-0 z-10 bg-[var(--cardBg)] border-b border-[var(--border)] px-4 py-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Badge variant="warning">CODING</Badge>
@@ -702,29 +847,69 @@ export function CodingAssessmentPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="w-16 h-12 bg-black rounded overflow-hidden flex-shrink-0">
+            <div
+              className={`w-16 h-12 bg-black rounded overflow-hidden flex-shrink-0 relative ring-1 ${
+                camera.status === 'active' ? 'ring-green-500/50' : 'ring-red-500/60'
+              }`}
+            >
               <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+              {camera.status !== 'active' && (
+                <button
+                  onClick={setupCamera}
+                  title={camera.message ?? 'Camera off'}
+                  className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 text-[9px] font-medium text-white/80 hover:bg-black/60"
+                >
+                  <Camera size={12} className="text-white/60" />
+                  {camera.status === 'requesting' ? '…' : 'Retry'}
+                </button>
+              )}
             </div>
 
-            {!faceDetected && (
+            {!faceDetected && proctoring.eyeDetection.enabled && (
               <div className="flex items-center gap-1 text-amber-500 animate-pulse">
                 <EyeOff size={14} />
                 <span className="text-xs font-medium">No face</span>
+              </div>
+            )}
+            {multipleFaces && proctoring.eyeDetection.enabled && (
+              <div className="flex items-center gap-1 text-red-500 animate-pulse">
+                <Users size={14} />
+                <span className="text-xs font-medium">Multiple faces</span>
               </div>
             )}
 
             <div className="relative group">
               <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold ${warningColor}`}>
                 <AlertTriangle size={12} />
-                <span>{totalWarnings}/{maxWarnings}</span>
+                <span>{totalWarnings} warning{totalWarnings === 1 ? '' : 's'}</span>
               </div>
-              <div className="absolute right-0 top-full mt-2 w-48 p-2.5 rounded-lg bg-[var(--cardBg)] border border-[var(--border)] shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity z-20">
+              <div className="absolute right-0 top-full mt-2 w-52 p-2.5 rounded-lg bg-[var(--cardBg)] border border-[var(--border)] shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity z-20">
                 <p className="text-xs font-semibold text-[var(--text)] mb-1.5">Warnings</p>
                 <div className="space-y-0.5 text-xs text-[var(--textSecondary)]">
-                  <p>Tab switches: {tabWarnings}</p>
-                  <p>Face detection: {warningCount}</p>
-                  <p>Fullscreen exits: {fullscreenExitCount}</p>
+                  {proctoring.tabSwitch.enabled && (
+                    <p>
+                      Tab switches: {tabWarnings}
+                      {proctoring.tabSwitch.maxBeforeAutoSubmit > 0
+                        ? ` / ${proctoring.tabSwitch.maxBeforeAutoSubmit}`
+                        : ''}
+                    </p>
+                  )}
+                  {proctoring.eyeDetection.enabled && (
+                    <p>
+                      Face / eye: {warningCount}
+                      {proctoring.eyeDetection.maxBeforeAutoSubmit > 0
+                        ? ` / ${proctoring.eyeDetection.maxBeforeAutoSubmit}`
+                        : ''}
+                    </p>
+                  )}
+                  {proctoring.fullscreen.enabled && <p>Fullscreen exits: {fullscreenExitCount}</p>}
+                  {/* No limit shown: noise warns but never auto-submits. */}
+                  {proctoring.noise.enabled && <p>Noise warnings: {noiseWarnings}</p>}
                 </div>
+                <p className="mt-1.5 text-[10px] text-[var(--textSecondary)] border-t border-[var(--border)] pt-1.5">
+                  Reaching a limit auto-submits your exam. Do not reload this page — the
+                  exam restarts from the beginning.
+                </p>
               </div>
             </div>
 
@@ -743,11 +928,14 @@ export function CodingAssessmentPage() {
       </div>
 
       {/* ── Main Content ─────────────────────────────────────────── */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left: Question Description */}
-        <div className="w-[38%] border-r border-[var(--border)] overflow-y-auto flex flex-col">
+      {/* min-h-0 lets this row shrink inside the flex column. Without it a tall
+          question pushes the row past the viewport and the body scrolls again,
+          defeating the overflow-y-auto on the pane below. */}
+      <div className="flex flex-1 min-h-0 overflow-hidden">
+        {/* Left: Question Description — scrolls independently of the editor. */}
+        <div className="w-[38%] border-r border-[var(--border)] overflow-y-auto scrollbar-thin flex flex-col">
           {currentQuestion && (
-            <div className="flex-1 p-5 space-y-4">
+            <div className="p-5 space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Code2 size={18} className="text-[var(--primary)]" />
@@ -801,10 +989,10 @@ export function CodingAssessmentPage() {
           )}
         </div>
 
-        {/* Right: Editor + Output */}
-        <div className="flex-1 flex flex-col" ref={containerRef}>
+        {/* Right: Editor + Output — its own column, scrolling independently. */}
+        <div className="flex-1 flex flex-col min-w-0 min-h-0" ref={containerRef}>
           {/* Toolbar */}
-          <div className="flex items-center justify-between px-4 py-2 bg-[var(--cardBg)] border-b border-[var(--border)]">
+          <div className="flex-shrink-0 flex items-center justify-between px-4 py-2 bg-[var(--cardBg)] border-b border-[var(--border)]">
             <div className="flex items-center gap-3">
               <div className="w-36">
                 <Select options={APP_CONFIG.COMPILER_LANGUAGES} value={language} onChange={(e) => handleLanguageChange(e.target.value)} disabled={isQuestionLocked} />
@@ -823,10 +1011,15 @@ export function CodingAssessmentPage() {
                 Compile & Run
               </Button>
               <div className="w-px h-6 bg-[var(--border)]" />
-              <Button size="sm" variant="outline" onClick={handleSaveQuestion} isLoading={savingQuestion} disabled={isQuestionLocked || !code.trim() || isSkeletonCode(code)} leftIcon={<Save size={14} />}>
+              {/* Disabled only when the question is locked. Greying these out
+                  for empty or untouched code left the candidate with two dead
+                  buttons and no reason why — the handlers now say what is
+                  missing instead, which is the same call the instructions
+                  screen makes about its Start button. */}
+              <Button size="sm" variant="outline" onClick={handleSaveQuestion} isLoading={savingQuestion} disabled={isQuestionLocked} leftIcon={<Save size={14} />}>
                 Save
               </Button>
-              <Button size="sm" variant="primary" onClick={handleSubmitQuestion} isLoading={submittingQuestion} disabled={isQuestionLocked || !code.trim() || isSkeletonCode(code)} leftIcon={<Send size={14} />}>
+              <Button size="sm" variant="primary" onClick={handleSubmitQuestion} isLoading={submittingQuestion} disabled={isQuestionLocked} leftIcon={<Send size={14} />}>
                 Submit Q{currentIndex + 1}
               </Button>
             </div>
@@ -862,12 +1055,12 @@ export function CodingAssessmentPage() {
           </div>
 
           {/* Drag Handle */}
-          <div className="h-2 bg-[#2d2d2d] cursor-row-resize flex items-center justify-center hover:bg-[#3d3d3d] transition-colors" onMouseDown={handleDragStart}>
+          <div className="flex-shrink-0 h-2 bg-[#2d2d2d] cursor-row-resize flex items-center justify-center hover:bg-[#3d3d3d] transition-colors" onMouseDown={handleDragStart}>
             <GripHorizontal size={14} className="text-gray-500" />
           </div>
 
           {/* Output Panel */}
-          <div className="border-t border-[#333] bg-[#1e1e1e] overflow-hidden flex flex-col" style={{ height: outputHeight }}>
+          <div className="flex-shrink-0 border-t border-[#333] bg-[#1e1e1e] overflow-hidden flex flex-col" style={{ height: outputHeight }}>
             {/* Tabs */}
             <div className="flex items-center border-b border-[#333] bg-[#252526] px-2">
               <button
@@ -878,8 +1071,13 @@ export function CodingAssessmentPage() {
               >
                 <Terminal size={14} />
                 Output
-                {compilerResponse?.passed === true && <CheckCircle size={12} className="text-green-400" />}
-                {compilerResponse?.passed === false && hasError && <XCircle size={12} className="text-red-400" />}
+                {/* Driven by status, not `passed` — an ungraded run reports
+                    passed: null, and reading that as false marked a clean run
+                    as a failure. */}
+                {compilerResponse && ranCleanly(compilerResponse) && (
+                  <CheckCircle size={12} className="text-green-400" />
+                )}
+                {compilerResponse && hasError && <XCircle size={12} className="text-red-400" />}
               </button>
               <button
                 onClick={() => setActiveOutputTab('input')}
@@ -888,19 +1086,55 @@ export function CodingAssessmentPage() {
                 }`}
               >
                 Custom Input
+                {/* Says which input the next run will consume without making
+                    the candidate open the tab to find out. */}
+                {runsCustomInput && (
+                  <span className="px-1.5 py-0.5 rounded-full bg-[var(--primary)]/20 text-[var(--primary)] text-[10px] font-semibold">
+                    Active
+                  </span>
+                )}
               </button>
             </div>
 
             {/* Tab content */}
             <div className="flex-1 overflow-y-auto p-4">
               {activeOutputTab === 'input' ? (
-                <textarea
-                  value={customInput}
-                  onChange={(e) => setCustomInput(e.target.value)}
-                  placeholder="Enter custom input here..."
-                  className="w-full h-full bg-transparent text-sm font-mono text-gray-300 placeholder-gray-600 resize-none outline-none"
-                  disabled={isQuestionLocked}
-                />
+                <div className="h-full flex flex-col gap-2">
+                  {questionHasTests ? (
+                    <label className="flex items-start gap-2 text-xs text-gray-400 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={useCustomInput}
+                        onChange={(e) => setUseCustomInput(e.target.checked)}
+                        disabled={isQuestionLocked}
+                        className="mt-0.5 accent-[var(--primary)]"
+                      />
+                      <span>
+                        Run against this input instead of the test cases.
+                        <span className="block text-gray-500">
+                          A custom run is for checking your own cases — it is not graded and
+                          does not change your test results.
+                        </span>
+                      </span>
+                    </label>
+                  ) : (
+                    <p className="text-xs text-gray-500">
+                      This question has no test cases, so Compile &amp; Run always uses the
+                      input below.
+                    </p>
+                  )}
+                  <textarea
+                    value={customInput}
+                    onChange={(e) => setCustomInput(e.target.value)}
+                    placeholder={
+                      currentQuestion?.sampleInput
+                        ? `Enter custom input here...\n\nLeave empty to use the sample input:\n${currentQuestion.sampleInput}`
+                        : 'Enter custom input here...'
+                    }
+                    className="flex-1 w-full bg-transparent text-sm font-mono text-gray-300 placeholder-gray-600 resize-none outline-none"
+                    disabled={isQuestionLocked}
+                  />
+                </div>
               ) : !compilerResponse ? (
                 <p className="text-sm text-gray-500 font-mono">Run your code to see the output here.</p>
               ) : (
@@ -956,62 +1190,161 @@ export function CodingAssessmentPage() {
                     </div>
                   )}
 
-                  {/* Success output (no test cases) */}
-                  {!hasError && compilerResponse.testResults?.length > 0 && !compilerResponse.testResults[0].expectedOutput && (
+                  {/* Plain output — an ungraded run, so there is nothing to
+                      compare and no pass/fail to report. */}
+                  {!hasError && compilerResponse.testResults?.length > 0 && !isGraded(compilerResponse.testResults[0]) && (
                     <pre className="text-sm font-mono whitespace-pre-wrap text-green-400">
                       {compilerResponse.testResults[0].actualOutput || 'No output'}
                     </pre>
                   )}
 
-                  {/* Test case results */}
-                  {compilerResponse.testResults?.some((tr) => tr.expectedOutput) && !hasError && (
+                  {/* Test case results.
+                      Gated on the code having COMPILED, not on hasError: a
+                      runtime error inside one case used to hide the whole list,
+                      including cases that had already passed. Nothing compiled
+                      means there are no results to show; anything else has
+                      per-case outcomes worth seeing. */}
+                  {compilerResponse.testResults?.some(isGraded) && !isCompilationError && (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <h4 className="text-sm font-semibold text-gray-400">Test Results</h4>
-                        {compilerResponse.passed !== undefined && (
-                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                            compilerResponse.passed ? 'bg-green-900/50 text-green-400' : 'bg-red-900/50 text-red-400'
-                          }`}>
-                            {compilerResponse.passed ? 'All Passed' : 'Some Failed'}
-                          </span>
-                        )}
+                        {/* A count, not just pass/fail: with the unsolved cases
+                            hidden, "how many are left" is the only progress
+                            signal the candidate has. */}
+                        {(() => {
+                          const passedCount = gradedTests.filter(isPassed).length;
+                          const allPassed = passedCount === gradedTests.length;
+                          return (
+                            <span
+                              className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                                allPassed
+                                  ? 'bg-green-900/50 text-green-400'
+                                  : 'bg-red-900/50 text-red-400'
+                              }`}
+                            >
+                              {passedCount} / {gradedTests.length} passed
+                            </span>
+                          );
+                        })()}
                       </div>
-                      {compilerResponse.testResults.filter((tr) => tr.expectedOutput).map((tr, idx) => (
+                      {/* States the rule up front. A padlock with no explanation
+                          reads as a bug, and a candidate who thinks the grader
+                          is broken debugs the wrong thing. */}
+                      {openTestCases < totalTestCases && (
+                        <p className="text-xs text-gray-500 flex items-center gap-1.5">
+                          <Lock size={11} className="flex-shrink-0" />
+                          {openTestCases === 0
+                            ? 'Each test reveals its input and expected output once your code passes it.'
+                            : `The first ${openTestCases} test${openTestCases === 1 ? '' : 's'} show their input and expected output. The rest unlock as you pass them.`}
+                        </p>
+                      )}
+                      {gradedTests.map((tr, idx) => {
+                        const passed = isPassed(tr);
+                        const revealed = isTestCaseRevealed({
+                          index: idx,
+                          passed,
+                          total: totalTestCases,
+                        });
+                        return (
                         <div
-                          key={idx}
+                          key={`${tr.questionId ?? 'case'}-${idx}`}
                           className={`p-3 rounded-lg border ${
-                            tr.passed ? 'border-green-800/50 bg-green-950/30' : 'border-red-800/50 bg-red-950/30'
+                            isPassed(tr) ? 'border-green-800/50 bg-green-950/30' : 'border-red-800/50 bg-red-950/30'
                           }`}
                         >
-                          <div className="flex items-center gap-2 mb-1">
-                            {tr.passed ? <CheckCircle className="w-4 h-4 text-green-400" /> : <XCircle className="w-4 h-4 text-red-400" />}
-                            <span className={`text-sm font-medium ${tr.passed ? 'text-green-400' : 'text-red-400'}`}>
-                              Test {idx + 1}: {tr.passed ? 'Passed' : 'Failed'}
+                          <div className="flex flex-wrap items-center gap-2 mb-1">
+                            {isPassed(tr)
+                              ? <CheckCircle className="w-4 h-4 text-green-400" />
+                              : <XCircle className="w-4 h-4 text-red-400" />}
+                            <span className={`text-sm font-medium ${isPassed(tr) ? 'text-green-400' : 'text-red-400'}`}>
+                              Test {idx + 1}
                             </span>
+                            {/* A timeout, a crash and a wrong answer are
+                                different problems — badge them differently. */}
+                            {tr.status && (
+                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${statusTone(tr.status)}`}>
+                                {statusLabel(tr.status)}
+                              </span>
+                            )}
+                            {tr.errorInfo?.line != null && (
+                              <span className="text-xs text-gray-400 bg-gray-800 px-2 py-0.5 rounded-full">
+                                Line {tr.errorInfo.line}
+                              </span>
+                            )}
                           </div>
-                          {!tr.passed && (
+                          {/* A passed case has nothing left to protect, and an
+                              open one was never protected — see
+                              coding-exam.config.ts for which cases are open. */}
+                          {revealed && (
                             <div className="mt-2 space-y-1 pl-6">
                               <div className="flex gap-2 text-xs font-mono">
                                 <span className="text-gray-500 w-20 shrink-0">Input:</span>
-                                <span className="text-gray-400">{tr.input}</span>
+                                <span className="text-gray-300 whitespace-pre-wrap">{tr.input}</span>
                               </div>
                               <div className="flex gap-2 text-xs font-mono">
                                 <span className="text-gray-500 w-20 shrink-0">Expected:</span>
-                                <span className="text-green-300">{tr.expectedOutput}</span>
+                                <span className="text-green-300 whitespace-pre-wrap">
+                                  {tr.expectedOutput}
+                                </span>
                               </div>
-                              <div className="flex gap-2 text-xs font-mono">
-                                <span className="text-gray-500 w-20 shrink-0">Got:</span>
-                                <span className="text-red-300">{tr.actualOutput}</span>
+                              {/* Only worth printing when it differs from what
+                                  was expected — on a pass the two are the same
+                                  line twice, which reads as a bug. */}
+                              {!passed && (
+                                <div className="flex gap-2 text-xs font-mono">
+                                  <span className="text-gray-500 w-20 shrink-0">Your output:</span>
+                                  <span className="text-red-300 whitespace-pre-wrap">
+                                    {tr.actualOutput || '(no output)'}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {!revealed && (
+                            <div className="mt-2 space-y-1 pl-6">
+                              {/* Input and expected output stay sealed until the
+                                  case passes, so a candidate cannot read the
+                                  hidden tests off a failing run and hard-code
+                                  answers to them. */}
+                              <div className="flex items-center gap-2 text-xs text-gray-500">
+                                <Lock size={12} className="flex-shrink-0" />
+                                <span>
+                                  Input and expected output are hidden until this test passes.
+                                </span>
                               </div>
+                              {/* The error is about their code, not the hidden
+                                  test data, so it is safe — and necessary — to
+                                  show even while the case is locked. */}
                               {tr.errorInfo && (
-                                <div className="mt-1 text-xs text-red-400 font-mono">
-                                  {tr.errorInfo.type}: {tr.errorInfo.message}
+                                <div className="mt-1 space-y-1">
+                                  <div className="text-xs text-red-400 font-mono">
+                                    {errorKind(tr.errorInfo)}: {tr.errorInfo.message}
+                                  </div>
+                                  {tr.errorInfo.hint && (
+                                    <p className="text-xs text-amber-300 flex items-start gap-1.5">
+                                      <Lightbulb size={12} className="mt-0.5 flex-shrink-0" />
+                                      {tr.errorInfo.hint}
+                                    </p>
+                                  )}
+                                  {tr.errorInfo.fullTrace &&
+                                    tr.errorInfo.fullTrace !== tr.errorInfo.message && (
+                                      <details>
+                                        <summary className="text-xs text-red-500 cursor-pointer hover:text-red-400">
+                                          Details
+                                        </summary>
+                                        <pre className="mt-1 text-xs font-mono whitespace-pre-wrap text-red-400/80">
+                                          {tr.errorInfo.fullTrace}
+                                        </pre>
+                                      </details>
+                                    )}
                                 </div>
                               )}
                             </div>
                           )}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -1030,7 +1363,7 @@ export function CodingAssessmentPage() {
         footer={
           <>
             <Button variant="ghost" onClick={() => setShowConfirmSubmit(false)}>Cancel</Button>
-            <Button variant="primary" onClick={handleSubmitExam} isLoading={submitting}>Confirm Submit</Button>
+            <Button variant="primary" onClick={() => handleSubmitExam()} isLoading={submitting}>Confirm Submit</Button>
           </>
         }
       >

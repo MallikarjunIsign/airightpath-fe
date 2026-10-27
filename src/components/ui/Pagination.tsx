@@ -9,6 +9,11 @@ interface PaginationProps extends HTMLAttributes<HTMLDivElement> {
   showFirstLast?: boolean;
   totalItems?: number;
   pageSize?: number;
+  /**
+   * `minimal` is the bare centred pager — arrows, page numbers, and a filled
+   * circle on the current page. No first/last jumps and no range caption.
+   */
+  variant?: 'default' | 'minimal';
 }
 
 function generatePageNumbers(current: number, total: number, siblings: number): (number | 'ellipsis')[] {
@@ -58,6 +63,16 @@ function generatePageNumbers(current: number, total: number, siblings: number): 
   return pages;
 }
 
+/** Filled circle in the minimal pager; brand-coloured pill in the default one. */
+function activePageClass(isCurrent: boolean, minimal: boolean): string {
+  if (isCurrent) {
+    return minimal
+      ? 'bg-[var(--bgMuted,var(--surface2))] text-[var(--text)] font-semibold'
+      : 'bg-[var(--primary)] text-white shadow-[0_1px_4px_rgba(99,102,241,0.3)]';
+  }
+  return 'text-[var(--textSecondary)] hover:bg-[var(--bgSubtle,var(--surface1))] hover:text-[var(--text)]';
+}
+
 export function Pagination({
   currentPage,
   totalPages,
@@ -66,23 +81,33 @@ export function Pagination({
   showFirstLast = true,
   totalItems,
   pageSize,
+  variant = 'default',
   className = '',
   ...props
 }: PaginationProps) {
   if (totalPages <= 1) return null;
 
+  const minimal = variant === 'minimal';
   const pages = generatePageNumbers(currentPage, totalPages, siblingCount);
+  const withFirstLast = showFirstLast && !minimal;
+  const showRange = !minimal && totalItems !== undefined && pageSize !== undefined;
 
   const buttonBase = `
-    inline-flex items-center justify-center
-    w-9 h-9 rounded-xl text-sm font-medium
+    inline-flex items-center justify-center flex-shrink-0
+    w-9 h-9 text-sm font-medium
     transition-all duration-200
     disabled:opacity-40 disabled:cursor-not-allowed
+    ${minimal ? 'rounded-full' : 'rounded-xl'}
   `;
 
   return (
-    <div className={`flex items-center justify-between gap-4 ${className}`} {...props}>
-      {totalItems !== undefined && pageSize !== undefined && (
+    <div
+      className={`flex flex-wrap items-center gap-x-4 gap-y-2 ${
+        minimal ? 'justify-center' : 'justify-between'
+      } ${className}`}
+      {...props}
+    >
+      {showRange && (
         <p className="text-sm text-[var(--textSecondary)] tabular-nums">
           Showing {Math.min((currentPage - 1) * pageSize + 1, totalItems)}
           {' '}-{' '}
@@ -90,8 +115,12 @@ export function Pagination({
         </p>
       )}
 
-      <nav className="flex items-center gap-1" aria-label="Pagination">
-        {showFirstLast && (
+      {/* Page buttons scroll rather than overflow when there are many pages. */}
+      <nav
+        className="flex items-center gap-1 max-w-full overflow-x-auto scrollbar-thin"
+        aria-label="Pagination"
+      >
+        {withFirstLast && (
           <button
             onClick={() => onPageChange(1)}
             disabled={currentPage === 1}
@@ -125,10 +154,7 @@ export function Pagination({
               onClick={() => onPageChange(page)}
               className={`
                 ${buttonBase}
-                ${page === currentPage
-                  ? 'bg-[var(--primary)] text-white shadow-[0_1px_4px_rgba(99,102,241,0.3)]'
-                  : 'text-[var(--textSecondary)] hover:bg-[var(--bgSubtle,var(--surface1))] hover:text-[var(--text)]'
-                }
+                ${activePageClass(page === currentPage, minimal)}
               `}
               aria-label={`Page ${page}`}
               aria-current={page === currentPage ? 'page' : undefined}
@@ -147,7 +173,7 @@ export function Pagination({
           <ChevronRight size={16} />
         </button>
 
-        {showFirstLast && (
+        {withFirstLast && (
           <button
             onClick={() => onPageChange(totalPages)}
             disabled={currentPage === totalPages}

@@ -77,6 +77,55 @@
       scroll-behavior: auto !important;
     }
   }
+
+  /* Native date/time inputs — keep responsive so they never overflow narrow
+     screens (their edit fields have an intrinsic min-width that won't shrink). */
+  input[type="date"],
+  input[type="time"],
+  input[type="datetime-local"] {
+    min-width: 0;
+    max-width: 100%;
+  }
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="time"]::-webkit-calendar-picker-indicator,
+  input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+    margin-inline-start: auto;
+    cursor: pointer;
+  }
+
+  /* The calendar/clock indicator and the picker panel are drawn by the browser,
+     not by us, and the browser picks their colour from `color-scheme` — which
+     it reads off the OS unless a page says otherwise. Our theme only sets CSS
+     variables and a `.dark` class, so the browser never learned which way the
+     app is facing: in dark mode it kept painting the dark glyph, which
+     disappeared into the dark field. The mismatch runs both ways — app in light
+     mode on a dark OS gave a white glyph on a white field — so both states are
+     declared rather than only the dark one.
+
+     Scoped to these controls on purpose. Setting `color-scheme` on the root
+     would also repaint scrollbars, autofill and every other native widget in
+     one go, which is a much wider change than this fix needs. */
+  html.dark input[type="date"],
+  html.dark input[type="time"],
+  html.dark input[type="datetime-local"] {
+    color-scheme: dark;
+  }
+  html:not(.dark) input[type="date"],
+  html:not(.dark) input[type="time"],
+  html:not(.dark) input[type="datetime-local"] {
+    color-scheme: light;
+  }
+
+  /* Prevent iOS Safari from auto-zooming when a date/time field is focused —
+     it zooms whenever the control's font-size is below 16px, which makes the
+     native picker overlap and mis-render on mobile. */
+  @media (max-width: 640px) {
+    input[type="date"],
+    input[type="time"],
+    input[type="datetime-local"] {
+      font-size: 16px;
+    }
+  }
 }
 
 /* ============================================================================
@@ -415,33 +464,21 @@
 
   /* ------------------------------------------------------------------
      Navbar Surface — Floating header
-     Transparent by default. On scroll: soft blur, NO hard border.
-     Feels like part of the same system as the sidebar.
+     Solid frosted background with a soft divider so it reads as a header.
      ------------------------------------------------------------------ */
   .navbar-surface {
-    background: transparent;
+    background: var(--sidebarBg);
     border-bottom: none;
   }
 
-  /* On scroll: frosted glass appearance with soft shadow, NO border */
+  /* On scroll: add a soft shadow */
   .navbar-scrolled {
-    background: color-mix(in srgb, var(--navbarBg) 75%, transparent);
-    backdrop-filter: blur(16px) saturate(160%);
-    -webkit-backdrop-filter: blur(16px) saturate(160%);
-    box-shadow: 0 1px 12px rgba(0, 0, 0, 0.04);
-    border-bottom: none;
+    background: var(--sidebarBg);
+    box-shadow: 0 1px 12px rgba(0, 0, 0, 0.06);
   }
 
   .dark .navbar-scrolled {
-    background: color-mix(in srgb, var(--navbarBg) 70%, transparent);
-    box-shadow: 0 1px 16px rgba(0, 0, 0, 0.12);
-  }
-
-  @supports not (background: color-mix(in srgb, red 50%, blue)) {
-    .navbar-scrolled {
-      background: var(--navbarBg);
-      opacity: 0.95;
-    }
+    box-shadow: 0 1px 16px rgba(0, 0, 0, 0.16);
   }
 
   /* ------------------------------------------------------------------
@@ -676,61 +713,58 @@
 }
 
 /* ============================================================================
-   AI Avatar Animations
+   AI Avatar — voice orb
    ============================================================================ */
-@keyframes avatar-blink {
-  0%, 90%, 100% { transform: scaleY(1); }
-  95% { transform: scaleY(0.1); }
-}
-
-@keyframes avatar-breathe {
+@keyframes orb-float {
   0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-3px); }
+  50%      { transform: translateY(-4px); }
 }
 
-@keyframes avatar-pulse-ring {
-  0% { transform: scale(0.9); opacity: 0.6; }
-  50% { transform: scale(1.05); opacity: 0.3; }
-  100% { transform: scale(0.9); opacity: 0.6; }
+@keyframes orb-halo {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 0.85; }
 }
 
-.avatar-pulse-ring {
-  animation: avatar-pulse-ring 1.5s ease-in-out infinite;
+/* Two drifts at different periods, so the orb never repeats a visible loop. */
+@keyframes orb-drift-a {
+  0%, 100% { transform: translate3d(-8%, -6%, 0) scale(1); }
+  33%      { transform: translate3d(10%, 8%, 0) scale(1.14); }
+  66%      { transform: translate3d(-4%, 12%, 0) scale(0.92); }
 }
 
-/* Mouth states */
-.avatar-mouth-idle {
-  width: 12px;
-  height: 3px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.7);
+@keyframes orb-drift-b {
+  0%, 100% { transform: translate3d(9%, 7%, 0) scale(1.08); }
+  40%      { transform: translate3d(-11%, -5%, 0) scale(0.9); }
+  70%      { transform: translate3d(3%, -10%, 0) scale(1.16); }
 }
 
-.avatar-mouth-open {
-  width: 14px;
-  height: 10px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.8);
+/* Resting waveform: a slow, shallow sway rather than a flat line. */
+@keyframes orb-bar-idle {
+  0%, 100% { transform: scaleY(0.12); }
+  50%      { transform: scaleY(0.22); }
 }
 
-.avatar-mouth-wide {
-  width: 16px;
-  height: 14px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.85);
+@keyframes orb-bar-think {
+  0%, 100% { transform: scaleY(0.16); }
+  25%      { transform: scaleY(0.62); }
+  50%      { transform: scaleY(0.28); }
+  75%      { transform: scaleY(0.8); }
 }
 
-.avatar-mouth-thinking {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.5);
-}
+.orb-float     { animation: orb-float 5s ease-in-out infinite; }
+.orb-halo      { animation: orb-halo 4.5s ease-in-out infinite; }
+.orb-drift-a   { animation: orb-drift-a 11s ease-in-out infinite; filter: blur(8px); }
+.orb-drift-b   { animation: orb-drift-b 14s ease-in-out infinite; filter: blur(10px); }
+.orb-bar-idle  { animation: orb-bar-idle 3.2s ease-in-out infinite; }
+.orb-bar-think { animation: orb-bar-think 1.6s ease-in-out infinite; }
 
-.avatar-mouth-listening {
-  width: 16px;
-  height: 4px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.7);
-  transform: scaleX(1.1);
+@media (prefers-reduced-motion: reduce) {
+  .orb-float,
+  .orb-halo,
+  .orb-drift-a,
+  .orb-drift-b,
+  .orb-bar-idle,
+  .orb-bar-think {
+    animation: none;
+  }
 }

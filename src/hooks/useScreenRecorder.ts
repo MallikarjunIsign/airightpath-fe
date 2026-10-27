@@ -1,109 +1,406 @@
+import { MIC_AUDIO_CONSTRAINTS } from '@/config/audio.config';
 import { useState, useRef, useCallback } from 'react';
+import { recordingSync } from '@/services/recording-sync.service';
+
+/**
+ * Stands in for a chunk that is already stored elsewhere.
+ *
+ * A recording is now one file for the whole interview, and its chunks are kept
+ * in the browser's database as they arrive. Holding them here as well put an
+ * hour of video in memory twice. The list's *length* is what the rest of this
+ * hook reads — whether any data has arrived — so it still gets one entry per
+ * chunk, just not the bytes.
+ */
+const EMPTY_BLOB = new Blob([]);
+
+/**
+ * Raised when the candidate shared something other than their whole screen.
+ * `surface` is what the browser says they picked: `window` or `browser` (a tab).
+ */
+export class ScreenSurfaceError extends Error {
+  readonly surface: string;
+  constructor(surface: string) {
+    super(`The ${surface === 'browser' ? 'browser tab' : surface} was shared instead of the entire screen`);
+    this.name = 'ScreenSurfaceError';
+    this.surface = surface;
+  }
+}
 
 interface UseScreenRecorderOptions {
+  /**
+   * Refuse anything but the whole screen.
+   *
+   * A shared window or tab records only that window or tab, so everything outside
+   * it — a call window, a second browser, another app showing the screen to a
+   * helper — is simply not in the recording. The share is also where this is
+   * actually enforceable: a page cannot see that another app is already sharing
+   * the screen, but it can insist that what it records is all of it, banners and
+   * call windows included. Where the browser does not report what was shared
+   * (Firefox, Safari) it cannot be checked and the share is accepted.
+   */
+  requireEntireScreen?: boolean;
   timeslice?: number;
   onScreenStop?: () => void;
+  /**
+   * The interviewer's voice, to be mixed in alongside the microphone.
+   *
+   * <p>A function rather than a value: the audio graph it comes from is built
+   * lazily when the first question is spoken, which is after the recording
+   * starts. Read at start time it would always be null.</p>
+   */
+  getInterviewerAudio?: () => MediaStream | null;
+  /**
+   * Close the recording off every `segmentMs` and upload that part in the
+   * background, then record on from the same share.
+   */
+  segmentMs?: number;
+  /**
+   * Keep every chunk in the browser's own store as it is recorded and upload
+   * finished parts in the background, so the recording survives a closed tab
+   * and the candidate never waits for it.
+   */
+  persist?: { scheduleId: () => number | null | undefined };
+}
+
+/**
+ * Both voices summed into one audio track.
+ *
+ * <p>Falls back to the microphone alone when there is no interviewer audio —
+ * before the first question is spoken, or when TTS went through the browser's
+ * own speech synthesis, which a page cannot capture. Half a conversation is
+ * still better than failing the recording.</p>
+ */
+function mixAudio(
+  micStream: MediaStream,
+  interviewerStream: MediaStream | null,
+  contextRef: React.MutableRefObject<AudioContext | null>
+): MediaStreamTrack[] {
+  if (!interviewerStream?.getAudioTracks().length) {
+    return micStream.getAudioTracks();
+  }
+
+  try {
+    // `interactive` asks the browser for the smallest buffer it can manage.
+    // The default hint optimises for power, which buys a larger buffer and
+    // puts the mixed audio tens of milliseconds behind the video track it is
+    // recorded alongside — heard back as lips out of step with the voice.
+    const context = new AudioContext({ latencyHint: 'interactive' });
+    contextRef.current = context;
+    const destination = context.createMediaStreamDestination();
+
+    context.createMediaStreamSource(micStream).connect(destination);
+    context.createMediaStreamSource(interviewerStream).connect(destination);
+
+    return destination.stream.getAudioTracks();
+  } catch (err) {
+    // A recording with the candidate's voice is worth far more than no
+    // recording at all, so a failure to mix falls back rather than throws.
+    console.warn('Could not mix the interviewer audio into the recording', err);
+    return micStream.getAudioTracks();
+  }
 }
 
 export function useScreenRecorder(options?: UseScreenRecorderOptions) {
   const [isRecording, setIsRecording] = useState(false);
+  /**
+   * The shared screen, for showing the candidate what is being captured.
+   *
+   * Video only — deliberately not the combined stream `start` returns, which
+   * carries the microphone track too and would feed the candidate's own voice
+   * back at them through any element it is attached to.
+   */
+  const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
+  /**
+   * Whether sharing ended on its own, rather than because the interview did.
+   *
+   * Drives the candidate-facing prompt to share again. Held as state because
+   * the panel has to re-render into its alert when it flips.
+   */
+  const [stoppedEarly, setStoppedEarly] = useState(false);
+
+  /**
+   * One finished Blob per share.
+   *
+   * <p>Sharing can stop and be picked up again mid-interview — the candidate
+   * closes the shared window, or hits the browser's own "Stop sharing" bar —
+   * and the footage from before that must survive. It is kept as separate
+   * files rather than one because each MediaRecorder run emits a complete
+   * WebM with its own header: appended end to end, every player stops at the
+   * boundary and the later parts are silently lost. Separate files are
+   * uploaded as separate parts and the reviewer plays them in order.</p>
+   */
+  const segmentsRef = useRef<Blob[]>([]);
+  /** Chunks of the share currently being recorded. */
   const chunksRef = useRef<Blob[]>([]);
   const recorderRef = useRef<MediaRecorder | null>(null);
+  const mimeTypeRef = useRef<string>('video/webm');
   const screenStreamRef = useRef<MediaStream | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
+  /** The graph that mixes the two voices; closed with the recording. */
+  const mixContextRef = useRef<AudioContext | null>(null);
+  const segmentTimerRef = useRef<number | null>(null);
+  const sessionRef = useRef<string | null>(null);
 
   // Keep callback ref fresh so stale closures don't matter
+  const optionsRef = useRef(options);
+  optionsRef.current = options;
+
   const onScreenStopRef = useRef(options?.onScreenStop);
   onScreenStopRef.current = options?.onScreenStop;
 
-  const start = useCallback(async (): Promise<MediaStream> => {
+  // Same reason as the callback above: read through a ref so `start` does not
+  // have to depend on the options object, which is a fresh literal on every
+  // render and would rebuild the callback each time.
+  const getInterviewerAudioRef = useRef(options?.getInterviewerAudio);
+  getInterviewerAudioRef.current = options?.getInterviewerAudio;
+
+  /** Release the capture devices and the mixing graph. */
+  const releaseCapture = useCallback(() => {
+    if (segmentTimerRef.current != null) {
+      window.clearInterval(segmentTimerRef.current);
+      segmentTimerRef.current = null;
+    }
+    screenStreamRef.current?.getTracks().forEach((t) => t.stop());
+    micStreamRef.current?.getTracks().forEach((t) => t.stop());
+    screenStreamRef.current = null;
+    micStreamRef.current = null;
+    // Each share builds its own graph. Left open they accumulate for the rest
+    // of the interview, and browsers cap how many a page may hold.
+    mixContextRef.current?.close().catch(() => {});
+    mixContextRef.current = null;
+    setScreenStream(null);
+  }, []);
+
+  /**
+   * Stop the running recorder and bank whatever it captured as one segment.
+   *
+   * <p>Resolves once the recorder has flushed. A MediaRecorder whose video
+   * track has already ended keeps reporting `recording` while producing
+   * nothing, so this is also what rescues the footage from a share the
+   * candidate cut off.</p>
+   */
+  const finishSegment = useCallback((): Promise<void> => {
+    return new Promise((resolve) => {
+      const recorder = recorderRef.current;
+      const bank = () => {
+        if (chunksRef.current.length > 0) {
+          const blob = new Blob(chunksRef.current, { type: mimeTypeRef.current });
+          chunksRef.current = [];
+          if (optionsRef.current?.persist && sessionRef.current) {
+            // Uploaded in the background, and kept in the browser's store until
+            // it is. Not held here: nothing waits on it.
+            recordingSync.submit(sessionRef.current, blob);
+            sessionRef.current = null;
+          } else {
+            segmentsRef.current.push(blob);
+          }
+        }
+        recorderRef.current = null;
+        setIsRecording(false);
+        resolve();
+      };
+
+      if (!recorder || recorder.state === 'inactive') {
+        bank();
+        return;
+      }
+      recorder.onstop = bank;
+      recorder.stop();
+    });
+  }, []);
+
+  /** Prompt for a screen, wire up a recorder, and begin a new segment. */
+  const beginCapture = useCallback(async (): Promise<MediaStream> => {
     // 1. Get screen stream (browser will show the "Choose what to share" dialog)
-    const screenStream = await navigator.mediaDevices.getDisplayMedia({
+    const screen = await navigator.mediaDevices.getDisplayMedia({
       video: {
         width: { ideal: 1280 },
         height: { ideal: 720 },
-        frameRate: { ideal: 15 },
+        // A shared screen is mostly still, and the few moments that are not —
+        // scrolling, typing — are better served by spending the budget on a
+        // clean frame than on twice as many smeared ones.
+        frameRate: { ideal: 10 },
+        // Hints for the picker, not guarantees: the entire screen first, no way to
+        // switch to a tab mid-share, and this page not offered as a thing to share.
+        displaySurface: 'monitor',
+        monitorTypeSurfaces: 'include',
+        selfBrowserSurface: 'exclude',
+        surfaceSwitching: 'exclude',
       } as MediaTrackConstraints,
       audio: false,
     });
-    screenStreamRef.current = screenStream;
+    const surface = screen.getVideoTracks()[0]?.getSettings?.().displaySurface;
+    if (optionsRef.current?.requireEntireScreen && surface && surface !== 'monitor') {
+      screen.getTracks().forEach((track) => track.stop());
+      throw new ScreenSurfaceError(surface);
+    }
+    screenStreamRef.current = screen;
+    setScreenStream(screen);
 
     // 2. Get mic audio separately
-    const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const micStream = await navigator.mediaDevices.getUserMedia({ audio: MIC_AUDIO_CONSTRAINTS });
     micStreamRef.current = micStream;
 
-    // 3. Combine screen video + mic audio into one stream
+    // 3. Screen video, plus both voices mixed down to a single track.
+    //
+    // Mixed rather than simply added. A MediaStream can carry two audio
+    // tracks, but MediaRecorder records only the first — so attaching the
+    // interviewer's voice as a second track would have silently changed
+    // nothing, which is the worst kind of fix. Web Audio sums them into one
+    // track that the recorder does capture.
+    const interviewerAudio = getInterviewerAudioRef.current?.() ?? null;
+    const audioTracks = mixAudio(micStream, interviewerAudio, mixContextRef);
+
     const combinedStream = new MediaStream([
-      ...screenStream.getVideoTracks(),
-      ...micStream.getAudioTracks(),
+      ...screen.getVideoTracks(),
+      ...audioTracks,
     ]);
 
     chunksRef.current = [];
 
-    const mimeType = 'video/webm;codecs=vp8,opus';
-    const recorder = new MediaRecorder(combinedStream, {
-      mimeType: MediaRecorder.isTypeSupported(mimeType) ? mimeType : undefined,
-      videoBitsPerSecond: 800_000,
-      audioBitsPerSecond: 64_000,
-    });
-
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        chunksRef.current.push(e.data);
-      }
+    const preferred = 'video/webm;codecs=vp8,opus';
+    const supported = MediaRecorder.isTypeSupported(preferred);
+    mimeTypeRef.current = supported ? preferred : 'video/webm';
+    const makeRecorder = (): MediaRecorder => {
+      const next = new MediaRecorder(combinedStream, {
+        mimeType: supported ? preferred : undefined,
+        videoBitsPerSecond: 1_500_000,
+        audioBitsPerSecond: 64_000,
+      });
+      recordingSync.discard(sessionRef.current);
+      sessionRef.current = optionsRef.current?.persist
+        ? recordingSync.begin(optionsRef.current.persist.scheduleId(), 'screen', mimeTypeRef.current)
+        : null;
+      const sessionId = sessionRef.current;
+      next.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(sessionId ? EMPTY_BLOB : e.data);
+          recordingSync.chunk(sessionId, e.data);
+        }
+      };
+      return next;
     };
+    const recorder = makeRecorder();
 
-    recorder.onstop = () => setIsRecording(false);
-
-    // 4. Fire onScreenStop when candidate stops sharing (browser stop button)
-    screenStream.getVideoTracks().forEach((track) => {
-      track.onended = () => onScreenStopRef.current?.();
+    screen.getVideoTracks().forEach((track) => {
+      track.onended = () => {
+        // A track that has already been replaced by a later share is not the
+        // one that just ended for the candidate; ignore its late event.
+        if (screenStreamRef.current !== screen) return;
+        setStoppedEarly(true);
+        // Close out the segment before releasing anything. Everything recorded
+        // up to the moment they stopped is kept, so picking the share back up
+        // costs only the gap.
+        void finishSegment().then(releaseCapture);
+        onScreenStopRef.current?.();
+      };
     });
 
     recorderRef.current = recorder;
     recorder.start(options?.timeslice);
     setIsRecording(true);
+    setStoppedEarly(false);
+
+    const segmentMs = options?.segmentMs;
+    if (segmentMs && options?.persist) {
+      if (segmentTimerRef.current != null) window.clearInterval(segmentTimerRef.current);
+      segmentTimerRef.current = window.setInterval(() => {
+        const current = recorderRef.current;
+        if (!current || current.state !== 'recording' || screenStreamRef.current !== screen) return;
+        // The old part is closed first and the next started from its stop
+        // event. A recorder's last chunk arrives as it stops; starting the
+        // successor earlier put that tail into the new part's buffer, leaving
+        // the old part short and the new one starting without its header.
+        current.onstop = () => {
+          const finished = chunksRef.current;
+          chunksRef.current = [];
+          if (finished.length > 0) {
+            recordingSync.submit(sessionRef.current, new Blob(finished, { type: mimeTypeRef.current }));
+            sessionRef.current = null;
+          }
+          // The share may have ended, or the interview finished, meanwhile.
+          if (screenStreamRef.current !== screen) return;
+          const successor = makeRecorder();
+          recorderRef.current = successor;
+          successor.start(options?.timeslice);
+        };
+        current.stop();
+      }, segmentMs);
+    }
     return combinedStream;
-  }, [options?.timeslice]);
+  }, [options?.timeslice, finishSegment, releaseCapture]);
+
+  const start = useCallback(async (): Promise<MediaStream> => {
+    segmentsRef.current = [];
+    return beginCapture();
+  }, [beginCapture]);
+
+  /**
+   * Pick the share back up after it stopped, without losing what came before.
+   *
+   * <p>Throws if the candidate dismisses the browser's picker, so the caller
+   * can leave the prompt on screen rather than reporting a share that is not
+   * happening.</p>
+   */
+  const resume = useCallback(async (): Promise<MediaStream> => {
+    // Defensive: a share that is somehow still live is banked first, so two
+    // recorders can never write into the same chunk list.
+    await finishSegment();
+    releaseCapture();
+    return beginCapture();
+  }, [beginCapture, finishSegment, releaseCapture]);
 
   const stop = useCallback(() => {
     recorderRef.current?.stop();
-    screenStreamRef.current?.getTracks().forEach((t) => t.stop());
-    micStreamRef.current?.getTracks().forEach((t) => t.stop());
-    screenStreamRef.current = null;
-    micStreamRef.current = null;
-  }, []);
+    recorderRef.current = null;
+    releaseCapture();
+    setIsRecording(false);
+  }, [releaseCapture]);
 
-  const stopAndGetBlob = useCallback((): Promise<Blob | null> => {
-    return new Promise((resolve) => {
-      const recorder = recorderRef.current;
-      if (!recorder || recorder.state === 'inactive') {
-        const allChunks = chunksRef.current;
-        resolve(
-          allChunks.length > 0
-            ? new Blob(allChunks, { type: recorder?.mimeType || 'video/webm' })
-            : null
-        );
-        return;
-      }
+  /**
+   * Throw the recording away: a start that did not go ahead.
+   *
+   * Different from `stop`, which leaves what was recorded to be uploaded. Here
+   * nothing is wanted — the share was taken before the interview and the
+   * interview never started — and an upload of it would be a recording of
+   * nothing, filed against an interview that did not happen.
+   */
+  const abort = useCallback(() => {
+    recordingSync.discard(sessionRef.current);
+    sessionRef.current = null;
+    try {
+      recorderRef.current?.stop();
+    } catch {
+      // Already stopped.
+    }
+    recorderRef.current = null;
+    chunksRef.current = [];
+    segmentsRef.current = [];
+    releaseCapture();
+    setIsRecording(false);
+  }, [releaseCapture]);
 
-      recorder.onstop = () => {
-        setIsRecording(false);
-        const allChunks = chunksRef.current;
-        resolve(
-          allChunks.length > 0
-            ? new Blob(allChunks, { type: recorder.mimeType || 'video/webm' })
-            : null
-        );
-      };
+  /**
+   * End the recording and hand back every segment, oldest first.
+   *
+   * <p>Empty when nothing was ever captured. Each segment is a self-contained
+   * WebM; they are uploaded as separate parts rather than joined, because
+   * concatenated WebM files play only up to the first boundary.</p>
+   */
+  const stopAndGetSegments = useCallback(async (): Promise<Blob[]> => {
+    await finishSegment();
+    releaseCapture();
+    setStoppedEarly(false);
+    const persist = optionsRef.current?.persist;
+    if (persist) {
+      // Everything has been handed to the background uploader; tell it that
+      // was the last of it so it can report how the recording went.
+      recordingSync.discard(sessionRef.current);
+      sessionRef.current = null;
+      recordingSync.finish(persist.scheduleId(), 'screen');
+    }
+    return segmentsRef.current.slice();
+  }, [finishSegment, releaseCapture]);
 
-      recorder.stop();
-      screenStreamRef.current?.getTracks().forEach((t) => t.stop());
-      micStreamRef.current?.getTracks().forEach((t) => t.stop());
-      screenStreamRef.current = null;
-      micStreamRef.current = null;
-    });
-  }, []);
-
-  return { isRecording, start, stop, stopAndGetBlob };
+  return { isRecording, stoppedEarly, start, resume, stop, abort, stopAndGetSegments, screenStream };
 }

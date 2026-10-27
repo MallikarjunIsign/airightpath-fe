@@ -34,8 +34,8 @@ interface SummaryState {
   evaluation?: InterviewEvaluation | VoiceEvaluationResult;
 }
 
-function isVoiceEvaluation(eval_: any): eval_ is VoiceEvaluationResult {
-  return eval_ && 'speechAnalysis' in eval_;
+function isVoiceEvaluation(value: unknown): value is VoiceEvaluationResult {
+  return typeof value === 'object' && value !== null && 'speechAnalysis' in value;
 }
 
 export function InterviewSummaryPage() {
@@ -48,7 +48,7 @@ export function InterviewSummaryPage() {
   const conversation = state?.conversation ?? [];
   const summary = state?.summary;
   const [evaluation, setEvaluation] = useState<InterviewEvaluation | VoiceEvaluationResult | null>(
-    (state?.evaluation as any) ?? null
+    state?.evaluation ?? null
   );
   const [loadingEval, setLoadingEval] = useState(false);
 

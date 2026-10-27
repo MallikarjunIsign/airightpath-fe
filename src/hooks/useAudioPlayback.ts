@@ -15,6 +15,19 @@ export function useAudioPlayback() {
   const queueRef = useRef<AudioChunk[]>([]);
   const isProcessingRef = useRef(false);
   const animFrameRef = useRef<number>(0);
+  /**
+   * The interviewer's voice, as a recordable stream.
+   *
+   * <p>Recordings captured the microphone and nothing else, so an interview
+   * played back as one side of a conversation: a candidate answering
+   * questions nobody could hear. The questions survive in the transcript, but
+   * a recording of someone responding to silence is close to useless as
+   * evidence of how the interview actually went.</p>
+   *
+   * <p>A second destination hung off the same graph. The speakers keep their
+   * own, so tapping this changes nothing about what the candidate hears.</p>
+   */
+  const recordDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
 
   const getAudioContext = useCallback(() => {
     if (!audioContextRef.current) {
@@ -22,6 +35,11 @@ export function useAudioPlayback() {
       analyserRef.current = audioContextRef.current.createAnalyser();
       analyserRef.current.fftSize = 256;
       analyserRef.current.connect(audioContextRef.current.destination);
+      // Branched off the same analyser every spoken chunk already passes
+      // through, so anything audible is captured without a second code path
+      // to keep in step with the first.
+      recordDestinationRef.current = audioContextRef.current.createMediaStreamDestination();
+      analyserRef.current.connect(recordDestinationRef.current);
     }
     return audioContextRef.current;
   }, []);
@@ -158,5 +176,33 @@ export function useAudioPlayback() {
     };
   }, [stopPlayback]);
 
-  return { isPlaying, amplitude, enqueueAudio, stopPlayback, playBrowserTTS };
+  /**
+   * The interviewer's voice for mixing into a recording. The graph is built on the first request if no
+   * audio has played yet, so a recording that starts before the first question still carries it.
+   *
+   * <p>Covers only audio played through this graph. Where TTS falls back to
+   * the browser's own speech synthesis, the sound goes straight to the
+   * operating system and cannot be captured from a web page at all.</p>
+   */
+  const getInterviewerAudioStream = useCallback(() => {
+    // Built here if nothing has played yet. The screen share is taken and recorded before the first
+    // question is spoken, so asking for the stream only after audio existed meant it was always null at
+    // that moment: the recording was started with the microphone alone and kept that way to the end,
+    // which is a recording of the candidate answering questions nobody can hear.
+    try {
+      getAudioContext();
+    } catch {
+      return null;
+    }
+    return recordDestinationRef.current?.stream ?? null;
+  }, [getAudioContext]);
+
+  return {
+    isPlaying,
+    amplitude,
+    enqueueAudio,
+    stopPlayback,
+    playBrowserTTS,
+    getInterviewerAudioStream,
+  };
 }

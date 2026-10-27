@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Mail, Phone, Lock, Eye, EyeOff, ArrowLeft, KeyRound, ShieldCheck } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, ArrowLeft, KeyRound, ShieldCheck } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useToast } from '@/components/ui/Toast';
+import { MESSAGES } from '@/config/messages';
 import { authService } from '@/services/auth.service';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
@@ -51,7 +52,7 @@ export function ForgotPasswordPage() {
       });
       setContactValue(data.contact);
       setOtpMethod(data.otpMethod);
-      showToast(`OTP sent to your ${data.otpMethod}`, 'success');
+      showToast(MESSAGES.auth.otpSent(data.otpMethod), 'success');
       setStep('otp');
     } catch {
       // Error toast auto-handled by interceptor
@@ -60,7 +61,7 @@ export function ForgotPasswordPage() {
 
   const handleValidateOtp = async () => {
     if (!otp || otp.length < 4) {
-      showToast('Please enter a valid OTP', 'error');
+      showToast(MESSAGES.auth.otpInvalid, 'error');
       return;
     }
 
@@ -71,7 +72,7 @@ export function ForgotPasswordPage() {
         email: otpMethod === 'email' ? contactValue : null,
         mobile: otpMethod === 'mobile' ? contactValue : null,
       });
-      showToast('OTP verified successfully', 'success');
+      showToast(MESSAGES.auth.otpVerified, 'success');
 
       localStorage.setItem('rightpath_resetMethod', otpMethod);
       localStorage.setItem('rightpath_resetValue', contactValue);
@@ -91,7 +92,7 @@ export function ForgotPasswordPage() {
         : { mobile: contactValue, newPassword: data.newPassword };
 
       await authService.updatePassword(payload);
-      showToast('Password updated successfully', 'success');
+      showToast(MESSAGES.auth.passwordUpdated, 'success');
 
       localStorage.removeItem('rightpath_resetMethod');
       localStorage.removeItem('rightpath_resetValue');
@@ -192,6 +193,7 @@ export function ForgotPasswordPage() {
                     <Mail size={16} className="text-[var(--textSecondary)]" />
                     <span className="text-sm text-[var(--text)]">Email</span>
                   </label>
+                  {/* Mobile OTP disabled — backend does not support mobile-based OTP send.
                   <label className="flex items-center gap-2 cursor-pointer px-4 py-2.5 rounded-[10px] border border-[var(--border)] hover:border-[var(--primary)] transition-colors flex-1">
                     <input
                       type="radio"
@@ -202,6 +204,7 @@ export function ForgotPasswordPage() {
                     <Phone size={16} className="text-[var(--textSecondary)]" />
                     <span className="text-sm text-[var(--text)]">Mobile</span>
                   </label>
+                  */}
                 </div>
                 {contactForm.formState.errors.otpMethod && (
                   <p className="mt-1.5 text-sm text-[var(--error)]">

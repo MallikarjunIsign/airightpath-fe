@@ -9,53 +9,35 @@ import {
   Loader2,
   EyeOff,
   Camera,
-  Maximize,
-  ShieldAlert,
+  Users,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/components/ui/Toast';
 import { assessmentService } from '@/services/assessment.service';
 import { useTimer } from '@/hooks/useTimer';
-import { useFullscreen } from '@/hooks/useFullscreen';
-import { usePageVisibility } from '@/hooks/usePageVisibility';
-import { useFaceDetection } from '@/hooks/useFaceDetection';
+import { useExamProctoring } from '@/hooks/useExamProctoring';
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { APP_CONFIG } from '@/config/app.config';
+import { PROCTORING_CONFIG } from '@/config/proctoring.config';
+import { MESSAGES } from '@/config/messages';
+import {
+  CameraRequiredOverlay,
+  DesktopRequiredOverlay,
+  FullscreenRequiredOverlay,
+} from '@/components/exam/ExamOverlays';
+import { useIsDesktop } from '@/hooks/useIsDesktop';
 import { ROUTES } from '@/config/routes';
 import { formatTimer } from '@/utils/format.utils';
+import { parseServerInstant } from '@/utils/format.utils';
+import { computeExamMinutes } from '@/utils/exam-duration.utils';
+import { buildSubmissionMeta } from '@/utils/result.utils';
+// Shared with Test Mode's rehearsal of this screen, so the two cannot render the
+// same paper differently. See utils/exam-question.utils.ts.
+import { normalizeAptitudeQuestions as normalizeQuestions } from '@/utils/exam-question.utils';
 import type { Assessment, Question, RawQuestion } from '@/types/assessment.types';
-
-/** Normalise raw BE question (object options, "question" field) → clean UI shape */
-function normalizeQuestions(raw: RawQuestion[]): Question[] {
-  return raw.map((q, idx) => {
-    // Options: BE sends {"A":"text","B":"text"} or legacy ["text","text"]
-    let options: { key: string; text: string }[];
-    if (Array.isArray(q.options)) {
-      options = q.options.map((text, i) => ({
-        key: String.fromCharCode(65 + i),
-        text: String(text),
-      }));
-    } else if (q.options && typeof q.options === 'object') {
-      options = Object.entries(q.options).map(([key, text]) => ({
-        key,
-        text: String(text),
-      }));
-    } else {
-      options = [];
-    }
-
-    return {
-      id: q.id ?? idx + 1,
-      questionText: q.questionText || q.question || '',
-      options,
-      correctAnswer: q.correctAnswer,
-      marks: q.marks,
-    };
-  });
-}
 
 export function AptitudeAssessmentPage() {
   const location = useLocation();
@@ -63,7 +45,13 @@ export function AptitudeAssessmentPage() {
   const { user } = useAuth();
   const { showToast } = useToast();
 
-  const assessment = (location.state as { assessment?: Assessment })?.assessment;
+  const navState = location.state as
+    | { assessment?: Assessment; durationMinutes?: number }
+    | null;
+  const assessment = navState?.assessment;
+  // The instructions screen already counted the paper and told the candidate
+  // how long they get; honour that number rather than deriving a second one.
+  const agreedDurationMinutes = navState?.durationMinutes;
 
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -72,10 +60,36 @@ export function AptitudeAssessmentPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showConfirmSubmit, setShowConfirmSubmit] = useState(false);
-  const [tabWarnings, setTabWarnings] = useState(0);
   const isSubmittingRef = useRef(false);
+  const isDesktop = useIsDesktop();
   const initRef = useRef(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const proctoring = PROCTORING_CONFIG;
+
+  // Latest auto-submit handler, wired to the proctoring hook (defined below).
+  const autoSubmitRef = useRef<(reason: string) => void>(() => {});
+  const proctor = useExamProctoring({
+    loading,
+    onAutoSubmit: (reason) => autoSubmitRef.current(reason),
+  });
+  const {
+    videoRef,
+    camera,
+    isFullscreen,
+    enterFullscreen,
+    exitFullscreen,
+    tabWarnings,
+    warningCount,
+    fullscreenExitCount,
+    noiseWarnings,
+    totalWarnings,
+    faceDetected,
+    multipleFaces,
+    setupCamera,
+    stopDetection,
+    begin: beginProctoring,
+    markActive,
+    markInactive,
+  } = proctor;
 
   // Refs for stable access in callbacks
   const questionsRef = useRef<Question[]>([]);
@@ -83,59 +97,28 @@ export function AptitudeAssessmentPage() {
   questionsRef.current = questions;
   answersRef.current = answers;
 
-  // Timer
-  const { secondsLeft, start: startTimer } = useTimer({
+  // Timer. The real duration is per-question, so it is only known once the
+  // paper has loaded — init below resets the clock to it before starting.
+  const { secondsLeft, start: startTimer, startAt: startTimerAt, reset: resetTimer } = useTimer({
     initialSeconds: APP_CONFIG.EXAM_TIMER_MINUTES * 60,
     autoStart: false,
     onExpire: () => handleAutoSubmit('Time is up!'),
   });
 
-  // Fullscreen with exit tracking
-  const { isFullscreen, enterFullscreen, exitFullscreen, fullscreenExitCount } = useFullscreen({
-    onExitAttempt: (count) => {
-      showToast(`Warning: Fullscreen exited! (${count})`, 'warning');
-    },
-  });
+  // The clock as it stood when submit ran, for the record written with the
+  // answers. Refs because handleSubmit is memoised and would otherwise close
+  // over the countdown as it was on the render that created it.
+  const secondsLeftRef = useRef(0);
+  secondsLeftRef.current = secondsLeft;
+  const examDurationSecondsRef = useRef(0);
 
-  // Page visibility / tab switch detection
-  usePageVisibility({
-    onHidden: () => {
-      setTabWarnings((prev) => {
-        const next = prev + 1;
-        showToast(`Warning: Tab switch detected! (${next})`, 'warning');
-        return next;
-      });
-    },
-  });
-
-  // Face detection
-  const { loadModels, startDetection, stopDetection, warningCount, faceDetected } =
-    useFaceDetection({
-      maxWarnings: APP_CONFIG.FACE_DETECTION_MAX_WARNINGS,
-      onMaxWarnings: () => handleAutoSubmit('Face not detected too many times.'),
-      onNoFace: () => {
-        showToast('Warning: Your face is not detected!', 'warning');
-      },
-    });
-
-  // Consolidated warnings
-  const totalWarnings = tabWarnings + warningCount + fullscreenExitCount;
-  const maxWarnings = APP_CONFIG.PROCTORING_MAX_TOTAL_WARNINGS;
-
-  // Auto-submit when total warnings exceed max
-  useEffect(() => {
-    if (totalWarnings >= maxWarnings && !isSubmittingRef.current && !loading) {
-      handleAutoSubmit('Too many proctoring warnings.');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [totalWarnings]);
-
-  const handleSubmit = useCallback(async () => {
+  const handleSubmit = useCallback(async (autoSubmitReason?: string) => {
     if (isSubmittingRef.current) return;
     isSubmittingRef.current = true;
     setSubmitting(true);
     setShowConfirmSubmit(false);
     stopDetection();
+    markInactive();
 
     try {
       if (!assessment || !user?.email) return;
@@ -143,10 +126,16 @@ export function AptitudeAssessmentPage() {
       const currentQuestions = questionsRef.current;
       const currentAnswers = answersRef.current;
 
+      // Marks earned and marks available, tracked together. The paper is the
+      // only place the denominator is known for certain, so it is sent with the
+      // result rather than reconstructed later from an answer sheet that cannot
+      // say what a wrong answer was worth.
       let score = 0;
+      let totalMarks = 0;
       const resultDetails = currentQuestions.map((q) => {
         const selectedAnswer = currentAnswers[q.id] || '';
         const isCorrect = selectedAnswer === q.correctAnswer;
+        totalMarks += q.marks || 1;
         if (isCorrect) score += q.marks || 1;
         return {
           questionId: q.id,
@@ -158,15 +147,33 @@ export function AptitudeAssessmentPage() {
         };
       });
 
+      // Recorded with the answers: whether the candidate submitted or the exam
+      // ended itself, why, and how much of the clock was still unused. The
+      // result screens can only report what the exam page knew at this moment.
+      const submission = buildSubmissionMeta({
+        reason: autoSubmitReason,
+        secondsLeft: secondsLeftRef.current,
+        durationSeconds: examDurationSecondsRef.current,
+      });
+
       await assessmentService.saveResult({
         candidateEmail: user.email,
         assessmentType: assessment.assessmentType,
         score,
-        resultsJson: JSON.stringify(resultDetails),
+        totalMarks,
+        // The pass mark is compared against this, not against `score` — raw
+        // marks are not a percentage, and grading them as one failed every
+        // paper marked out of more than the pass mark.
+        percentage: totalMarks > 0 ? Math.round((score / totalMarks) * 100) : 0,
+        resultsJson: JSON.stringify([...resultDetails, submission]),
         jobPrefix: assessment.jobPrefix,
+        // Names the paper this candidate actually had open. Where an exam has
+        // been re-sent there are two of the same type, and the server cannot
+        // otherwise tell which one is being handed in.
+        assessmentId: assessment.id,
       });
 
-      showToast('Exam submitted successfully!', 'success');
+      showToast(MESSAGES.exam.aptitudeSubmitted, 'success');
       await exitFullscreen();
       navigate(ROUTES.CANDIDATE.RESULTS);
     } catch {
@@ -174,6 +181,10 @@ export function AptitudeAssessmentPage() {
     } finally {
       setSubmitting(false);
       isSubmittingRef.current = false;
+      // Submit failed (or was skipped) — the exam continues, so re-arm the
+      // counters and the reload prompt. Harmless on the success path: the
+      // redirect to results has already unmounted this page.
+      markActive();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assessment, user?.email]);
@@ -181,12 +192,17 @@ export function AptitudeAssessmentPage() {
   const handleAutoSubmit = useCallback(
     (reason: string) => {
       if (isSubmittingRef.current) return;
-      showToast(`Auto-submitting: ${reason}`, 'error');
-      handleSubmit();
+      showToast(MESSAGES.proctoring.autoSubmitting(reason), 'error');
+      handleSubmit(reason);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [handleSubmit]
   );
+
+  // Keep the proctoring hook's auto-submit pointing at the latest handler.
+  useEffect(() => {
+    autoSubmitRef.current = handleAutoSubmit;
+  });
 
   // Fetch questions and start exam
   useEffect(() => {
@@ -214,32 +230,45 @@ export function AptitudeAssessmentPage() {
 
         setQuestions(normalizeQuestions(parsed));
 
-        // Enter fullscreen
-        await enterFullscreen();
+        // Now that the paper is counted, set the clock: per-question time x
+        // questions, unless the instructions screen already fixed a duration.
+        const minutes = computeExamMinutes({
+          type: assessment.assessmentType,
+          questionCount: parsed.length,
+          minutesPerQuestion: assessment.minutesPerQuestion,
+          durationMinutes: agreedDurationMinutes ?? assessment.durationMinutes,
+        });
+        examDurationSecondsRef.current = minutes * 60;
+        resetTimer(minutes * 60);
 
-        // Load face detection models and start camera (non-blocking)
-        try {
-          await loadModels();
-          const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-          if (videoRef.current) {
-            videoRef.current.srcObject = stream;
-            videoRef.current.onloadedmetadata = () => {
-              startDetection(videoRef.current!);
-            };
-          }
-        } catch (camErr) {
-          console.warn('Face detection/camera unavailable:', camErr);
-        }
+        // Proctoring init: fullscreen → face models → camera (config-driven).
+        await beginProctoring();
 
         // Mark assessment as attended
+        let attended: Awaited<ReturnType<typeof assessmentService.markAttended>> | null = null;
         if (user?.email) {
-          await assessmentService.markAttended({
+          attended = await assessmentService.markAttended({
             assessmentId: assessment.id,
             candidateEmail: user.email,
           });
         }
 
-        startTimer();
+        // Proctoring counters go live only now — after all permission prompts.
+        markActive();
+        // The clock counts down to a fixed moment, not from a fresh
+        // duration. examStartedAt is stamped once on the server, so a reload
+        // part-way through lands on the same deadline — refreshing used to
+        // restart the countdown and hand back a whole paper's worth of time.
+        // Falls back to a plain countdown when the server does not send it,
+        // which is the behaviour this replaces rather than a new risk.
+        const startedAt = attended?.data?.examStartedAt
+          ? parseServerInstant(attended.data.examStartedAt)
+          : null;
+        if (startedAt && !Number.isNaN(startedAt.getTime())) {
+          startTimerAt(startedAt.getTime() + minutes * 60_000);
+        } else {
+          startTimer();
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Failed to load exam questions.';
         setError(message);
@@ -248,17 +277,6 @@ export function AptitudeAssessmentPage() {
       }
     }
     initExam();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      stopDetection();
-      if (videoRef.current?.srcObject) {
-        (videoRef.current.srcObject as MediaStream).getTracks().forEach((t) => t.stop());
-      }
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -316,20 +334,21 @@ export function AptitudeAssessmentPage() {
 
   return (
     <div className="min-h-screen bg-[var(--background)] flex flex-col">
+      {/* Camera Required Overlay — blocks the exam until the camera is live */}
+      {proctoring.camera.required &&
+        !loading &&
+        (camera.status === 'denied' ||
+          camera.status === 'unavailable' ||
+          camera.status === 'error') && (
+          <CameraRequiredOverlay message={camera.message} onRetry={setupCamera} />
+        )}
+
+      {/* Sits above the others: on a phone none of the rest can be satisfied. */}
+      {!isDesktop && <DesktopRequiredOverlay />}
+
       {/* Fullscreen Exit Overlay */}
-      {!isFullscreen && !loading && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
-          <div className="text-center p-8 rounded-2xl bg-[var(--cardBg)] border border-[var(--border)] max-w-md mx-4 shadow-2xl">
-            <ShieldAlert className="w-16 h-16 text-amber-500 mx-auto mb-4" />
-            <h2 className="text-xl font-bold text-[var(--text)] mb-2">Fullscreen Required</h2>
-            <p className="text-[var(--textSecondary)] mb-6">
-              You must remain in fullscreen mode during the exam. Exiting fullscreen is recorded as a warning.
-            </p>
-            <Button onClick={enterFullscreen} leftIcon={<Maximize size={16} />}>
-              Return to Fullscreen
-            </Button>
-          </div>
-        </div>
+      {proctoring.fullscreen.enabled && !isFullscreen && !loading && (
+        <FullscreenRequiredOverlay onReturn={enterFullscreen} />
       )}
 
       {/* Top Bar */}
@@ -348,20 +367,46 @@ export function AptitudeAssessmentPage() {
                 <span className="text-sm font-medium">Face not detected</span>
               </div>
             )}
+            {multipleFaces && (
+              <div className="flex items-center gap-1 text-red-500 animate-pulse">
+                <Users size={16} />
+                <span className="text-sm font-medium">Multiple faces detected</span>
+              </div>
+            )}
 
             {/* Consolidated warning pill */}
             <div className="relative group">
               <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-semibold ${warningColor}`}>
                 <AlertTriangle size={14} />
-                <span>{totalWarnings}/{maxWarnings}</span>
+                <span>{totalWarnings} warning{totalWarnings === 1 ? '' : 's'}</span>
               </div>
-              <div className="absolute right-0 top-full mt-2 w-56 p-3 rounded-lg bg-[var(--cardBg)] border border-[var(--border)] shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity z-20">
+              <div className="absolute right-0 top-full mt-2 w-64 p-3 rounded-lg bg-[var(--cardBg)] border border-[var(--border)] shadow-lg opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto transition-opacity z-20">
                 <p className="text-xs font-semibold text-[var(--text)] mb-2">Warning Breakdown</p>
                 <div className="space-y-1 text-xs text-[var(--textSecondary)]">
-                  <p>Tab switches: {tabWarnings}</p>
-                  <p>Face detection: {warningCount}</p>
-                  <p>Fullscreen exits: {fullscreenExitCount}</p>
+                  {proctoring.tabSwitch.enabled && (
+                    <p>
+                      Tab switches: {tabWarnings}
+                      {proctoring.tabSwitch.maxBeforeAutoSubmit > 0
+                        ? ` / ${proctoring.tabSwitch.maxBeforeAutoSubmit}`
+                        : ''}
+                    </p>
+                  )}
+                  {proctoring.eyeDetection.enabled && (
+                    <p>
+                      Face / eye: {warningCount}
+                      {proctoring.eyeDetection.maxBeforeAutoSubmit > 0
+                        ? ` / ${proctoring.eyeDetection.maxBeforeAutoSubmit}`
+                        : ''}
+                    </p>
+                  )}
+                  {proctoring.fullscreen.enabled && <p>Fullscreen exits: {fullscreenExitCount}</p>}
+                  {/* No limit shown: noise warns but never auto-submits. */}
+                  {proctoring.noise.enabled && <p>Noise warnings: {noiseWarnings}</p>}
                 </div>
+                <p className="mt-2 text-[11px] text-[var(--textSecondary)] border-t border-[var(--border)] pt-2">
+                  Reaching a limit auto-submits your exam. Do not reload this page — the
+                  exam restarts from the beginning.
+                </p>
               </div>
             </div>
 
@@ -394,12 +439,39 @@ export function AptitudeAssessmentPage() {
         <div className="w-64 border-r border-[var(--border)] bg-[var(--cardBg)] p-4 overflow-y-auto">
           {/* Camera Preview */}
           <div className="mb-4">
-            <div className="aspect-video bg-black rounded-lg overflow-hidden">
+            <div className="aspect-video bg-black rounded-lg overflow-hidden relative">
               <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+              {camera.status !== 'active' && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/70 px-2 text-center">
+                  <Camera size={20} className="text-white/60" />
+                  <span className="text-[11px] leading-tight text-white/80">
+                    {camera.status === 'requesting' ? 'Starting camera…' : 'Camera off'}
+                  </span>
+                  {(camera.status === 'denied' ||
+                    camera.status === 'unavailable' ||
+                    camera.status === 'error') && (
+                    <button
+                      onClick={setupCamera}
+                      className="mt-1 rounded-md bg-white/15 px-2 py-1 text-[11px] font-medium text-white hover:bg-white/25"
+                    >
+                      Retry
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
-            <div className="flex items-center gap-1 mt-1 text-xs text-[var(--textSecondary)]">
-              <Camera size={12} />
-              <span>Camera active</span>
+            <div className="flex items-center gap-1 mt-1 text-xs">
+              <Camera
+                size={12}
+                className={camera.status === 'active' ? 'text-green-500' : 'text-red-500'}
+              />
+              <span
+                className={
+                  camera.status === 'active' ? 'text-green-600 dark:text-green-400' : 'text-red-500'
+                }
+              >
+                {camera.status === 'active' ? 'Camera active' : 'Camera not active'}
+              </span>
             </div>
           </div>
 
@@ -537,7 +609,7 @@ export function AptitudeAssessmentPage() {
             <Button variant="ghost" onClick={() => setShowConfirmSubmit(false)}>
               Cancel
             </Button>
-            <Button variant="primary" onClick={handleSubmit} isLoading={submitting}>
+            <Button variant="primary" onClick={() => handleSubmit()} isLoading={submitting}>
               Confirm Submit
             </Button>
           </>

@@ -8,9 +8,12 @@ interface SpeechRecognitionEvent {
 export function useSpeechRecognition() {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
+  // The Web Speech API is non-standard and not present in the TS DOM lib.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const recognitionRef = useRef<any>(null);
 
   const start = useCallback((options?: { lang?: string; continuous?: boolean }) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
       console.error('Speech recognition not supported');

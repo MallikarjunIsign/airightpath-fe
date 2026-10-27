@@ -1,0 +1,1899 @@
+<title>AIRightpath Technical Reference</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+  /* ── Tokens: light is the base, both dark states redefine only tokens ── */
+  :root {
+    --ground:      #F6F8FA;
+    --surface:     #FFFFFF;
+    --surface-2:   #EDF1F5;
+    --ink:         #121A24;
+    --ink-2:       #3C4A5C;
+    --ink-3:       #6A7889;
+    --rule:        #D6DDE6;
+    --rule-soft:   #E6EBF1;
+    --l1:          #0E6B72;
+    --l1-soft:     #DCEEF0;
+    --l2:          #9C4F2E;
+    --l2-soft:     #F6E5DC;
+    --ok:          #26714A;
+    --ok-soft:     #DDEEE4;
+    --warn:        #8A5F0B;
+    --warn-soft:   #F5EAD2;
+    --bad:         #A03535;
+    --bad-soft:    #F6E0E0;
+    --code-bg:     #EDF1F5;
+    --shadow:      0 1px 2px rgba(18,26,36,.06), 0 8px 24px rgba(18,26,36,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:    #0D1218;
+      --surface:   #141B23;
+      --surface-2: #1A222C;
+      --ink:       #E5EAF1;
+      --ink-2:     #B0BBC9;
+      --ink-3:     #7C8999;
+      --rule:      #29323D;
+      --rule-soft: #202832;
+      --l1:        #56C2C9;
+      --l1-soft:   #10353A;
+      --l2:        #E29268;
+      --l2-soft:   #3A2318;
+      --ok:        #5CC48D;
+      --ok-soft:   #15301F;
+      --warn:      #D6AC52;
+      --warn-soft: #33280F;
+      --bad:       #E38585;
+      --bad-soft:  #351A1A;
+      --code-bg:   #1A222C;
+      --shadow:    0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.28);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:    #0D1218;
+    --surface:   #141B23;
+    --surface-2: #1A222C;
+    --ink:       #E5EAF1;
+    --ink-2:     #B0BBC9;
+    --ink-3:     #7C8999;
+    --rule:      #29323D;
+    --rule-soft: #202832;
+    --l1:        #56C2C9;
+    --l1-soft:   #10353A;
+    --l2:        #E29268;
+    --l2-soft:   #3A2318;
+    --ok:        #5CC48D;
+    --ok-soft:   #15301F;
+    --warn:      #D6AC52;
+    --warn-soft: #33280F;
+    --bad:       #E38585;
+    --bad-soft:  #351A1A;
+    --code-bg:   #1A222C;
+    --shadow:    0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.28);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: 16.5px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Shell ───────────────────────────────────────────────────────── */
+  .shell {
+    display: grid;
+    grid-template-columns: 268px minmax(0, 1fr);
+    gap: 0;
+    max-width: 1440px;
+    margin: 0 auto;
+  }
+
+  /* ── Index rail ──────────────────────────────────────────────────── */
+  .rail {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 34px 24px 48px 32px;
+    border-right: 1px solid var(--rule);
+    background: var(--surface);
+  }
+  .rail-mark {
+    font-family: "Archivo", system-ui, sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+    margin: 0 0 2px;
+  }
+  .rail-sub {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 26px;
+  }
+  .rail nav { display: flex; flex-direction: column; gap: 1px; }
+  .rail a {
+    display: grid;
+    grid-template-columns: 22px 1fr;
+    gap: 8px;
+    align-items: baseline;
+    padding: 5px 8px 5px 6px;
+    border-radius: 5px;
+    text-decoration: none;
+    color: var(--ink-2);
+    font-family: "Archivo", system-ui, sans-serif;
+    font-size: 13.5px;
+    line-height: 1.35;
+    border-left: 2px solid transparent;
+  }
+  .rail a .n {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10.5px;
+    color: var(--ink-3);
+    font-weight: 500;
+  }
+  .rail a:hover { background: var(--surface-2); color: var(--ink); }
+  .rail a.on {
+    color: var(--ink);
+    font-weight: 600;
+    border-left-color: var(--l1);
+    background: var(--surface-2);
+  }
+  .rail a.on .n { color: var(--l1); }
+
+  .rail-foot {
+    margin-top: 28px;
+    padding-top: 18px;
+    border-top: 1px solid var(--rule-soft);
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10.5px;
+    line-height: 1.8;
+    color: var(--ink-3);
+  }
+
+  /* ── Main column ─────────────────────────────────────────────────── */
+  main { padding: 0 0 120px; min-width: 0; }
+  .wrap { max-width: 860px; padding: 0 44px; }
+
+  /* ── Masthead ────────────────────────────────────────────────────── */
+  .masthead {
+    padding: 72px 44px 40px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--surface);
+  }
+  .masthead .inner { max-width: 860px; }
+  .eyebrow {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--l1);
+    margin: 0 0 18px;
+  }
+  h1 {
+    font-family: "Archivo", system-ui, sans-serif;
+    font-weight: 700;
+    font-size: clamp(34px, 5vw, 52px);
+    line-height: 1.04;
+    letter-spacing: -0.028em;
+    margin: 0 0 20px;
+    text-wrap: balance;
+  }
+  .standfirst {
+    font-size: 19px;
+    line-height: 1.6;
+    color: var(--ink-2);
+    margin: 0 0 34px;
+    max-width: 62ch;
+  }
+  .meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px;
+    background: var(--rule-soft);
+    border: 1px solid var(--rule-soft);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .meta-grid div { background: var(--surface); padding: 12px 14px; }
+  .meta-grid dt {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 4px;
+  }
+  .meta-grid dd {
+    margin: 0;
+    font-family: "Archivo", system-ui, sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  /* ── Sections ────────────────────────────────────────────────────── */
+  section { padding-top: 64px; scroll-margin-top: 24px; }
+  .sec-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+  .sec-num {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ink-3);
+    letter-spacing: 0.06em;
+  }
+  .sec-rule { flex: 1; height: 1px; background: var(--rule); }
+
+  h2 {
+    font-family: "Archivo", system-ui, sans-serif;
+    font-weight: 700;
+    font-size: clamp(25px, 3.2vw, 33px);
+    line-height: 1.14;
+    letter-spacing: -0.022em;
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+  h3 {
+    font-family: "Archivo", system-ui, sans-serif;
+    font-weight: 600;
+    font-size: 19px;
+    line-height: 1.3;
+    letter-spacing: -0.012em;
+    margin: 40px 0 12px;
+    text-wrap: balance;
+  }
+  h4 {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-weight: 700;
+    font-size: 11.5px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 30px 0 10px;
+  }
+  p { margin: 0 0 15px; max-width: 68ch; }
+  ul, ol { margin: 0 0 15px; padding-left: 22px; max-width: 68ch; }
+  li { margin-bottom: 7px; }
+  strong { font-weight: 600; color: var(--ink); }
+  a { color: var(--l1); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+
+  /* ── Track chips ─────────────────────────────────────────────────── */
+  .chip {
+    display: inline-block;
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    padding: 3px 7px;
+    border-radius: 4px;
+    white-space: nowrap;
+    vertical-align: 2px;
+  }
+  .chip.l1  { background: var(--l1-soft);   color: var(--l1); }
+  .chip.l2  { background: var(--l2-soft);   color: var(--l2); }
+  .chip.pf  { background: var(--surface-2); color: var(--ink-3); }
+  .chip.ok  { background: var(--ok-soft);   color: var(--ok); }
+  .chip.wn  { background: var(--warn-soft); color: var(--warn); }
+  .chip.bd  { background: var(--bad-soft);  color: var(--bad); }
+
+  /* ── Code + paths ────────────────────────────────────────────────── */
+  code {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 0.845em;
+    background: var(--code-bg);
+    padding: 1.5px 5px;
+    border-radius: 4px;
+    color: var(--ink);
+  }
+  pre {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 12.5px;
+    line-height: 1.62;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 18px 20px;
+    overflow-x: auto;
+    margin: 0 0 22px;
+    color: var(--ink-2);
+  }
+  pre code { background: none; padding: 0; font-size: inherit; color: inherit; }
+
+  /* ── Tables ──────────────────────────────────────────────────────── */
+  .tw { overflow-x: auto; margin: 0 0 24px; border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  thead th {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    text-align: left;
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+    background: var(--surface-2);
+  }
+  tbody td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+    font-family: "Archivo", system-ui, sans-serif;
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--ink-2);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody td:first-child { color: var(--ink); font-weight: 500; }
+  td code, th code { font-size: 12px; background: var(--code-bg); }
+  .num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  .mono { font-family: "JetBrains Mono", ui-monospace, monospace; font-size: 12px; }
+
+  /* ── Callout ─────────────────────────────────────────────────────── */
+  .note {
+    border-left: 2px solid var(--rule);
+    padding: 2px 0 2px 18px;
+    margin: 0 0 22px;
+    max-width: 68ch;
+  }
+  .note p { margin-bottom: 8px; }
+  .note p:last-child { margin-bottom: 0; }
+  .note.why { border-left-color: var(--l1); }
+  .note.risk { border-left-color: var(--bad); }
+  .note-label {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    display: block;
+    margin-bottom: 5px;
+  }
+  .note.why .note-label { color: var(--l1); }
+  .note.risk .note-label { color: var(--bad); }
+
+  /* ── Flow diagram ────────────────────────────────────────────────── */
+  .track {
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 20px 22px;
+    margin: 0 0 22px;
+    background: var(--surface);
+  }
+  .track-title {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    margin: 0 0 14px;
+  }
+  .track.a { border-top: 2px solid var(--l1); }
+  .track.a .track-title { color: var(--l1); }
+  .track.b { border-top: 2px solid var(--l2); }
+  .track.b .track-title { color: var(--l2); }
+  .steps { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .step {
+    font-family: "Archivo", system-ui, sans-serif;
+    font-size: 12.5px;
+    font-weight: 500;
+    padding: 5px 10px;
+    border-radius: 5px;
+    background: var(--surface-2);
+    color: var(--ink-2);
+  }
+  .step.end { background: var(--l1-soft); color: var(--l1); font-weight: 600; }
+  .track.b .step.end { background: var(--l2-soft); color: var(--l2); }
+  .arrow { color: var(--ink-3); font-family: "JetBrains Mono", monospace; font-size: 11px; }
+
+  /* ── Status legend ───────────────────────────────────────────────── */
+  .legend { display: flex; flex-wrap: wrap; gap: 18px; margin: 0 0 22px; }
+  .legend div { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ink-2); font-family: "Archivo", system-ui, sans-serif; }
+
+  /* ── Responsive ──────────────────────────────────────────────────── */
+  @media (max-width: 900px) {
+    .shell { grid-template-columns: 1fr; }
+    .rail {
+      position: static;
+      height: auto;
+      border-right: none;
+      border-bottom: 1px solid var(--rule);
+      padding: 24px 24px 20px;
+    }
+    .rail nav { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 2px; }
+    .rail-foot { display: none; }
+    .masthead { padding: 44px 24px 32px; }
+    .wrap { padding: 0 24px; }
+  }
+
+  a:focus-visible, .rail a:focus-visible {
+    outline: 2px solid var(--l1);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  }
+  html { scroll-behavior: smooth; }
+</style>
+
+<div class="shell">
+
+  <aside class="rail">
+    <p class="rail-mark">AIRightpath</p>
+    <p class="rail-sub">Technical Reference</p>
+    <nav id="toc">
+      <a href="#overview"><span class="n">01</span><span>Platform Overview</span></a>
+      <a href="#architecture"><span class="n">02</span><span>System Architecture</span></a>
+      <a href="#backend"><span class="n">03</span><span>Backend</span></a>
+      <a href="#frontend"><span class="n">04</span><span>Frontend</span></a>
+      <a href="#l1"><span class="n">05</span><span>L1 — Assessment</span></a>
+      <a href="#l2"><span class="n">06</span><span>L2 — Interview</span></a>
+      <a href="#api"><span class="n">07</span><span>API Reference</span></a>
+      <a href="#data"><span class="n">08</span><span>Data Model</span></a>
+      <a href="#security"><span class="n">09</span><span>Security &amp; RBAC</span></a>
+      <a href="#deploy"><span class="n">10</span><span>Environments</span></a>
+      <a href="#status"><span class="n">11</span><span>Status &amp; Gaps</span></a>
+    </nav>
+    <div class="rail-foot">
+      REV 2026-08-29<br>
+      BRANCH staging<br>
+      FE react 18 · vite 5<br>
+      BE spring boot 3.4 · java 21
+    </div>
+  </aside>
+
+  <main>
+
+    <header class="masthead">
+      <div class="inner">
+        <p class="eyebrow">Frontend &amp; Backend · Complete Reference</p>
+        <h1>AIRightpath Technical Reference</h1>
+        <p class="standfirst">
+          An AI hiring platform that screens resumes, runs proctored aptitude and coding exams,
+          and conducts the first-round interview with a voice agent. This document covers both
+          repositories end to end, organised around the split the product itself is built on:
+          <strong>L1</strong> is everything up to the exam result, <strong>L2</strong> is everything from the interview onward.
+        </p>
+        <dl class="meta-grid">
+          <div><dt>Frontend</dt><dd>airightpath-fe</dd></div>
+          <div><dt>Backend</dt><dd>airightpath-be</dd></div>
+          <div><dt>Database</dt><dd>MySQL 8</dd></div>
+          <div><dt>AI Models</dt><dd>gpt-4o · whisper-1 · tts-1-hd</dd></div>
+          <div><dt>L1 Status</dt><dd>Complete</dd></div>
+          <div><dt>L2 Status</dt><dd>Complete</dd></div>
+        </dl>
+      </div>
+    </header>
+
+    <div class="wrap">
+
+      <!-- ══════════════════════════ 01 ══════════════════════════ -->
+      <section id="overview">
+        <div class="sec-head"><span class="sec-num">01</span><span class="sec-rule"></span></div>
+        <h2>Platform Overview</h2>
+
+        <p>
+          RightPath takes a candidate from job advert to hiring decision without a recruiter
+          sitting the screening rounds. Two things separate it from a conventional applicant
+          tracking system.
+        </p>
+        <p>
+          <strong>The exams are generated and graded by the platform.</strong> Aptitude papers and coding
+          problems are produced from the job description by <code>gpt-4o</code>, sat in a locked-down
+          browser exam under camera proctoring, and — for coding — compiled and executed against
+          test cases on the server.
+        </p>
+        <p>
+          <strong>The first interview is conducted by an AI.</strong> A voice agent asks questions, listens,
+          adapts difficulty, watches the candidate through the webcam, and produces a weighted
+          evaluation the recruiter reviews.
+        </p>
+
+        <h3>The two levels</h3>
+        <p>
+          The product splits where automated assessment ends and the interview begins. That split
+          runs through the codebase, the permissions and this document.
+        </p>
+
+        <div class="track a">
+          <p class="track-title">L1 — Assessment</p>
+          <div class="steps">
+            <span class="step">Job post</span><span class="arrow">→</span>
+            <span class="step">Apply</span><span class="arrow">→</span>
+            <span class="step">ATS screening</span><span class="arrow">→</span>
+            <span class="step">Shortlist</span><span class="arrow">→</span>
+            <span class="step">Assign exam</span><span class="arrow">→</span>
+            <span class="step">Pre-exam checks</span><span class="arrow">→</span>
+            <span class="step">Aptitude</span><span class="arrow">→</span>
+            <span class="step">Coding</span><span class="arrow">→</span>
+            <span class="step end">Exam result</span>
+          </div>
+        </div>
+
+        <div class="track b">
+          <p class="track-title">L2 — Interview</p>
+          <div class="steps">
+            <span class="step">Schedule</span><span class="arrow">→</span>
+            <span class="step">Candidate joins</span><span class="arrow">→</span>
+            <span class="step">Voice interview</span><span class="arrow">→</span>
+            <span class="step">Recordings stored</span><span class="arrow">→</span>
+            <span class="step">AI evaluation</span><span class="arrow">→</span>
+            <span class="step end">Selected / Rejected</span>
+          </div>
+        </div>
+
+        <h3>Actors</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Actor</th><th>Role</th><th>Responsibility</th></tr></thead>
+          <tbody>
+            <tr><td>Super Admin</td><td><code>SUPER_ADMIN</code></td><td>Everything, including user activation and role assignment</td></tr>
+            <tr><td>Recruiter / Admin</td><td><code>ADMIN</code></td><td>Jobs, screening, exam assignment, interview scheduling, results</td></tr>
+            <tr><td>Candidate</td><td><code>USER</code></td><td>Applies, sits exams, sits the interview, views own results</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Candidate lifecycle as stored state</h3>
+        <p>
+          The application row carries the candidate's position in the funnel. <code>ApplicationStatus</code>
+          is the canonical ladder; <code>REJECTED</code> is reachable from any earlier state.
+        </p>
+<pre><code>APPLIED → SHORTLISTED → ACKNOWLEDGED → ACKNOWLEDGED_BACK → RECONFIRMED
+        → EXAM_SENT → EXAM_COMPLETED                    ◀── L1 ends
+        → INTERVIEW_SCHEDULED → INTERVIEW_COMPLETED     ◀── L2
+        → SELECTED | REJECTED</code></pre>
+        <p>
+          Alongside the enum, the application row keeps individual string flags —
+          <code>atsScanStatus</code>, <code>shortlistStatus</code>, <code>acknowledgedStatus</code>,
+          <code>examLinkStatus</code>, <code>examCompletedStatus</code>, <code>writtenTestStatus</code>,
+          <code>rejectionStatus</code> — which drive the per-column badges on the admin candidate table.
+          <code>StatusTransitionValidator</code> keeps the two representations in step; a new stage
+          must update both.
+        </p>
+
+        <h3>Screen map</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Area</th><th>Route</th><th>Track</th></tr></thead>
+          <tbody>
+            <tr><td>Admin dashboard</td><td class="mono">/admin/dashboard</td><td><span class="chip pf">Platform</span></td></tr>
+            <tr><td>Jobs — list, create, edit</td><td class="mono">/admin/jobs · /create · /:jobPrefix/edit</td><td><span class="chip l1">L1</span></td></tr>
+            <tr><td>Candidate pipeline</td><td class="mono">/admin/candidates</td><td><span class="chip l1">L1</span></td></tr>
+            <tr><td>ATS screening — single, batch</td><td class="mono">/admin/ats · /admin/ats/batch</td><td><span class="chip l1">L1</span></td></tr>
+            <tr><td>Upload question paper</td><td class="mono">/admin/assessments/upload</td><td><span class="chip l1">L1</span></td></tr>
+            <tr><td>Assign assessment</td><td class="mono">/admin/assessments/assign</td><td><span class="chip l1">L1</span></td></tr>
+            <tr><td>Assessment results</td><td class="mono">/admin/assessments/results</td><td><span class="chip l1">L1</span></td></tr>
+            <tr><td>Candidate result detail</td><td class="mono">/admin/assessments/results/:jobPrefix/:email</td><td><span class="chip l1">L1</span></td></tr>
+            <tr><td>Prompts &amp; evaluation categories</td><td class="mono">/admin/prompts</td><td><span class="chip l1">L1</span> <span class="chip l2">L2</span></td></tr>
+            <tr><td>Interview scheduler</td><td class="mono">/admin/interviews/schedule</td><td><span class="chip l2">L2</span></td></tr>
+            <tr><td>Interview results</td><td class="mono">/admin/interviews/results</td><td><span class="chip l2">L2</span></td></tr>
+            <tr><td>Users &amp; roles</td><td class="mono">/admin/users</td><td><span class="chip pf">Platform</span></td></tr>
+            <tr><td>Candidate — apply</td><td class="mono">/candidate/apply/:jobPrefix</td><td><span class="chip l1">L1</span></td></tr>
+            <tr><td>Candidate — assessments, instructions</td><td class="mono">/candidate/assessments · /instructions</td><td><span class="chip l1">L1</span></td></tr>
+            <tr><td>Candidate — exams</td><td class="mono">/candidate/exam/aptitude · /coding</td><td><span class="chip l1">L1</span></td></tr>
+            <tr><td>Candidate — results</td><td class="mono">/candidate/results · /results/:id</td><td><span class="chip l1">L1</span></td></tr>
+            <tr><td>Candidate — interview</td><td class="mono">/candidate/interviews · /interview · /summary</td><td><span class="chip l2">L2</span></td></tr>
+            <tr><td>Mobile room-scan companion</td><td class="mono">/mobile-connect</td><td><span class="chip l2">L2</span></td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Where the AI is used</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Purpose</th><th>Model</th><th>Implementation</th></tr></thead>
+          <tbody>
+            <tr><td>Aptitude question generation</td><td><code>gpt-4o</code></td><td><code>OpenAiServiceImpl.generateQuestions</code></td></tr>
+            <tr><td>Coding question generation</td><td><code>gpt-4o</code></td><td><code>OpenAiServiceImpl.generateCodingQuestions</code></td></tr>
+            <tr><td>Interview question generation</td><td><code>gpt-4o</code></td><td><code>InterviewQuestionsServiceImpl</code></td></tr>
+            <tr><td>Interview conversation</td><td><code>gpt-4o</code> streaming</td><td><code>OpenAiStreamingService</code></td></tr>
+            <tr><td>Speech → text</td><td><code>whisper-1</code></td><td><code>SpeechToTextServiceImpl</code></td></tr>
+            <tr><td>Text → speech</td><td><code>tts-1-hd</code>, voice <code>nova</code></td><td><code>TextToSpeechService</code></td></tr>
+            <tr><td>Room / webcam frame checks</td><td><code>gpt-4o</code> vision</td><td><code>OpenAiVisionServiceImpl</code></td></tr>
+            <tr><td>Interview evaluation</td><td><code>gpt-4o</code></td><td><code>InterviewEvaluationService</code></td></tr>
+          </tbody>
+        </table></div>
+        <div class="note why">
+          <span class="note-label">Not an LLM</span>
+          <p>
+            Resume-to-JD matching is deterministic: TF-IDF cosine similarity plus skill, experience
+            and education scoring in <code>ATSServiceImpl</code>. It is reproducible and auditable,
+            which matters for a decision that rejects candidates.
+          </p>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════ 02 ══════════════════════════ -->
+      <section id="architecture">
+        <div class="sec-head"><span class="sec-num">02</span><span class="sec-rule"></span></div>
+        <h2>System Architecture</h2>
+
+        <h3>Stack</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Concern</th><th>Frontend</th><th>Backend</th></tr></thead>
+          <tbody>
+            <tr><td>Core</td><td>React 18.3 · TypeScript 5.5</td><td>Spring Boot 3.4.0 · Java 21</td></tr>
+            <tr><td>Build</td><td>Vite 5</td><td>Maven</td></tr>
+            <tr><td>Routing / web</td><td>react-router-dom 7</td><td>spring-web + webflux (<code>WebClient</code>)</td></tr>
+            <tr><td>Data</td><td>axios 1.13 · react-query 5</td><td>Spring Data JPA · Hibernate · MySQL 8</td></tr>
+            <tr><td>Auth</td><td>Token store + interceptors</td><td>Spring Security · jjwt 0.11.5</td></tr>
+            <tr><td>Realtime</td><td>@stomp/stompjs 7 · sockjs-client</td><td>spring-websocket (STOMP + raw)</td></tr>
+            <tr><td>Forms / validation</td><td>react-hook-form 7 · zod 4</td><td>spring-validation</td></tr>
+            <tr><td>Specialist</td><td>Monaco editor · face-api.js · exceljs · jspdf</td><td>Tika 2.9 · AWS S3 SDK v2 · Thymeleaf · Twilio 11 · okhttp-sse</td></tr>
+            <tr><td>Styling / docs</td><td>Tailwind 3.4 + CSS custom properties</td><td>springdoc-openapi 2.7</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Runtime topology</h3>
+<pre><code>                  +------------------------------+
+                  |  Browser (candidate / admin) |
+                  |  React SPA served by nginx   |
+                  +------+----------------+------+
+               HTTPS/JSON |                | SockJS + STOMP
+                          |                | (audio as base64 frames)
+                  +-------v----------------v-----+
+                  |   Spring Boot API (:8081)    |
+                  |  Controllers → Services →    |
+                  |  Repositories                |
+                  |                              |
+                  |  + CodeExecutionEngine       |
+                  |    spawns javac/java,        |
+                  |    python3, node, gcc, g++   |
+                  +--+---------+---------+-------+
+                     |         |         |
+           +---------v--+ +----v----+ +--v-------------+
+           |  MySQL 8   | | AWS S3  | |  OpenAI API    |
+           |  (RDS)     | | media   | |  gpt-4o        |
+           +------------+ +---------+ |  whisper-1     |
+                     |                |  tts-1-hd      |
+           +---------v--+             +----------------+
+           | SMTP mail  |
+           | + Twilio   |
+           +------------+</code></pre>
+
+        <div class="note why">
+          <span class="note-label">Why it matters</span>
+          <p>
+            The exam toolchains run <em>inside</em> the API container, not in a separate sandbox
+            service. The backend <code>Dockerfile</code> installs each language runtime and verifies
+            it at build time, so a missing toolchain fails the image build in CI rather than a
+            candidate's submission mid-exam.
+          </p>
+        </div>
+
+        <h3>How the two apps talk</h3>
+        <p>
+          <strong>REST.</strong> Every path lives in one file — <code>src/config/api.endpoints.ts</code>. Nothing
+          else in the client writes a URL string, so a backend path change is a single edit. One axios
+          instance in <code>src/services/api.service.ts</code> carries <code>withCredentials: true</code>
+          for the refresh cookie, attaches the bearer token on request, and performs a single-flight
+          refresh on 401. Service modules wrap endpoints per domain; pages never call axios directly.
+        </p>
+        <p>
+          <strong>WebSocket.</strong> Two channels, both registered in <code>WebSocketConfig</code>:
+          <code>/ws</code> (SockJS + STOMP) carries the voice interview and mobile pairing;
+          <code>/ws/terminal</code> is a raw handler. The broker is simple, on <code>/queue</code> and
+          <code>/topic</code>, with app prefix <code>/app</code> and user prefix <code>/user</code>.
+          <code>WebSocketAuthInterceptor</code> authenticates the handshake and stores the email in
+          session attributes; every message handler then re-verifies that the schedule being addressed
+          belongs to that email.
+        </p>
+        <p>
+          <strong>CORS.</strong> <code>CorsConfig</code> reads <code>app.cors.allowed-origins</code> from
+          the active profile, allows credentials, and permits <code>GET, POST, PATCH, PUT, DELETE,
+          OPTIONS</code>. The same origin list gates the STOMP endpoint — a missing origin breaks
+          interviews, not just REST.
+        </p>
+
+        <h3>Request path through the backend</h3>
+<pre><code>HTTP request
+   |
+   +- RequestResponseLoggingFilter   correlation id → MDC "requestId"
+   |                                 every log line renders as LEVEL [id] ...
+   +- CORS filter
+   +- ApiJwtAuthenticationFilter     validates access token, builds the
+   |                                 Authentication with permission authorities
+   +- SecurityFilterChain            /api/** stateless; small public allowlist
+   |
+   +- @PreAuthorize("hasAuthority('...')")   method-level permission check
+   |
+   +- Controller → Service → ServiceImpl → Repository → MySQL</code></pre>
+
+        <h3>Cross-cutting decisions</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Decision</th><th>Reasoning</th></tr></thead>
+          <tbody>
+            <tr>
+              <td>Access token in <code>localStorage</code>, refresh in an httpOnly cookie</td>
+              <td>The server rotates the refresh token on every use and treats reuse as theft. A memory-only access token meant every page load spent a rotation — two quick reloads logged the user out. Persisting the short-lived token removes the cause.</td>
+            </tr>
+            <tr>
+              <td>Single-flight refresh, locked across tabs</td>
+              <td>One in-flight promise per tab plus an origin-wide Web Locks lock, so two tabs cannot both spend the cookie.</td>
+            </tr>
+            <tr>
+              <td>Exam length derived, not stored</td>
+              <td>Duration = question count × per-question allowance. Add five questions and the exam grows by itself; nobody has to remember to edit a constant.</td>
+            </tr>
+            <tr>
+              <td>Client timeouts above server limits</td>
+              <td>Compile timeout is 120 s because the server bounds execution at 45 s and queues four submissions. A client that aborts first replaces a typed server error with a generic one.</td>
+            </tr>
+            <tr>
+              <td>Compile once, run many</td>
+              <td><code>CodeExecutionEngine</code> compiles a submission once and reuses the artifact for every test case, with a deadline per process and a budget for the whole submission.</td>
+            </tr>
+            <tr>
+              <td>Grading is percentage-based</td>
+              <td>The exam page sends percentage alongside raw score. The pass mark is compared against the percentage — grading raw marks failed papers that had actually passed.</td>
+            </tr>
+            <tr>
+              <td>Assign and notify succeed independently</td>
+              <td><code>assignAssessment</code> returns a report naming anyone who got the exam but not the mail, so a recruiter can resend rather than find out when the candidate never turns up.</td>
+            </tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- ══════════════════════════ 03 ══════════════════════════ -->
+      <section id="backend">
+        <div class="sec-head"><span class="sec-num">03</span><span class="sec-rule"></span></div>
+        <h2>Backend</h2>
+        <p>
+          Package root <code>com.rightpath</code>. Classic layering: controllers hold no business
+          logic, services are interface + <code>impl</code> pairs, repositories are Spring Data.
+        </p>
+
+        <h3>Package map</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Package</th><th>Contents</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">config</td><td>Security, CORS, WebSocket, async pools, OpenAI client, OpenAPI, RBAC seeding</td></tr>
+            <tr><td class="mono">controller</td><td>20 classes — REST plus two STOMP message controllers</td></tr>
+            <tr><td class="mono">dto · dto/voice</td><td>Request/response types; voice interview payloads</td></tr>
+            <tr><td class="mono">entity</td><td>26 JPA entities</td></tr>
+            <tr><td class="mono">enums</td><td>17 domain enums</td></tr>
+            <tr><td class="mono">error · exceptions</td><td>Error envelope, custom exceptions, <code>@ControllerAdvice</code></td></tr>
+            <tr><td class="mono">filter</td><td><code>ApiJwtAuthenticationFilter</code>, <code>RequestResponseLoggingFilter</code></td></tr>
+            <tr><td class="mono">rbac</td><td><code>RoleName</code>, <code>PermissionName</code> — canonical authority names</td></tr>
+            <tr><td class="mono">repository</td><td>Spring Data interfaces + <code>JobPostSpecifications</code></td></tr>
+            <tr><td class="mono">service · service/impl</td><td>33 interfaces, 32 implementations</td></tr>
+            <tr><td class="mono">util</td><td>PDF generation, prompt placeholders, token hashing, business schedule, synonyms</td></tr>
+            <tr><td class="mono">websocket</td><td>STOMP auth interceptor, socket handlers</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Controllers</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Controller</th><th>Base path</th><th>Track</th><th>Responsibility</th></tr></thead>
+          <tbody>
+            <tr><td>AuthenthicationController</td><td class="mono">/api</td><td><span class="chip pf">PF</span></td><td>Register, login, refresh, logout, <code>/me</code>, OTP, passwords, profile, user list</td></tr>
+            <tr><td>RbacAdminController</td><td class="mono">/api/admin/rbac</td><td><span class="chip pf">PF</span></td><td>Assign and remove roles, inspect roles</td></tr>
+            <tr><td>JobPostController</td><td class="mono">/api/jobs</td><td><span class="chip l1">L1</span></td><td>Job CRUD, counts, job types</td></tr>
+            <tr><td>JobApplicationForCandidateController</td><td class="mono">/api/job-applications</td><td><span class="chip l1">L1</span></td><td>Apply, list, screen, shortlist, referral status, every candidate mail, exam link</td></tr>
+            <tr><td>ResumeController</td><td class="mono">/api</td><td><span class="chip l1">L1</span></td><td>Upload, update, view resume</td></tr>
+            <tr><td>ATSController</td><td class="mono">/api</td><td><span class="chip l1">L1</span></td><td>Single and bulk resume screening</td></tr>
+            <tr><td>QuestionController</td><td class="mono">/api</td><td><span class="chip l1">L1</span></td><td>Generate aptitude and coding questions</td></tr>
+            <tr><td>AssessmentController</td><td class="mono">/api</td><td><span class="chip l1">L1</span></td><td>Upload, assign, fetch, submit, results, reschedule, hourly expiry</td></tr>
+            <tr><td>CompilerController</td><td class="mono">/api/compiler</td><td><span class="chip l1">L1</span></td><td>Run code, save submissions, read code results</td></tr>
+            <tr><td>ExamProctoringController</td><td class="mono">/api/exam-proctoring</td><td><span class="chip l1">L1</span></td><td>Identity photo, room scan, capture reads</td></tr>
+            <tr><td>InterviewController</td><td class="mono">/api/interview</td><td><span class="chip l2">L2</span></td><td>Assign, start, answer, voice lifecycle, recordings, events, stats</td></tr>
+            <tr><td>VoiceInterviewWebSocketController</td><td class="mono">STOMP</td><td><span class="chip l2">L2</span></td><td>Audio chunks, answers, interrupt, proctoring events</td></tr>
+            <tr><td>MobileWebSocketController</td><td class="mono">STOMP</td><td><span class="chip l2">L2</span></td><td>Desktop/mobile pairing, WebRTC signalling</td></tr>
+            <tr><td>MobileVerificationController</td><td class="mono">/api/mobile</td><td><span class="chip l2">L2</span></td><td>Room verification from the phone</td></tr>
+            <tr><td>JobPromptController</td><td class="mono">/api/prompts</td><td><span class="chip l1">L1</span> <span class="chip l2">L2</span></td><td>Per-job prompts and evaluation categories</td></tr>
+          </tbody>
+        </table></div>
+        <p>
+          Also present: <code>CompileController</code> (public lightweight compile),
+          <code>HeaderCountController</code>, <code>HealthController</code>,
+          <code>WhatsAppController</code>, <code>ErrorPageController</code>.
+        </p>
+
+        <h3>ATS scoring engine</h3>
+        <p>
+          <code>ATSServiceImpl</code> extracts resume text with Tika, tokenises after stripping
+          stopwords, then combines weighted sub-scores: TF-IDF cosine similarity against the job
+          description, skill match expanded through <code>synonyms.json</code>, years-of-experience
+          match parsed from the text, and education match from extracted degrees and passing years.
+          The result is clamped to 0–100, written to <code>matchPercent</code>, and compared against
+          <code>ats.screening.threshold</code> (default <code>60.0</code>). It also extracts the
+          candidate's email so a bulk upload can attach scores to people.
+        </p>
+
+        <h3>Code execution engine</h3>
+        <p>The core of coding assessment, and the most safety-critical component in L1.</p>
+        <ul>
+          <li>Compiles once and reuses the artifact for every test case; Java compiles in-process where the JDK allows, avoiding a second JVM start.</li>
+          <li>Python and JavaScript get an up-front syntax check, so a syntax error reports as one rather than as N identical crashes.</li>
+          <li>Every candidate-code failure — compile error, crash, infinite loop, runaway output, wrong answer — is a normal result carrying an <code>ExecutionStatus</code>. Exceptions are reserved for the platform failing and answer <code>503 COMPILER_UNAVAILABLE</code>.</li>
+          <li>Test cases run in parallel up to <code>compiler.max-parallel-runs</code>.</li>
+        </ul>
+        <div class="tw"><table>
+          <thead><tr><th>Key</th><th class="num">Default</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">compiler.compile-timeout-seconds</td><td class="num">20</td><td>Compile step deadline</td></tr>
+            <tr><td class="mono">compiler.run-timeout-seconds</td><td class="num">5</td><td>One test case</td></tr>
+            <tr><td class="mono">compiler.total-timeout-seconds</td><td class="num">45</td><td>Compile plus every run</td></tr>
+            <tr><td class="mono">compiler.max-output-bytes</td><td class="num">65536</td><td>Captured output per run</td></tr>
+            <tr><td class="mono">compiler.max-script-length</td><td class="num">200000</td><td>Rejects oversized pastes before compiling</td></tr>
+            <tr><td class="mono">compiler.max-parallel-runs</td><td class="num">4</td><td>Concurrent test-case runs</td></tr>
+          </tbody>
+        </table></div>
+        <p>
+          Toolchain binaries are configurable via <code>compiler.command.{python,node,gcc,gpp,javac,java}</code>.
+          All these keys carry code defaults and are absent from the profile YAMLs.
+        </p>
+
+        <h3>Async and scheduling</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Pool / job</th><th>Cadence or size</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>transcriptionExecutor</code></td><td>4 core / 8 max</td><td>Whisper speech-to-text</td></tr>
+            <tr><td><code>ttsExecutor</code></td><td>2 core / 4 max</td><td>Text-to-speech synthesis</td></tr>
+            <tr><td><code>scheduleExpireAssessments</code></td><td>hourly</td><td>Calls <code>expireAssessments()</code></td></tr>
+            <tr><td><code>updateExpiredAssessments</code></td><td>every minute</td><td>Bulk-updates rows past their deadline</td></tr>
+            <tr><td><code>enforceInterviewTimeouts</code></td><td>every 5 min</td><td>Auto-completes stale <code>IN_PROGRESS</code> interviews</td></tr>
+            <tr><td>OTP purge</td><td>every 5 min</td><td>Removes expired OTPs</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Persistence and logging</h3>
+        <p>
+          MySQL 8 with <code>ddl-auto=update</code> on <em>every</em> profile — the schema is
+          Hibernate-managed and there is no Flyway or Liquibase; changes are recorded by hand under
+          <code>docs/migrations/</code>. <code>RbacSeedConfig</code> runs as a
+          <code>CommandLineRunner</code> on boot and idempotently seeds every permission, the
+          <code>ADMIN</code> and <code>USER</code> roles, and their default sets.
+        </p>
+        <p>
+          <code>RequestResponseLoggingFilter</code> stamps a correlation id into the MDC and the log
+          pattern <code>%5p [%X{requestId:-}]</code> prints it on every line — empty for non-request
+          logs such as startup. <code>ErrorClassifier</code> turns raw compiler output into a typed
+          status plus a candidate-readable message.
+        </p>
+      </section>
+
+      <!-- ══════════════════════════ 04 ══════════════════════════ -->
+      <section id="frontend">
+        <div class="sec-head"><span class="sec-num">04</span><span class="sec-rule"></span></div>
+        <h2>Frontend</h2>
+        <p>
+          React 18 + TypeScript, built by Vite, styled with Tailwind over CSS custom properties.
+          No Redux — shared state lives in five contexts and everything else is local. <code>@</code>
+          is aliased to <code>src/</code>.
+        </p>
+
+        <h3>Folder map</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Folder</th><th>Holds</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">src/config/</td><td>Endpoints, routes, roles, permissions, env, feature configs, messages, validation</td></tr>
+            <tr><td class="mono">src/contexts/</td><td>Auth, Theme, Sidebar, ProfileImage, PendingAssessments</td></tr>
+            <tr><td class="mono">src/hooks/</td><td>27 hooks — proctoring, media, timers, RBAC, websocket, utility</td></tr>
+            <tr><td class="mono">src/services/</td><td>15 modules, one per backend domain; the only place axios is used</td></tr>
+            <tr><td class="mono">src/types/</td><td>Shared types mirroring backend DTOs</td></tr>
+            <tr><td class="mono">src/utils/</td><td>Pure functions: scoring, formatting, exports, duration, storage</td></tr>
+            <tr><td class="mono">src/components/ui/</td><td>30 primitives — Button, Table, Modal, Toast, Badge…</td></tr>
+            <tr><td class="mono">src/components/</td><td>Feature components: admin, admin/result, exam, interview, jobs, auth, layout</td></tr>
+            <tr><td class="mono">src/pages/</td><td>Route components: admin, candidate, auth, public, errors</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Startup</h3>
+        <p>The provider order in <code>main.tsx</code> is deliberate.</p>
+<pre><code>StrictMode
+ └ BrowserRouter
+    └ ThemeProvider          theme applies even to an error screen
+       └ ErrorBoundary       catches everything below it
+          └ AuthProvider     bootstraps the session before any page renders
+             └ ToastProvider
+                └ ProfileImageProvider
+                   └ SidebarProvider
+                      └ PendingAssessmentsProvider
+                         └ App   (routes)</code></pre>
+        <p>
+          <code>AuthProvider</code> reads the persisted access token and, if expired, performs one
+          refresh before routes evaluate — so a reload does not flash the login page.
+        </p>
+
+        <h3>Routing and guards</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Branch</th><th>Guard</th><th>Layout</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">/ · /about · /contact · /mobile-connect</td><td>none</td><td>page-owned</td></tr>
+            <tr><td class="mono">/login · /register · /forgot-password · /reset-password</td><td>redirects to role dashboard when signed in</td><td>page-owned</td></tr>
+            <tr><td class="mono">/admin/*</td><td><code>ProtectedRoute</code> — ADMIN, SUPER_ADMIN</td><td><code>Layout</code> (sidebar + navbar)</td></tr>
+            <tr><td class="mono">/candidate/*</td><td><code>ProtectedRoute</code> — authenticated</td><td><code>Layout</code></td></tr>
+            <tr><td class="mono">/candidate/exam/*</td><td><code>ProtectedRoute</code></td><td><code>ExamLayout</code> — lockdown, no chrome</td></tr>
+            <tr><td class="mono">/candidate/interview/*</td><td><code>ProtectedRoute</code></td><td><code>InterviewLayout</code> — lockdown, no chrome</td></tr>
+          </tbody>
+        </table></div>
+        <p>
+          Exam and interview have their own layouts precisely so there is no sidebar, navbar or
+          navigation affordance to click during a proctored session. Finer gating inside a page uses
+          <code>PermissionGate</code> and <code>RoleGate</code>, both backed by <code>useRbac()</code>.
+        </p>
+
+        <h3>State</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Context</th><th>Owns</th></tr></thead>
+          <tbody>
+            <tr><td>AuthContext</td><td>User, roles, permissions, <code>isAuthenticated</code>, login/logout, session bootstrap</td></tr>
+            <tr><td>ThemeContext</td><td>Light/dark, persisted, applied as CSS variables</td></tr>
+            <tr><td>SidebarContext</td><td>Collapsed/expanded sidebar</td></tr>
+            <tr><td>ProfileImageContext</td><td>Avatar bytes, so navbar and profile page share one fetch</td></tr>
+            <tr><td>PendingAssessmentsContext</td><td>Assessments still to be sat — one fetch feeding both the sidebar dot and the notification bell. Candidates only; for admins it stays empty and never calls the endpoint</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Service layer rules</h3>
+        <ol>
+          <li>Pages and components never import axios. They call a service.</li>
+          <li>Services never hardcode a URL. They read <code>ENDPOINTS</code>.</li>
+          <li>Only <code>api.service.ts</code> configures axios.</li>
+        </ol>
+
+        <h3>Hooks</h3>
+        <p>
+          <strong>Exam proctoring <span class="chip l1">L1</span></strong> — <code>useExamProctoring</code>
+          composes <code>useFullscreen</code>, <code>usePageVisibility</code>,
+          <code>useFaceDetection</code>, <code>useExamCamera</code>, <code>useMicNoiseLevel</code> and
+          <code>useBeforeUnload</code>. The page owns questions, timer and submit; the hook owns
+          proctoring. <code>begin()</code> runs the permission sequence and <code>markActive()</code>
+          turns violation counters on afterwards, so the initial permission prompts never register as
+          violations.
+        </p>
+        <p>
+          <strong>Interview media <span class="chip l2">L2</span></strong> —
+          <code>useVoiceInterview</code> is the state machine over <code>useAudioStreaming</code>,
+          <code>useAudioChunking</code>, <code>useAudioPlayback</code>, <code>useMediaRecorder</code>,
+          <code>useScreenRecorder</code>, <code>useSpeechRecognition</code>,
+          <code>useSpeechSynthesis</code>, <code>useMobileStream</code> and <code>useWebSocket</code>.
+        </p>
+
+        <h3>Utilities worth knowing</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Utility</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">exam-duration.utils.ts</td><td>Exam length = question count × per-question allowance, with admin override and clamping</td></tr>
+            <tr><td class="mono">result.utils.ts</td><td>Difficulty banding, coding-row merging, summary totals, submission metadata — shared by admin and candidate views so both quote identical numbers</td></tr>
+            <tr><td class="mono">results-export.utils.ts</td><td>The Excel workbook. ExcelJS is dynamically imported so a large dependency used by one admin button stays out of the bundle every candidate downloads. Cells carry typed values, never display strings</td></tr>
+            <tr><td class="mono">answer-sheet.utils.ts</td><td>PDF answer sheets (jsPDF)</td></tr>
+            <tr><td class="mono">compiler.utils.ts</td><td><code>isGraded</code> / <code>isPassed</code> verdict helpers</td></tr>
+            <tr><td class="mono">code.utils.ts</td><td><code>isSkeletonCode</code> — tells an untouched template from a real attempt</td></tr>
+            <tr><td class="mono">jwt.utils.ts</td><td><code>isJwtExpired</code>, used before spending a refresh</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Build commands</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Command</th><th>Does</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">npm run dev</td><td>Vite on <code>0.0.0.0:5173</code>, <code>/api</code> proxied to <code>:8081</code>. The host binding is what lets a phone on the LAN reach it for the room-scan flow</td></tr>
+            <tr><td class="mono">npm run build</td><td>Production bundle to <code>dist/</code></td></tr>
+            <tr><td class="mono">npm run typecheck</td><td><code>tsc --noEmit -p tsconfig.app.json</code></td></tr>
+            <tr><td class="mono">npm run lint</td><td>ESLint 9 flat config</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- ══════════════════════════ 05 ══════════════════════════ -->
+      <section id="l1">
+        <div class="sec-head"><span class="sec-num">05</span><span class="sec-rule"></span></div>
+        <h2>L1 — Assessment Flow <span class="chip l1">L1</span></h2>
+        <p>
+          Everything from a job being posted to the aptitude and coding exam results being
+          available. Twelve stages, each described from both sides.
+        </p>
+
+        <h3>1 · Job post</h3>
+        <p>
+          <code>JobPostFormPage</code> serves both create and edit; <code>AdminJobsPage</code> lists
+          with <code>JobListControls</code> and <code>useJobListing</code>. <code>ShareJobLink</code>
+          produces the public apply URL.
+        </p>
+        <p>
+          <code>jobPrefix</code> — not the numeric job id — is the business key used everywhere
+          downstream: assessments, results, prompts and interviews are all keyed by it. Deletes are
+          soft (<code>deletedAt</code>, <code>deletedBy</code>); <code>JobPostSpecifications</code>
+          builds the filtered list queries.
+        </p>
+
+        <h3>2 · Candidate applies</h3>
+        <p>
+          <code>JobApplicationPage</code> works from <code>/candidate/apply</code> and from the
+          shareable <code>/candidate/apply/:jobPrefix</code>, loading the job from the URL.
+          <code>POST /api/job-applications/apply</code> (multipart, <code>JOB_APPLY</code>) creates
+          the application with <code>status = APPLIED</code>, storing resume bytes plus filename and
+          content type. Validation: PDF, DOC, DOCX, 2 MB cap.
+        </p>
+
+        <h3>3 · ATS screening</h3>
+        <p>
+          <code>AtsScreeningPage</code> handles a single job's applicants,
+          <code>AtsBatchPage</code> a folder of resumes screened against a JD.
+          <code>ScreeningRunReport</code> summarises a run.
+        </p>
+        <div class="tw"><table>
+          <thead><tr><th>Endpoint</th><th>Use</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">POST /api/job-applications/screen</td><td>Screen a whole job, or only the emails passed in</td></tr>
+            <tr><td class="mono">POST /api/upload-multiple-resumes</td><td>Batch-screen uploaded resumes against a JD</td></tr>
+            <tr><td class="mono">POST /api/upload-single-resumes</td><td>Single resume</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note risk">
+          <span class="note-label">Deprecated</span>
+          <p>
+            <code>GET /api/job-applications/filterByPrefix/{jobPrefix}</code> re-screened the whole
+            job on every GET. The client marks it deprecated and uses <code>/screen</code> instead.
+          </p>
+        </div>
+
+        <h3>4 · Shortlisting</h3>
+        <p>
+          Automatic shortlisting follows the ATS threshold. Manual is
+          <code>PATCH /api/job-applications/shortlist</code> with <code>{ jobPrefix, emails, override }</code>,
+          letting a recruiter push someone through regardless of score.
+          <code>PATCH /referral-status</code> sets <code>PENDING</code>, <code>VERIFIED</code> or
+          <code>REJECTED</code>. The pipeline is worked from <code>CandidateDetailsPage</code> with
+          <code>CandidateTable</code>, <code>BulkActionModal</code> and <code>ResumeViewerModal</code>.
+        </p>
+
+        <h3>5 · Candidate emails</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Endpoint</th><th>EmailType</th><th>Sent when</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">send-ack-mail</td><td><code>ACKNOWLEDGEMENT</code></td><td>Application received / shortlisted</td></tr>
+            <tr><td class="mono">send-reconfirmation-mail</td><td><code>RECONFIRMATION</code></td><td>Candidate must confirm availability</td></tr>
+            <tr><td class="mono">send-exam-link</td><td><code>EXAM_SCHEDULE</code></td><td>Exam window is set</td></tr>
+            <tr><td class="mono">send-success-mail</td><td><code>WRITTEN_TEST_SUCCESS</code></td><td>Passed the exam</td></tr>
+            <tr><td class="mono">send-failure-mail</td><td><code>WRITTEN_TEST_FAILURE</code></td><td>Failed the exam</td></tr>
+            <tr><td class="mono">send-rejection-mail</td><td><code>REJECTION</code></td><td>Rejected at any point</td></tr>
+          </tbody>
+        </table></div>
+        <p>
+          All require <code>JOB_APPLICATION_READ_ALL</code>. Sender name, company, portal URL,
+          support address and test venue come from <code>app.mail.*</code>, so branding changes in
+          one place rather than per template.
+        </p>
+
+        <h3>6 · Question papers</h3>
+        <p>
+          <strong>Uploaded</strong> via <code>POST /api/upload</code>; the client parses it to detect
+          the question count, which then prices the exam clock.
+          <strong>Generated</strong> via <code>GET /api/generate-questions</code> and
+          <code>/api/generate-coding-questions</code>, both calling <code>gpt-4o</code> steered by
+          the job's stored prompt. The client allows 330 s for these, since generation is slow.
+        </p>
+
+        <h3>7 · Assigning an assessment</h3>
+        <p>
+          <code>AssignAssessmentPage</code> with <code>ExamDurationFields</code> and
+          <code>PassMarkField</code>. The admin picks candidates, paper, exam window, per-question
+          allowance and pass percentage. <code>POST /api/assign</code> creates one
+          <code>Assessment</code> row per candidate.
+        </p>
+        <div class="note why">
+          <span class="note-label">Field distinction</span>
+          <p>
+            <code>assignedAt</code> is when the admin assigned it; <code>startTime</code> is when the
+            exam window opens. They are different fields and must not be conflated.
+          </p>
+        </div>
+        <p>
+          <strong>Rescheduling</strong> — <code>PATCH /api/assessments/{id}/schedule</code> moves the
+          window of a paper not yet sat. <code>notify</code> defaults to true server-side: the
+          candidate was told the old window, so a silent move would leave them turning up to an exam
+          that has gone. <strong>Expiry</strong> — a per-minute job bulk-updates rows past their
+          deadline, and an hourly job calls <code>expireAssessments()</code>.
+        </p>
+
+        <h3>8 · Pre-exam checks</h3>
+        <p><code>ExamInstructionsPage</code> gates entry to the exam and runs, in order:</p>
+        <ol>
+          <li><strong>Desktop check</strong> — phones are refused.</li>
+          <li><strong>Camera permission.</strong></li>
+          <li><strong>Face presence</strong> — at a fast 1 s cadence here, with readings trusted only after two settling cycles.</li>
+          <li><strong>Mic noise</strong> — below warn threshold green, up to block threshold amber, above it red once sustained. Red blocks the start only if configured to.</li>
+          <li><strong>Identity photo</strong> — downscaled and uploaded.</li>
+          <li><strong>Room scan</strong> — optional 360° sweep capturing N frames.</li>
+        </ol>
+        <p>
+          Every step is switchable through <code>VITE_PROCTORING_*</code>, so an environment can
+          loosen or tighten checks without a code change. Captures become
+          <code>ExamProctoringCapture</code> rows with the bytes in object storage.
+        </p>
+
+        <h3>9 · Aptitude exam</h3>
+        <p>
+          Rendered inside <code>ExamLayout</code> — no sidebar, no navbar.
+          <code>GET /api/fetchAssessment/{id}</code> returns the paper;
+          <code>normalizeQuestions</code> handles both option shapes the backend emits.
+          <code>POST /api/markExamAttended</code> records the start. The clock is question count ×
+          <code>minutesPerQuestion</code> (default 1), with the assignment's override winning.
+        </p>
+        <p>
+          Submit is manual, or automatic on timeout or violation. The page computes
+          <code>score</code>, <code>totalMarks</code> and
+          <code>percentage = round(score / totalMarks × 100)</code>, then
+          <code>POST /api/result</code> with the answer JSON as body and the rest as query params.
+          <code>buildSubmissionMeta()</code> attaches a <code>__submissionMeta</code> block recording
+          <code>MANUAL</code> vs <code>AUTO</code>, the reason, client timestamp, seconds left and
+          duration — which is how result screens can later say "auto-submitted, proctoring, 20 min left".
+        </p>
+
+        <h3>10 · Coding exam</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Aspect</th><th>Behaviour</th></tr></thead>
+          <tbody>
+            <tr><td>Editor</td><td>Monaco, languages Java, Python, C, C++, JavaScript</td></tr>
+            <tr><td>Clock</td><td>25 minutes per question by default</td></tr>
+            <tr><td>Run</td><td><code>POST /api/compiler/run</code> — compiles once, runs every case, returns a per-case <code>ExecutionStatus</code></td></tr>
+            <tr><td>Test-case visibility</td><td><code>locked</code> (nothing shown until a case passes), <code>open</code>, or <code>partial</code> (first N open, rest unlock as they pass)</td></tr>
+            <tr><td>Unattempted</td><td>Recorded separately so a blank is distinguishable from a failed attempt; <code>isSkeletonCode</code> tells an untouched template from a real attempt</td></tr>
+            <tr><td>Submit</td><td>Same path as aptitude, with submission metadata attached</td></tr>
+          </tbody>
+        </table></div>
+        <p>
+          Submissions persist as <code>CodeSubmission</code> (script, language, question id,
+          answers JSON, attempted, passed) with a <code>TestResultEntity</code> per case recording
+          input, expected, actual, status, error and execution time.
+        </p>
+
+        <h3>11 · Grading</h3>
+        <p>
+          Aptitude scores correct answers against the key; coding scores test cases passed, banded by
+          the paper's difficulty labels. The verdict is
+          <code>percentage &gt;= assessment.passPercentage</code> → <code>PASSED</code>, else
+          <code>FAILED</code>. A <code>Result</code> row stores score, total marks, percentage,
+          status, submission time and the full <code>resultsJson</code>.
+        </p>
+
+        <h3>12 · Results and export</h3>
+        <p>
+          <code>ResultsPage</code> aggregates per candidate: aptitude and coding attempts, latest of
+          each, code submissions, overall status (<code>PASSED</code> / <code>FAILED</code> /
+          <code>PARTIAL</code>). <code>CandidateResultDetailPage</code> drills in with band cards,
+          test-case cards, code blocks and proctoring captures. Candidates see the same numbers
+          through <code>ResultsListPage</code> and <code>ResultDetailPage</code> — both sides compute
+          through <code>result.utils.ts</code>.
+        </p>
+        <p>
+          Exports: an Excel workbook with typed cells and a final summary sheet of per-candidate
+          metrics, PDF answer sheets, and question-paper export.
+        </p>
+        <div class="note why">
+          <span class="note-label">Colour rule</span>
+          <p>
+            <code>scoreColor()</code> lets a recorded verdict win over the 80/60 heuristic bands.
+            Without that, a module that PASSED on 45% was drawn red beside its own green PASSED
+            badge — telling the reviewer two opposite things about one result.
+          </p>
+        </div>
+      </section>
+
+      <!-- ══════════════════════════ 06 ══════════════════════════ -->
+      <section id="l2">
+        <div class="sec-head"><span class="sec-num">06</span><span class="sec-rule"></span></div>
+        <h2>L2 — Interview Flow <span class="chip l2">L2</span></h2>
+        <p>
+          Begins after L1 results exist. A recruiter schedules the AI voice interview, the candidate
+          sits it in the browser, and the platform produces a weighted evaluation and a verdict.
+        </p>
+
+        <h3>1 · Evaluation categories and prompts</h3>
+        <p>
+          <code>JobPrompt</code> is keyed by <code>(jobPrefix, promptType, promptStage)</code> where
+          type is <code>APTITUDE | CODING | INTERVIEW</code> and stage is <code>START | SUMMARY</code>.
+          <code>EvaluationCategory</code> is keyed by <code>(jobPrefix, categoryName)</code> and carries
+          a weight and description — those weights are what the final score is computed against. Base
+          prompt text lives in <code>interview-prompts.properties</code>, with placeholders resolved by
+          <code>PromptPlaceholderResolver</code>.
+        </p>
+
+        <h3>2 · Interview questions</h3>
+        <p>
+          Uploaded files become <code>UploadInterviewQuestions</code> rows; per-schedule questions
+          become <code>InterviewQuestion</code> rows. <code>OpenAiServiceImpl.generateQuestionsForCategories</code>
+          can generate questions per evaluation category.
+        </p>
+
+        <h3>3 · Scheduling</h3>
+        <p>
+          <code>POST /api/interview/assign-interview</code> and <code>/assign-interview-bulk</code>
+          each create a <code>CandidateInterviewSchedule</code> with the interview window,
+          <code>attemptStatus = NOT_ATTEMPTED</code>, <code>currentPhase = INTRODUCTION</code>,
+          <code>difficultyLevel = 2</code> and <code>interviewerName = "Sarah"</code>. The candidate
+          is mailed and the application moves to <code>INTERVIEW_SCHEDULED</code>.
+        </p>
+
+        <h3>4 · Candidate joins</h3>
+        <p>
+          <code>InterviewListPage</code> lists active interviews, then <code>InterviewPage</code> runs
+          inside <code>InterviewLayout</code> — the same no-chrome lockdown as the exam.
+          <code>InterviewPreStartScreen</code> handles permissions and a 30-second countdown.
+        </p>
+        <p>
+          <strong>Optional phone room scan.</strong> The desktop shows a QR code; the phone opens
+          <code>/mobile-connect</code> and the two pair over STOMP, then exchange WebRTC
+          offer/answer/ICE so the phone's camera streams to the desktop session. Room images can also
+          be checked by <code>gpt-4o</code> vision, producing a <code>RoomVerificationSession</code>
+          with status <code>PENDING | VERIFIED | FAILED</code>.
+        </p>
+
+        <h3>5 · The interview</h3>
+        <p>
+          <code>POST /api/interview/voice/start</code> sets <code>IN_PROGRESS</code> and returns the
+          opening question. Transport is SockJS + STOMP on <code>/ws</code>. SockJS carries only text
+          frames, so audio is base64-encoded inside JSON, capped at 200 KB per chunk server-side.
+        </p>
+        <div class="tw"><table>
+          <thead><tr><th>Direction</th><th>Destination</th><th>Payload</th></tr></thead>
+          <tbody>
+            <tr><td>→ server</td><td class="mono">/app/interview/{id}/audio-chunk</td><td><code>{ audio: base64 }</code>, max 200 KB</td></tr>
+            <tr><td>→ server</td><td class="mono">/app/interview/{id}/submit-answer</td><td><code>VoiceAnswerRequest</code></td></tr>
+            <tr><td>→ server</td><td class="mono">/app/interview/{id}/interrupt</td><td>Candidate barge-in</td></tr>
+            <tr><td>→ server</td><td class="mono">/app/interview/{id}/proctoring-event</td><td>Event type + details</td></tr>
+            <tr><td>← client</td><td class="mono">/topic/interview/{id}/transcription</td><td>Live transcript</td></tr>
+            <tr><td>← client</td><td class="mono">/topic/interview/{id}/transcription-error</td><td>Errors including auth failures</td></tr>
+            <tr><td>← client</td><td class="mono">/topic/interview/{id}/ai-token</td><td>Streaming answer tokens</td></tr>
+            <tr><td>← client</td><td class="mono">/topic/interview/{id}/response-complete</td><td>End of the AI turn</td></tr>
+            <tr><td>← client</td><td class="mono">/topic/interview/{id}/tts-audio</td><td>Synthesised speech</td></tr>
+            <tr><td>← client</td><td class="mono">/topic/interview/{id}/tts-fallback</td><td>Use browser speech synthesis</td></tr>
+            <tr><td>← client</td><td class="mono">/topic/interview/{id}/filler</td><td>Filler phrase while the model works</td></tr>
+          </tbody>
+        </table></div>
+        <p>
+          Every handler calls <code>verifyOwnership(scheduleId, headerAccessor)</code> — the schedule
+          must belong to the authenticated email from the handshake, or the message is dropped and an
+          error published. Answers are deduplicated by <code>scheduleId + transcript hash</code> for
+          60 s, with a daemon thread pruning the map every 5 minutes.
+        </p>
+
+        <h4>Phases</h4>
+        <div class="tw"><table>
+          <thead><tr><th>Phase</th><th class="num">Minutes</th><th class="num">Questions</th><th>Focus</th></tr></thead>
+          <tbody>
+            <tr><td><code>INTRODUCTION</code></td><td class="num">3</td><td class="num">2</td><td>Warm-up</td></tr>
+            <tr><td><code>BACKGROUND</code></td><td class="num">8</td><td class="num">3</td><td>Resume and experience</td></tr>
+            <tr><td><code>TECHNICAL</code></td><td class="num">20</td><td class="num">6</td><td>Role-specific technical</td></tr>
+            <tr><td><code>PROBLEM_SOLVING</code></td><td class="num">12</td><td class="num">3</td><td>Scenario and system design</td></tr>
+            <tr><td><code>BEHAVIORAL</code></td><td class="num">10</td><td class="num">3</td><td>STAR-format behavioural</td></tr>
+            <tr><td><code>CLOSING</code></td><td class="num">5</td><td class="num">1</td><td>Wrap-up and candidate questions</td></tr>
+          </tbody>
+        </table></div>
+        <p>
+          <code>difficultyLevel</code> (1–5, starting at 2) moves with answer quality.
+          <code>runningSummary</code> keeps the conversation inside the context window — four recent
+          turns plus the summary — maintained by <code>InterviewContextService</code>. A
+          <code>CodingEditor</code> lets the AI set a coding task mid-interview; the answer is stored
+          on the conversation entry.
+        </p>
+        <p>
+          <strong>Proctoring and recording.</strong> Face detection, tab checks and devtools detection
+          publish events continuously, stored as <code>ProctoringEvent</code> rows.
+          <code>warningCount</code> drives escalation. Webcam and screen recordings upload in chunks
+          (15 s video, 4 s audio, <code>audio/webm;codecs=opus</code>) to S3, with keys on the schedule.
+        </p>
+
+        <h3>6 · Ending</h3>
+        <div class="tw"><table>
+          <thead><tr><th>CompletionReason</th><th>Trigger</th></tr></thead>
+          <tbody>
+            <tr><td><code>NATURAL_COMPLETION</code></td><td>All phases finished</td></tr>
+            <tr><td><code>CANDIDATE_ENDED</code></td><td>Candidate ended it</td></tr>
+            <tr><td><code>TIMEOUT</code></td><td>Duration exceeded — client, or the 5-minute server sweep</td></tr>
+            <tr><td><code>PROCTORING_VIOLATION</code></td><td>Warning ceiling reached</td></tr>
+            <tr><td><code>MAX_SKIPS</code></td><td>Three consecutive skips</td></tr>
+            <tr><td><code>EARLY_TERMINATION_POOR_PERFORMANCE</code></td><td>Heuristics below</td></tr>
+          </tbody>
+        </table></div>
+        <p>
+          Early termination applies only after 4 questions, when skip ratio exceeds 0.5, average word
+          count is under 15, confidence is under 30.0, there are 2 consecutive skips, or 3 consecutive
+          short answers. <code>GET /api/interview/voice/{id}/resume</code> restores an interrupted
+          interview after a disconnect.
+        </p>
+
+        <h3>7 · Evaluation</h3>
+        <p>
+          <code>InterviewEvaluationService</code> scores the transcript against the job's
+          <code>EvaluationCategory</code> weights using <code>gpt-4o</code>, and
+          <code>CandidatePerformanceAnalyzer</code> and <code>ToneAnalysisService</code> add delivery
+          metrics from the stored conversation entries: word count, words per minute, filler-word
+          count, confidence score and speech duration. The result is written to
+          <code>evaluationJson</code> and <code>interviewResult</code> is set to <code>PASSED</code>,
+          <code>FAILED</code> or <code>PENDING</code>. <code>PdfReportGenerator</code> produces the
+          report.
+        </p>
+
+        <h3>8 · Admin review</h3>
+        <p>
+          <code>InterviewResultsPage</code> reads results, stats, full transcript and every proctoring
+          event — all under <code>INTERVIEW_ASSIGN</code>. From there the application moves to
+          <code>INTERVIEW_COMPLETED</code>, then <code>SELECTED</code> or <code>REJECTED</code>.
+        </p>
+      </section>
+
+      <!-- ══════════════════════════ 07 ══════════════════════════ -->
+      <section id="api">
+        <div class="sec-head"><span class="sec-num">07</span><span class="sec-rule"></span></div>
+        <h2>API Reference</h2>
+        <p>
+          <strong>Auth</strong> is <code>public</code> for the security allowlist, <code>auth</code> for
+          any valid access token, otherwise the <code>@PreAuthorize</code> authority name. Interactive
+          spec at <code>/swagger-ui.html</code>, raw at <code>/v3/api-docs</code>.
+        </p>
+
+        <h3>Authentication and users</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Method</th><th>Path</th><th>Auth</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">POST</td><td class="mono">/api/register</td><td>public</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/login</td><td>public</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/refresh</td><td>public (refresh cookie)</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/logout</td><td>public</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/me</td><td>auth</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/generate-otp · /api/validate-otp</td><td>public</td></tr>
+            <tr><td class="mono">PUT</td><td class="mono">/api/update-password</td><td>public (post-OTP)</td></tr>
+            <tr><td class="mono">PUT</td><td class="mono">/api/change-password</td><td>USER_UPDATE</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/users</td><td>USER_LIST</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/profile-details/{email}</td><td>USER_READ</td></tr>
+            <tr><td class="mono">PUT</td><td class="mono">/api/update/{email}</td><td>USER_UPDATE</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/profile-image/{email}</td><td>USER_READ</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/updateActive · /api/updateDeactive</td><td>USER_ACTIVATE · USER_DEACTIVATE</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/admin/rbac/assign-role · remove-role</td><td>USER_UPDATE</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/admin/rbac/user · /roles</td><td>USER_READ</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Jobs and applications <span class="chip l1">L1</span></h3>
+        <div class="tw"><table>
+          <thead><tr><th>Method</th><th>Path</th><th>Auth</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">POST</td><td class="mono">/api/jobs/post</td><td>JOB_POST_CREATE</td></tr>
+            <tr><td class="mono">PUT</td><td class="mono">/api/jobs/post/{id}</td><td>JOB_POST_UPDATE</td></tr>
+            <tr><td class="mono">DELETE</td><td class="mono">/api/jobs/post/{id}</td><td>JOB_POST_DELETE</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/jobs/getPost · /counts · /job-types</td><td>JOB_POST_READ</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/job-applications/apply</td><td>JOB_APPLY</td></tr>
+            <tr><td class="mono">PATCH</td><td class="mono">/api/job-applications/update</td><td>JOB_APPLY</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/job-applications/{email}</td><td>JOB_APPLY</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/job-applications/byJobPrefixAndEmail/{prefix}/{email}</td><td>JOB_APPLY</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/job-applications/byJobPrefix/{prefix}</td><td>JOB_APPLICATION_READ_ALL</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/job-applications/getAllApplications</td><td>JOB_APPLICATION_READ_ALL</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/job-applications/screen</td><td>JOB_APPLICATION_READ_ALL</td></tr>
+            <tr><td class="mono">PATCH</td><td class="mono">/api/job-applications/shortlist · /referral-status</td><td>JOB_APPLICATION_READ_ALL</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/job-applications/send-*-mail</td><td>JOB_APPLICATION_READ_ALL</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/job-applications/schedule-interview</td><td>JOB_APPLICATION_READ_ALL</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/upload-resume · PUT /api/update-resume</td><td>RESUME_UPLOAD · RESUME_UPDATE</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/view-resume/{email}</td><td>RESUME_VIEW</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/upload-multiple-resumes</td><td>ATS_UPLOAD_MULTI</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Assessments and code execution <span class="chip l1">L1</span></h3>
+        <div class="tw"><table>
+          <thead><tr><th>Method</th><th>Path</th><th>Auth</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">GET</td><td class="mono">/api/generate-questions</td><td>QUESTION_GENERATE</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/generate-coding-questions</td><td>CODING_QUESTION_GENERATE</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/upload</td><td>ASSESSMENT_UPLOAD</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/assign · /api/assign-blob</td><td>ASSESSMENT_ASSIGN</td></tr>
+            <tr><td class="mono">PATCH</td><td class="mono">/api/assessments/{id}/schedule</td><td>ASSESSMENT_ASSIGN</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/getCandidateAssessments/{email}</td><td>auth — pending only</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/getAssessments?candidateEmail=</td><td>auth — everything, attended included</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/fetchAssessment/{id} · /api/assessment-content/{id}</td><td>auth</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/markExamAttended</td><td>auth</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/submit/{id}</td><td>ASSESSMENT_SUBMIT</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/result</td><td>ASSESSMENT_RESULT_SUBMIT</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/get-results?email=&amp;jobPrefix=</td><td>auth</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/get-results-by-job-prefix</td><td>JOB_APPLICATION_READ_ALL</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/compiler/run</td><td>COMPILER_RUN</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/compiler/saveUnattemptedSubmissions</td><td>COMPILER_RUN</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/compiler/results · /results/code · /results/by-job-prefix</td><td>COMPILER_RESULTS_READ</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/exam-proctoring/identity-photo · /room-scan</td><td>auth (candidate)</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/exam-proctoring/captures · /captures/{id}/image</td><td>ASSESSMENT_READ</td></tr>
+          </tbody>
+        </table></div>
+        <p>
+          <code>POST /api/result</code> takes the answer JSON as the <strong>body</strong> and
+          <code>candidateEmail</code>, <code>assessmentType</code>, <code>score</code>,
+          <code>jobPrefix</code>, <code>assessmentId</code>, <code>totalMarks</code> and
+          <code>percentage</code> as <strong>query params</strong>.
+        </p>
+
+        <h3>Interview <span class="chip l2">L2</span></h3>
+        <div class="tw"><table>
+          <thead><tr><th>Method</th><th>Path</th><th>Auth</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">POST</td><td class="mono">/api/interview/assign-interview · -bulk</td><td>INTERVIEW_ASSIGN</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/interview/results · /results/{id} · /stats</td><td>INTERVIEW_ASSIGN</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/interview/{id}/proctoring-events · /conversation</td><td>INTERVIEW_ASSIGN</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/interview/active</td><td>INTERVIEW_START</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/interview/start · /voice/start</td><td>INTERVIEW_START</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/interview/answer · /voice-to-text</td><td>INTERVIEW_ANSWER</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/interview/{id}/video · /screen-recording</td><td>INTERVIEW_ANSWER</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/interview/voice/{id}/end</td><td>INTERVIEW_ANSWER</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/interview/voice/{id}/status · /evaluation · /resume</td><td>INTERVIEW_START</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/interview/upload-interview-questions · /update-questions/{prefix}</td><td>INTERVIEW_ASSIGN</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/interview/questions</td><td>INTERVIEW_START</td></tr>
+            <tr><td class="mono">POST</td><td class="mono">/api/interview/verification-session · /verify-room</td><td>auth</td></tr>
+            <tr><td class="mono">GET</td><td class="mono">/api/prompts/{prefix} · /evaluation-categories/{prefix}</td><td>JOB_POST_CREATE</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>WebSocket topology</h3>
+        <p>
+          Endpoints <code>/ws</code> (SockJS + STOMP) and <code>/ws/terminal</code> (raw handler).
+          Broker on <code>/queue</code> and <code>/topic</code>; app prefix <code>/app</code>; user
+          prefix <code>/user</code>. Interview destinations are listed in section 06. Mobile pairing
+          uses <code>/app/desktop/register</code>, <code>/app/mobile/{register,offer,answer,ice,verified}</code>
+          and <code>/user/queue/mobile/{offer,answer,ice,ready,verified,warning}</code>.
+          <code>/topic/jobPosts</code> broadcasts job-list changes.
+        </p>
+      </section>
+
+      <!-- ══════════════════════════ 08 ══════════════════════════ -->
+      <section id="data">
+        <div class="sec-head"><span class="sec-num">08</span><span class="sec-rule"></span></div>
+        <h2>Data Model</h2>
+
+        <h3>Entity relationships</h3>
+<pre><code>Users (PK email)
+ ├─&lt; UserRole &gt;─ Role &gt;─ Permission            RBAC
+ ├─&lt; RefreshToken                              sessions
+ ├─&lt; JobApplicationForCandidate &gt;─ JobPost
+ ├─&lt; Assessment &gt;─ Result
+ ├─&lt; CodeSubmission &gt;─ TestResultEntity
+ └─&lt; CandidateInterviewSchedule
+        ├─&lt; VoiceConversationEntry
+        ├─&lt; ProctoringEvent
+        └─&lt; InterviewQuestion
+
+JobPost (business key: job_prefix)
+ ├─&lt; JobApplicationForCandidate
+ ├─&lt; JobPrompt              (jobPrefix, promptType, promptStage) unique
+ ├─&lt; EvaluationCategory     (jobPrefix, categoryName) unique
+ ├─&lt; Assessment · Result · CandidateInterviewSchedule
+
+Assessment ──1:1── Result
+Assessment ──&lt;   ExamProctoringCapture</code></pre>
+        <p><code>jobPrefix</code>, not the numeric job id, is the join key across the domain.</p>
+
+        <h3>Core entities</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Entity</th><th>Key fields</th></tr></thead>
+          <tbody>
+            <tr><td>Users</td><td>PK <code>email</code>, names, BCrypt <code>password</code>, <code>enabled</code>, unique <code>mobileNumber</code>, <code>profileImage</code> (LONGBLOB)</td></tr>
+            <tr><td>Role · Permission · UserRole</td><td>Many-to-many roles↔permissions; <code>UserRole</code> is a join entity with an <code>active</code> flag so a role can be switched off without deletion</td></tr>
+            <tr><td>RefreshToken</td><td>UUID id, <code>userEmail</code>, <code>sessionId</code>, <code>tokenHash</code> (SHA-256, unique), created/lastUsed/expires/revoked, <code>replacedByTokenId</code>, IP, user agent</td></tr>
+            <tr><td>JobPost</td><td><code>jobPrefix</code> unique, title, company, location, description (3000), skills, experience, education, salary, openings, deadline, soft-delete fields</td></tr>
+            <tr><td>JobApplicationForCandidate</td><td>Names, experience, resume bytes + content type, <code>matchPercent</code>, referral fields, <code>status</code>, ten per-stage string flags, exam date/time</td></tr>
+            <tr><td>Assessment</td><td>Type, candidate, jobPrefix, <code>questionPaper</code>, <code>answerKey</code>, <code>examAttended</code>, <code>expired</code>, <code>assignedAt</code>, <code>startTime</code>, <code>deadline</code>, <code>examStartedAt</code>, timing fields, <code>passPercentage</code>, storage refs</td></tr>
+            <tr><td>Result</td><td><code>score</code>, <code>totalMarks</code>, <code>percentage</code>, <code>status</code>, <code>submittedAt</code>, <code>resultsJson</code> (full breakdown + submission metadata)</td></tr>
+            <tr><td>CodeSubmission · TestResultEntity</td><td>Script, language, question id, answers JSON, attempted, passed; per case input/expected/actual, status, error, execution time</td></tr>
+            <tr><td>ExamProctoringCapture</td><td><code>captureType</code>, <code>frameIndex</code>, storage container + filename, content type, size, captured/uploaded times</td></tr>
+            <tr><td>CandidateInterviewSchedule</td><td>Window, <code>attemptStatus</code>, <code>interviewResult</code>, <code>currentPhase</code>, <code>difficultyLevel</code>, question counters, <code>runningSummary</code>, <code>warningCount</code>, <code>completionReason</code>, <code>evaluationJson</code>, recording references</td></tr>
+            <tr><td>VoiceConversationEntry</td><td><code>role</code>, <code>content</code>, timestamp, plus <code>wordCount</code>, <code>wordsPerMinute</code>, <code>fillerWordCount</code>, <code>confidenceScore</code>, <code>speechDurationSeconds</code>, and code fields</td></tr>
+            <tr><td>JobPrompt · EvaluationCategory</td><td>Per-job prompt text by type and stage; category name, weight and description</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Enums</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Enum</th><th>Values</th></tr></thead>
+          <tbody>
+            <tr><td>ApplicationStatus</td><td class="mono">APPLIED · SHORTLISTED · ACKNOWLEDGED · ACKNOWLEDGED_BACK · RECONFIRMED · EXAM_SENT · EXAM_COMPLETED · INTERVIEW_SCHEDULED · INTERVIEW_COMPLETED · SELECTED · REJECTED</td></tr>
+            <tr><td>AssessmentType</td><td class="mono">APTITUDE · CODING</td></tr>
+            <tr><td>ResultStatus</td><td class="mono">PASSED · FAILED</td></tr>
+            <tr><td>ExecutionStatus</td><td class="mono">PASSED · WRONG_ANSWER · COMPILE_ERROR · RUNTIME_ERROR · TIMEOUT · OUTPUT_LIMIT_EXCEEDED · NOT_RUN · INTERNAL_ERROR</td></tr>
+            <tr><td>AttemptStatus</td><td class="mono">NOT_ATTEMPTED · IN_PROGRESS · COMPLETED</td></tr>
+            <tr><td>InterviewResult</td><td class="mono">PASSED · FAILED · PENDING</td></tr>
+            <tr><td>InterviewPhase</td><td class="mono">INTRODUCTION · BACKGROUND · TECHNICAL · PROBLEM_SOLVING · BEHAVIORAL · CLOSING</td></tr>
+            <tr><td>CompletionReason</td><td class="mono">NATURAL_COMPLETION · EARLY_TERMINATION_POOR_PERFORMANCE · CANDIDATE_ENDED · PROCTORING_VIOLATION · TIMEOUT · MAX_SKIPS</td></tr>
+            <tr><td>ConversationRole</td><td class="mono">SYSTEM · INTERVIEWER · CANDIDATE</td></tr>
+            <tr><td>ProctoringCaptureType</td><td class="mono">IDENTITY_PHOTO · ROOM_SCAN_FRAME</td></tr>
+            <tr><td>VerificationStatus</td><td class="mono">PENDING · VERIFIED · FAILED</td></tr>
+            <tr><td>ReferralStatus</td><td class="mono">PENDING · VERIFIED · REJECTED</td></tr>
+            <tr><td>PromptType · PromptStage</td><td class="mono">APTITUDE · CODING · INTERVIEW  /  START · SUMMARY</td></tr>
+            <tr><td>EmailType</td><td class="mono">15 values covering every candidate touchpoint</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Where binary data lives</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Data</th><th>Storage</th></tr></thead>
+          <tbody>
+            <tr><td>Profile image</td><td>MySQL <code>LONGBLOB</code></td></tr>
+            <tr><td>Resume</td><td>MySQL <code>@Lob</code> + content type</td></tr>
+            <tr><td>Answer key</td><td>MySQL <code>@Lob</code></td></tr>
+            <tr><td>Question paper</td><td>MySQL <code>TEXT</code>, or object storage by container + filename</td></tr>
+            <tr><td>Exam proctoring captures</td><td>Object storage, row keeps the reference</td></tr>
+            <tr><td>Interview video and screen recordings</td><td>S3, keys on the schedule</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <!-- ══════════════════════════ 09 ══════════════════════════ -->
+      <section id="security">
+        <div class="sec-head"><span class="sec-num">09</span><span class="sec-rule"></span></div>
+        <h2>Security &amp; RBAC</h2>
+
+        <h3>Token model</h3>
+        <div class="tw"><table>
+          <thead><tr><th></th><th>Access token</th><th>Refresh token</th></tr></thead>
+          <tbody>
+            <tr><td>Form</td><td>Signed JWT, subject = email</td><td>Opaque random value, not a JWT</td></tr>
+            <tr><td>Lifetime</td><td>10 minutes</td><td>14 days</td></tr>
+            <tr><td>Storage</td><td><code>localStorage</code> on the client</td><td>SHA-256 hash in the DB; raw value only in the cookie</td></tr>
+            <tr><td>Transport</td><td><code>Authorization: Bearer</code></td><td>httpOnly cookie <code>refresh_token</code>, path <code>/api</code>, <code>SameSite=Lax</code></td></tr>
+            <tr><td>Validation</td><td>Issuer, audience, time claims, 60 s clock skew</td><td>Rotated on every use, linked by <code>replacedByTokenId</code></td></tr>
+            <tr><td>On misuse</td><td>401 → refresh</td><td>Reuse of a rotated token revokes the entire session chain</td></tr>
+          </tbody>
+        </table></div>
+
+        <div class="note why">
+          <span class="note-label">What strict reuse detection forces on the client</span>
+          <p>
+            The client must never spend the cookie twice, so <code>api.service.ts</code> does three
+            things. It <strong>persists the access token</strong> — memory-only meant every page load
+            spent a rotation, and two quick reloads presented the same token twice and killed the
+            session; the user was logged out for pressing F5. It runs a <strong>single-flight
+            refresh</strong> per tab, because the startup bootstrap and the 401-retry path each ran
+            their own, and under StrictMode the bootstrap ran twice by itself. And it takes an
+            <strong>origin-wide Web Locks lock</strong>, so two tabs waking together serialise instead
+            of both spending the cookie.
+          </p>
+          <p>
+            The trade-off, stated plainly: the short-lived access token is readable by script on this
+            origin. The refresh cookie stays httpOnly.
+          </p>
+        </div>
+
+        <h3>Filter chain</h3>
+        <p>
+          One chain at <code>@Order(1)</code> matching <code>/api/**</code>: CORS, CSRF disabled,
+          sessions stateless, <code>OPTIONS</code> permitted for preflight, then a public allowlist —
+          <code>/api/login</code>, <code>/api/register</code>, <code>/api/refresh</code>,
+          <code>/api/logout</code>, <code>/api/compile/**</code>,
+          <code>/api/job-applications/**</code>, <code>/api/mobile/**</code>,
+          <code>/api/generate-otp</code>, <code>/api/validate-otp</code>,
+          <code>/api/update-password</code>. Everything else is authenticated.
+        </p>
+        <div class="note risk">
+          <span class="note-label">Note the breadth</span>
+          <p>
+            <code>/api/job-applications/**</code> is allowlisted as a whole prefix, so chain-level
+            authentication does not apply to it. Its endpoints are protected only by their
+            <code>@PreAuthorize</code> annotations — which they all do carry. It works, but the safety
+            net is one layer thinner there. Worth narrowing to the genuinely public paths,
+            <code>/apply</code> and <code>/acknowledge</code>.
+          </p>
+        </div>
+
+        <h3>Authorization model</h3>
+        <p>
+          Roles and permissions live in the database and are enforced as Spring Security authorities.
+          Roles are exposed as <code>ROLE_&lt;NAME&gt;</code>; permissions as plain strings. Method
+          security uses <strong>permissions</strong>, never roles.
+          <code>RbacAuthorityService.resolveAuthorities(email)</code> loads active rows from
+          <code>user_roles</code>, adds the role authority, and adds every permission attached.
+        </p>
+
+        <h4>Permission matrix</h4>
+        <div class="tw"><table>
+          <thead><tr><th>Permission</th><th>SUPER_ADMIN</th><th>ADMIN</th><th>USER</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">USER_READ · USER_UPDATE</td><td>✓</td><td>✓</td><td>✓</td></tr>
+            <tr><td class="mono">USER_LIST · USER_ACTIVATE · USER_DEACTIVATE</td><td>✓</td><td>—</td><td>—</td></tr>
+            <tr><td class="mono">RESUME_UPLOAD · RESUME_UPDATE · RESUME_VIEW</td><td>✓</td><td>✓</td><td>✓</td></tr>
+            <tr><td class="mono">RESUME_VIEW_ALL</td><td>✓</td><td>✓</td><td>—</td></tr>
+            <tr><td class="mono">ATS_UPLOAD_SINGLE · ATS_UPLOAD_MULTI · ATS_READ</td><td>✓</td><td>✓</td><td>—</td></tr>
+            <tr><td class="mono">ASSESSMENT_UPLOAD · ASSESSMENT_ASSIGN · ASSESSMENT_READ</td><td>✓</td><td>✓</td><td>—</td></tr>
+            <tr><td class="mono">ASSESSMENT_SUBMIT · ASSESSMENT_RESULT_SUBMIT</td><td>✓</td><td>✓</td><td>✓</td></tr>
+            <tr><td class="mono">QUESTION_GENERATE · CODING_QUESTION_GENERATE · QUESTION_WRITE</td><td>✓</td><td>✓</td><td>—</td></tr>
+            <tr><td class="mono">JOB_POST_CREATE · _UPDATE · _DELETE · JOB_WRITE</td><td>✓</td><td>✓</td><td>—</td></tr>
+            <tr><td class="mono">JOB_POST_READ · JOB_APPLY</td><td>✓</td><td>✓</td><td>✓</td></tr>
+            <tr><td class="mono">JOB_APPLICATION_READ_ALL</td><td>✓</td><td>✓</td><td>—</td></tr>
+            <tr><td class="mono">INTERVIEW_ASSIGN · INTERVIEW_WRITE</td><td>✓</td><td>✓</td><td>—</td></tr>
+            <tr><td class="mono">INTERVIEW_START · INTERVIEW_ANSWER</td><td>✓</td><td>✓</td><td>✓</td></tr>
+            <tr><td class="mono">COMPILER_RUN · COMPILER_RESULTS_READ</td><td>✓</td><td>✓</td><td>✓</td></tr>
+          </tbody>
+        </table></div>
+        <p>
+          <code>RbacSeedConfig</code> seeds this on every boot, idempotently.
+          <code>SUPER_ADMIN</code> is only refreshed if the row already exists — some deployments have
+          a <code>roles.name</code> column too small to hold the string, and creating it would fail
+          startup.
+        </p>
+
+        <h3>Exam and interview integrity</h3>
+        <p>
+          Assessment security is behavioural as much as authorization: lockdown layouts with no
+          navigation, fullscreen enforcement, tab-switch counting, face detection, devtools detection,
+          noise checks, identity photo, optional room scan, and auto-submit on limits. WebSocket
+          sessions are authenticated at handshake and every message handler re-verifies schedule
+          ownership; audio chunks are capped and answers deduplicated.
+        </p>
+
+        <h3>Operational notes</h3>
+        <ul>
+          <li><code>cookie-secure: false</code> in all four shipped profiles. Any HTTPS deployment should set it <code>true</code>.</li>
+          <li>Secrets are committed as YAML defaults behind <code>${ENV_VAR:...}</code> fallbacks. Supply the environment variables and treat the committed values as compromised.</li>
+          <li><code>ddl-auto=update</code> in production means Hibernate can alter the live schema on boot.</li>
+          <li>Actuator exposes only <code>health</code> and <code>info</code>.</li>
+        </ul>
+      </section>
+
+      <!-- ══════════════════════════ 10 ══════════════════════════ -->
+      <section id="deploy">
+        <div class="sec-head"><span class="sec-num">10</span><span class="sec-rule"></span></div>
+        <h2>Environments &amp; Deployment</h2>
+
+        <h3>Profiles</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Profile</th><th class="num">Port</th><th>Database</th><th>API host</th><th>FE env file</th></tr></thead>
+          <tbody>
+            <tr><td><code>dev</code></td><td class="num">8081</td><td>local MySQL <code>Rightpath</code></td><td class="mono">localhost:8082</td><td class="mono">.env.development</td></tr>
+            <tr><td><code>stage</code></td><td class="num">8082</td><td>RDS <code>rightpath_stage</code></td><td class="mono">devapi.airightpath.com</td><td class="mono">.env.staging</td></tr>
+            <tr><td><code>uat</code></td><td class="num">8083</td><td>RDS <code>Rightpath-uat</code></td><td class="mono">api-uat.airightpath.com</td><td>—</td></tr>
+            <tr><td><code>prod</code></td><td class="num">8081</td><td>RDS <code>Rightpath-dev</code></td><td class="mono">api.airightpath.com</td><td class="mono">.env.production</td></tr>
+          </tbody>
+        </table></div>
+        <div class="note risk">
+          <span class="note-label">Two things to watch</span>
+          <p>
+            <code>prod</code> points at a database named <code>Rightpath-dev</code> on the
+            <code>-db-dev</code> RDS instance, shared with <code>stage</code>. And
+            <code>.env.development</code> sets the API to <code>:8081</code> while the WebSocket URL
+            points at <code>:8082</code> — set both explicitly for whichever backend you run locally.
+          </p>
+        </div>
+
+        <h3>Backend configuration keys</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Area</th><th>Keys and defaults</th></tr></thead>
+          <tbody>
+            <tr><td>Server</td><td>Tomcat max 200 threads / 10 min-spare, 100 MB form post, 64 KB headers, gzip over 1 KB</td></tr>
+            <tr><td>Datasource</td><td><code>MYSQL_HOST</code>, <code>MYSQL_PORT</code>, <code>MYSQL_USER</code>, <code>MYSQL_PASSWORD</code></td></tr>
+            <tr><td>JPA</td><td><code>ddl-auto: update</code> everywhere; <code>show-sql</code> in dev only</td></tr>
+            <tr><td>Mail</td><td><code>MAIL_HOST</code>, <code>MAIL_PORT</code>, <code>MAIL_USERNAME</code>, <code>MAIL_PASSWORD</code>; STARTTLS on</td></tr>
+            <tr><td>Upload</td><td>Max file and request size 500 MB</td></tr>
+            <tr><td>Auth v2</td><td><code>rightpath.security.v2.jwt.*</code> and <code>...refresh.*</code></td></tr>
+            <tr><td>OpenAI</td><td><code>OPENAI_API_KEY</code>, model <code>gpt-4o</code>, audio <code>whisper-1</code>, TTS <code>tts-1-hd</code>/<code>nova</code>, question timeout 300 s</td></tr>
+            <tr><td>AWS S3</td><td><code>AWS_S3_BUCKET</code>, region <code>ap-south-1</code>, access and secret keys</td></tr>
+            <tr><td>ATS</td><td><code>ats.screening.threshold</code> = 60.0</td></tr>
+            <tr><td>Interview</td><td>max duration 60 min, max warnings 5, context window 4</td></tr>
+            <tr><td>Early termination</td><td>min questions 4, skip ratio 0.5, min avg words 15, min confidence 30.0, 2 consecutive skips, 3 short answers</td></tr>
+            <tr><td>CORS</td><td><code>APP_CORS_ALLOWED_ORIGINS</code>, <code>APP_BASE_URL</code></td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Frontend environment differences</h3>
+        <p>Dev is lenient; staging and production are strict. Everything not listed is identical across the three.</p>
+        <div class="tw"><table>
+          <thead><tr><th>Setting</th><th class="num">dev</th><th class="num">staging</th><th class="num">production</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">MAX_TAB_SWITCHES</td><td class="num">5</td><td class="num">1</td><td class="num">1</td></tr>
+            <tr><td class="mono">MAX_EYE_WARNINGS</td><td class="num">5</td><td class="num">0 (warn only)</td><td class="num">0 (warn only)</td></tr>
+            <tr><td class="mono">EYE_CHECK_INTERVAL_MS</td><td class="num">4000</td><td class="num">5000</td><td class="num">5000</td></tr>
+            <tr><td class="mono">ROOM_SCAN_FRAMES</td><td class="num">8</td><td class="num">12</td><td class="num">12</td></tr>
+          </tbody>
+        </table></div>
+        <p>
+          Only <code>VITE_</code>-prefixed variables reach the browser — never put a secret in them.
+          Vite inlines them at build time, so <strong>the API URL is baked into the image</strong>: one
+          image per environment, built with that environment's <code>.env</code> file.
+        </p>
+
+        <h3>Running locally</h3>
+<pre><code># Backend — needs MySQL plus javac/java, python3, node, gcc, g++ on PATH
+cd Backend/airightpath-be
+./mvnw spring-boot:run                 # dev profile, :8081
+./mvnw clean package -DskipTests       # → target/rightpath.jar
+docker compose up --build              # or: app + MySQL 8
+
+# Frontend
+cd Frontend/airightpath-fe
+npm ci
+npm run dev                            # :5173, /api proxied to :8081
+npm run typecheck &amp;&amp; npm run lint
+npm run build                          # → dist/</code></pre>
+
+        <h3>Docker images</h3>
+        <p>
+          <strong>Backend</strong> — <code>eclipse-temurin:21-jdk-jammy</code> plus <code>python3</code>,
+          <code>build-essential</code> (needed for gcc/g++ to link) and Node 22. The build then runs a
+          version check on every toolchain, so a broken image fails in CI rather than mid-exam.
+          <code>EXPOSE 8081 8082 8083</code> is documentation — one image serves every environment and
+          the port comes from the active profile.
+        </p>
+        <p>
+          <strong>Frontend</strong> — multi-stage: <code>node:22-bullseye-slim</code> builds, then
+          <code>nginx:alpine</code> serves <code>dist/</code> with
+          <code>try_files $uri /index.html</code> so client-side routes resolve on a hard refresh.
+        </p>
+
+        <h3>Deployment checklist</h3>
+        <ol>
+          <li>Set every secret through environment variables; do not rely on committed defaults.</li>
+          <li>Set <code>cookie-secure=true</code> and confirm <code>SameSite</code> suits your domains.</li>
+          <li>Add the frontend origin to <code>APP_CORS_ALLOWED_ORIGINS</code> — it also gates the WebSocket handshake, so a missing origin breaks interviews, not just REST.</li>
+          <li>Confirm the backend image carries all five language toolchains.</li>
+          <li>Confirm S3 bucket, region and credentials — recordings and captures fail at the wrong layer otherwise.</li>
+          <li>Build the frontend with the matching <code>.env</code> file.</li>
+          <li>Verify <code>/actuator/health</code>; disable Swagger where it should not be exposed.</li>
+          <li>Review <code>ddl-auto</code> — it is <code>update</code> in prod.</li>
+        </ol>
+      </section>
+
+      <!-- ══════════════════════════ 11 ══════════════════════════ -->
+      <section id="status">
+        <div class="sec-head"><span class="sec-num">11</span><span class="sec-rule"></span></div>
+        <h2>Status &amp; Gaps</h2>
+        <p>
+          Read from the code on branch <code>staging</code>, not from a plan.
+        </p>
+        <div class="legend">
+          <div><span class="chip ok">Complete</span> exists end to end and is wired into the UI</div>
+          <div><span class="chip wn">Partial</span> works, with a caveat</div>
+          <div><span class="chip bd">Gap</span> referenced but missing, or drifting</div>
+        </div>
+
+        <h3>Headline</h3>
+        <p>
+          <strong>Both L1 and L2 are functionally complete end to end</strong> — job post through exam
+          result, and scheduling through interview evaluation. What is thin is verification and
+          hygiene, not features.
+        </p>
+
+        <h3>L1 — Assessment <span class="chip l1">L1</span></h3>
+        <div class="tw"><table>
+          <thead><tr><th>Capability</th><th>Status</th><th>Note</th></tr></thead>
+          <tbody>
+            <tr><td>Job posting, update, delete</td><td><span class="chip ok">Complete</span></td><td>Client comments still call update/delete "pending backend delivery" — stale</td></tr>
+            <tr><td>Shareable per-job apply link</td><td><span class="chip ok">Complete</span></td><td></td></tr>
+            <tr><td>Application + resume upload</td><td><span class="chip ok">Complete</span></td><td>PDF/DOC/DOCX, 2 MB</td></tr>
+            <tr><td>Referral capture and verification</td><td><span class="chip ok">Complete</span></td><td></td></tr>
+            <tr><td>ATS screening — single and batch</td><td><span class="chip ok">Complete</span></td><td>Threshold 60.0</td></tr>
+            <tr><td>Scoped screening by email list</td><td><span class="chip ok">Complete</span></td><td>Replaces the deprecated <code>filterByPrefix</code></td></tr>
+            <tr><td>Manual shortlisting with override</td><td><span class="chip ok">Complete</span></td><td></td></tr>
+            <tr><td>Candidate mail suite</td><td><span class="chip ok">Complete</span></td><td>Six templates, branding centralised</td></tr>
+            <tr><td>AI question generation — aptitude and coding</td><td><span class="chip ok">Complete</span></td><td>Prompt-driven per job</td></tr>
+            <tr><td>Question paper upload</td><td><span class="chip ok">Complete</span></td><td>With client-side question counting</td></tr>
+            <tr><td>Assessment assignment</td><td><span class="chip ok">Complete</span></td><td>Window, timing, pass mark</td></tr>
+            <tr><td>Assignment survives a mail outage</td><td><span class="chip ok">Complete</span></td><td>Covered by test</td></tr>
+            <tr><td>Exam rescheduling</td><td><span class="chip ok">Complete</span></td><td><code>notify</code> defaults true</td></tr>
+            <tr><td>Automatic expiry</td><td><span class="chip ok">Complete</span></td><td>Per-minute bulk update + hourly sweep</td></tr>
+            <tr><td>Pre-exam checks</td><td><span class="chip ok">Complete</span></td><td>All six, env-switchable</td></tr>
+            <tr><td>Aptitude and coding exams</td><td><span class="chip ok">Complete</span></td><td>Proctored, timed, auto-submit</td></tr>
+            <tr><td>Server-side code execution</td><td><span class="chip ok">Complete</span></td><td>Compile-once, typed statuses, 503 when a toolchain is missing</td></tr>
+            <tr><td>Grading and result views</td><td><span class="chip ok">Complete</span></td><td>Shared maths across admin and candidate</td></tr>
+            <tr><td>Multiple attempts per module</td><td><span class="chip ok">Complete</span></td><td>Attempts kept, latest surfaced</td></tr>
+            <tr><td>Excel and PDF export</td><td><span class="chip ok">Complete</span></td><td>Typed cells plus a summary sheet</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>L2 — Interview <span class="chip l2">L2</span></h3>
+        <div class="tw"><table>
+          <thead><tr><th>Capability</th><th>Status</th><th>Note</th></tr></thead>
+          <tbody>
+            <tr><td>Evaluation categories with weights</td><td><span class="chip ok">Complete</span></td><td>Drives the score</td></tr>
+            <tr><td>Per-job interview prompts</td><td><span class="chip ok">Complete</span></td><td>Start and summary stages</td></tr>
+            <tr><td>Question upload and generation</td><td><span class="chip ok">Complete</span></td><td>Per job and per category</td></tr>
+            <tr><td>Scheduling — single and bulk</td><td><span class="chip ok">Complete</span></td><td>Window, mail, status transition</td></tr>
+            <tr><td>Mobile pairing + WebRTC room scan</td><td><span class="chip ok">Complete</span></td><td>QR pairing over STOMP</td></tr>
+            <tr><td>AI room verification</td><td><span class="chip ok">Complete</span></td><td><code>gpt-4o</code> vision</td></tr>
+            <tr><td>Voice interview, six phases</td><td><span class="chip ok">Complete</span></td><td>Adaptive difficulty, phase budgets</td></tr>
+            <tr><td>Streaming responses + TTS + fallback</td><td><span class="chip ok">Complete</span></td><td></td></tr>
+            <tr><td>Live transcription</td><td><span class="chip ok">Complete</span></td><td>Dedicated thread pool</td></tr>
+            <tr><td>Barge-in, filler audio</td><td><span class="chip ok">Complete</span></td><td></td></tr>
+            <tr><td>Coding questions inside the interview</td><td><span class="chip ok">Complete</span></td><td></td></tr>
+            <tr><td>Interview proctoring</td><td><span class="chip ok">Complete</span></td><td>Events persisted, escalation</td></tr>
+            <tr><td>Video + screen recording</td><td><span class="chip ok">Complete</span></td><td>Chunked upload to S3</td></tr>
+            <tr><td>Early termination + server timeout sweep</td><td><span class="chip ok">Complete</span></td><td>Six tunable heuristics</td></tr>
+            <tr><td>Resume after disconnect</td><td><span class="chip ok">Complete</span></td><td></td></tr>
+            <tr><td>Weighted evaluation + speech metrics</td><td><span class="chip ok">Complete</span></td><td></td></tr>
+            <tr><td>PDF report, admin results and transcript</td><td><span class="chip ok">Complete</span></td><td></td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Partial</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Item</th><th>Detail</th></tr></thead>
+          <tbody>
+            <tr><td>Backend test coverage</td><td>22 test classes, concentrated on job posts, assessment timing, scheduling validation, code execution, error classification, proctoring upload binding, email rendering and status transitions. Interview/voice, ATS scoring and the auth token flow have no direct tests</td></tr>
+            <tr><td>Frontend test coverage</td><td>None. No test runner in <code>package.json</code>; the gates are <code>typecheck</code> and <code>lint</code></td></tr>
+            <tr><td>Schema migrations</td><td><code>ddl-auto=update</code> on every profile including prod; changes documented by hand, no Flyway or Liquibase</td></tr>
+            <tr><td>Azure Blob storage</td><td>Implementation exists alongside S3; the profiles configure S3</td></tr>
+            <tr><td>AWS Rekognition</td><td>On the classpath; shipped face checks are <code>gpt-4o</code> vision and client-side face-api.js</td></tr>
+            <tr><td>WhatsApp / Twilio</td><td>Works but is not part of the candidate journey; dev credentials are placeholders</td></tr>
+            <tr><td>Terminal WebSocket</td><td><code>/ws/terminal</code> wired with config; no UI drives it</td></tr>
+            <tr><td>React Query</td><td>A dependency, but most screens call services directly — caching is inconsistent across pages</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Gaps and drift</h3>
+        <div class="tw"><table>
+          <thead><tr><th class="num">#</th><th>Finding</th><th>Impact</th></tr></thead>
+          <tbody>
+            <tr><td class="num">1</td><td><code>COMPILER.SAVE_UNATTEMPTED</code> points at <code>/api/compiler/save-unattempted</code>; the backend mapping is <code>saveUnattemptedSubmissions</code> and expects a different payload</td><td>Latent — the method is never called. Fix before wiring it into the exam</td></tr>
+            <tr><td class="num">2</td><td><code>RESUME.UPLOAD_MULTIPLE</code> points at <code>/api/upload-resumes</code>, which has no backend mapping</td><td>Latent — unused; the batch screen uses the correct path</td></tr>
+            <tr><td class="num">3</td><td><code>ATS.SCREEN_SINGLE</code> points at <code>/api/ats/screen</code>; no <code>/api/ats</code> controller exists</td><td>Latent — unused</td></tr>
+            <tr><td class="num">4</td><td><code>src/config/permissions.ts</code> does not match the backend enum — it invents 11 names and omits most real ones</td><td>A <code>PermissionGate</code> keyed to an invented name can never open. Regenerate from <code>PermissionName</code></td></tr>
+            <tr><td class="num">5</td><td>Stale "pending backend delivery" comments for job update and delete</td><td>Both shipped; the fallback code paths are dead</td></tr>
+            <tr><td class="num">6</td><td><code>/api/job-applications/**</code> allowlisted as a whole prefix</td><td>Access control still holds via annotations, but the chain-level net is missing</td></tr>
+            <tr><td class="num">7</td><td><code>cookie-secure: false</code> in every profile, including prod</td><td>Refresh cookie can travel over plain HTTP</td></tr>
+            <tr><td class="num">8</td><td>Secrets committed as YAML defaults — DB, JWT, OpenAI, AWS, Twilio, mail</td><td>Override via env and rotate</td></tr>
+            <tr><td class="num">9</td><td>Prod points at a dev-named database on the dev RDS instance, shared with stage</td><td>Blast radius across environments</td></tr>
+            <tr><td class="num">10</td><td><code>.env.development</code> mixes ports — API <code>:8081</code>, WS <code>:8082</code></td><td>Local interview flow silently fails</td></tr>
+            <tr><td class="num">11</td><td><code>README.md</code> is still the Azure DevOps template; <code>RIGHTPATH_DOCUMENTATION.md</code> describes roles that do not exist in code and a Supabase-era schema</td><td>Misleads new joiners</td></tr>
+          </tbody>
+        </table></div>
+
+        <h3>Recommended next steps</h3>
+        <div class="tw"><table>
+          <thead><tr><th>Theme</th><th>Action</th></tr></thead>
+          <tbody>
+            <tr><td>Correctness</td><td>Fix gaps 1–5. Each is small and removes a latent bug or a misleading comment</td></tr>
+            <tr><td>Security</td><td>Close gaps 6–8 before any production hardening review</td></tr>
+            <tr><td>Confidence</td><td>Add tests where the money is — interview evaluation scoring, ATS scoring, and the refresh-token rotation/reuse path. Add Vitest and start with <code>result.utils.ts</code>, <code>exam-duration.utils.ts</code> and <code>results-export.utils.ts</code>, which are pure and carry the grading maths</td></tr>
+            <tr><td>Operability</td><td>Introduce Flyway before the schema drifts further from what <code>ddl-auto=update</code> produced</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<script>
+  (function () {
+    var links = Array.prototype.slice.call(document.querySelectorAll('#toc a'));
+    var sections = links
+      .map(function (a) { return document.querySelector(a.getAttribute('href')); })
+      .filter(Boolean);
+
+    if (!('IntersectionObserver' in window) || !sections.length) return;
+
+    var visible = new Map();
+
+    function paint() {
+      var best = null;
+      sections.forEach(function (s) {
+        if (visible.get(s.id)) {
+          if (!best || s.getBoundingClientRect().top < best.getBoundingClientRect().top) best = s;
+        }
+      });
+      if (!best) return;
+      links.forEach(function (a) {
+        a.classList.toggle('on', a.getAttribute('href') === '#' + best.id);
+      });
+    }
+
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { visible.set(e.target.id, e.isIntersecting); });
+      paint();
+    }, { rootMargin: '-10% 0px -70% 0px', threshold: 0 });
+
+    sections.forEach(function (s) { io.observe(s); });
+  })();
+</script>

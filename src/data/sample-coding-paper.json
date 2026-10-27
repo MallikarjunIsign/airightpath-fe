@@ -1,0 +1,128 @@
+[
+  {
+    "id": "1",
+    "title": "Clean Badge Name (letters and spaces, lowercase)",
+    "question": "A visitor badge printer sometimes receives names with punctuation and numbers from a keypad entry. Produce a version suitable for printing by keeping only letters and spaces, and converting everything to lowercase.",
+    "description": "Input: a string containing a name with possible symbols and digits. Output: a string that contains only lowercase letters (a-z) and spaces; all other characters are removed. Spaces inside the name are preserved as-is.",
+    "sampleInput": "Sample Input 1:\nA!nNa- MaRy2\nSample Input 2:\nJo%hn   Do#e\nSample Input 3:\nChris_P. Bacon",
+    "sampleOutput": "Sample Output 1:\nanna mary\nSample Output 2:\njohn   doe\nSample Output 3:\nchrisp bacon",
+    "testCases": [
+      { "input": "A!nNa- MaRy2", "expectedOutput": "anna mary" },
+      { "input": "Jo%hn   Do#e", "expectedOutput": "john   doe" },
+      { "input": "Office-101 Reception", "expectedOutput": "office reception" },
+      { "input": "No-Noise!", "expectedOutput": "nonoise" },
+      { "input": "Clean_Name v2.0", "expectedOutput": "cleanname v" }
+    ],
+    "Difficulty": "Basic"
+  },
+  {
+    "id": "2",
+    "title": "Count Even Order Quantities",
+    "question": "A kiosk logs quantities for small orders as a list of integers. You need to quickly report how many of those quantities are even numbers.",
+    "description": "Input: an array/list of integers. Output: a single integer equal to the count of even numbers in the list.",
+    "sampleInput": "Sample Input 1:\n[3,4,10,11]\nSample Input 2:\n[2,2,2]\nSample Input 3:\n[1,3,5]",
+    "sampleOutput": "Sample Output 1:\n2\nSample Output 2:\n3\nSample Output 3:\n0",
+    "testCases": [
+      { "input": "[0]", "expectedOutput": "1" },
+      { "input": "[1]", "expectedOutput": "0" },
+      { "input": "[2,4,6,8]", "expectedOutput": "4" },
+      { "input": "[7,9,11,13]", "expectedOutput": "0" },
+      { "input": "[3,4,10,11,14,15]", "expectedOutput": "3" }
+    ],
+    "Difficulty": "Basic"
+  },
+  {
+    "id": "3",
+    "title": "Normalize Tag List (trim, lowercase, remove empties)",
+    "question": "A helpdesk form collects multiple tags per ticket, but some entries have extra spaces or blank fields. Clean the tags so they can be displayed consistently.",
+    "description": "Input: an array/list of strings (tags). For each tag: trim leading/trailing spaces and convert to lowercase. Remove any tag that becomes empty after trimming. Output: an array/list of the cleaned tags in the same original order (excluding removed items).",
+    "sampleInput": "Sample Input 1:\n[\"  Urgent \",\"\",\" follow-up \",\"  \",\"Info\"]\nSample Input 2:\n[\"  a \",\"B \",\" c \"]\nSample Input 3:\n[\"  \",\"  \",\"Note\"]",
+    "sampleOutput": "Sample Output 1:\n[\"urgent\",\"follow-up\",\"info\"]\nSample Output 2:\n[\"a\",\"b\",\"c\"]\nSample Output 3:\n[\"note\"]",
+    "testCases": [
+      { "input": "[\"  task\",\"review  \",\"  \",\" Bug \"]", "expectedOutput": "[\"task\",\"review\",\"bug\"]" },
+      { "input": "[\"note\",\"NOTE  \",\" note \"]", "expectedOutput": "[\"note\",\"note\",\"note\"]" },
+      { "input": "[\"  a \",\"B \",\" c \"]", "expectedOutput": "[\"a\",\"b\",\"c\"]" },
+      { "input": "[\"   keep \",\" spaced  \",\" entries \",\" ok \"]", "expectedOutput": "[\"keep\",\"spaced\",\"entries\",\"ok\"]" },
+      { "input": "[\"One\",\"Two\",\"  \",\"Three \",\" \"]", "expectedOutput": "[\"one\",\"two\",\"three\"]" },
+      { "input": "[\"   leading\",\"trailing   \"]", "expectedOutput": "[\"leading\",\"trailing\"]" },
+      { "input": "[\"MiXeD\",\"Case\",\"ExAmPle\"]", "expectedOutput": "[\"mixed\",\"case\",\"example\"]" },
+      { "input": "[\"  single  \"]", "expectedOutput": "[\"single\"]" },
+      { "input": "[\" multi \",\" word \",\" tags \"]", "expectedOutput": "[\"multi\",\"word\",\"tags\"]" },
+      { "input": "[\"remove\",\"\", \"    \", \"empties\"]", "expectedOutput": "[\"remove\",\"empties\"]" }
+    ],
+    "Difficulty": "Intermediate"
+  },
+  {
+    "id": "4",
+    "title": "Filter Headline to Key Words",
+    "question": "A newsboard needs a condensed headline with only meaningful words. From a sentence, keep words of length 3 or more after removing non-letter symbols, and normalize spacing and case.",
+    "description": "Input: a string sentence. Steps: (1) Remove any character that is not a letter (a-z, A-Z) or space. (2) Split on spaces. (3) Discard words shorter than 3 characters. (4) Join remaining words with a single space in lowercase. Output: the resulting string.",
+    "sampleInput": "Sample Input 1:\nQuick, brown fox!\nSample Input 2:\nKeep THE big words.\nSample Input 3:\nNumbers 123 and symbols #$% vanish",
+    "sampleOutput": "Sample Output 1:\nquick brown fox\nSample Output 2:\nkeep the big words\nSample Output 3:\nnumbers and symbols vanish",
+    "testCases": [
+      { "input": "Hello, World!", "expectedOutput": "hello world" },
+      { "input": "A very, VERY long day.", "expectedOutput": "very very long day" },
+      { "input": "To be or not to be", "expectedOutput": "not" },
+      { "input": "Clean-up these: lines!! now", "expectedOutput": "cleanup these lines now" },
+      { "input": "Edge CASES   everywhere", "expectedOutput": "edge cases everywhere" },
+      { "input": "short an no", "expectedOutput": "short" },
+      { "input": "Mix of 123 numbers and words", "expectedOutput": "mix numbers and words" },
+      { "input": "Symbols @@## removed here", "expectedOutput": "symbols removed here" },
+      { "input": "THIS IS SHOUTING", "expectedOutput": "this shouting" },
+      { "input": "ok go on now", "expectedOutput": "now" }
+    ],
+    "Difficulty": "Intermediate"
+  },
+  {
+    "id": "5",
+    "title": "Adjust Charges (remove negatives, fee, evenize, cap)",
+    "question": "A small kiosk system computes final charge lines from base amounts. Invalid negative entries should be dropped. Each remaining amount gets a fixed service fee, is nudged to the next even number if needed, and is limited to an upper cap for printing.",
+    "description": "Input: an array/list of integers (base amounts). Steps: (1) Remove negative numbers. (2) Add 2 to each remaining number. (3) If the result is odd, add 1 to make it even. (4) If the result exceeds 100, change it to 100. Output: the transformed array/list of integers in the original order of the valid items.",
+    "sampleInput": "Sample Input 1:\n[10, -3, 99]\nSample Input 2:\n[0,1,2,3]\nSample Input 3:\n[100, 101, 150]",
+    "sampleOutput": "Sample Output 1:\n[12,100]\nSample Output 2:\n[2,4,4,6]\nSample Output 3:\n[100,100,100]",
+    "testCases": [
+      { "input": "[10, -3, 99]", "expectedOutput": "[12,100]" },
+      { "input": "[0,1,2,3]", "expectedOutput": "[2,4,4,6]" },
+      { "input": "[100,101,150]", "expectedOutput": "[100,100,100]" },
+      { "input": "[-1, 1]", "expectedOutput": "[4]" },
+      { "input": "[2]", "expectedOutput": "[4]" },
+      { "input": "[49,50,51]", "expectedOutput": "[52,52,54]" },
+      { "input": "[98,99,100]", "expectedOutput": "[100,100,100]" },
+      { "input": "[-2,0,5,-7]", "expectedOutput": "[2,8]" },
+      { "input": "[33, 65, 77]", "expectedOutput": "[36,68,80]" },
+      { "input": "[1,3,5,7,9]", "expectedOutput": "[4,6,8,10,12]" },
+      { "input": "[88, 90, 92]", "expectedOutput": "[90,92,94]" },
+      { "input": "[99]", "expectedOutput": "[100]" },
+      { "input": "[97, -100, -1, 1]", "expectedOutput": "[100,4]" },
+      { "input": "[34, 35, 36, 37]", "expectedOutput": "[36,38,38,40]" },
+      { "input": "[95, 5]", "expectedOutput": "[98,8]" }
+    ],
+    "Difficulty": "Advanced"
+  },
+  {
+    "id": "6",
+    "title": "De-duplicate and Arrange Queue Tickets (evens first, stable)",
+    "question": "A ticket display board receives a list of ticket numbers with accidental repeats. Show each ticket only once, and arrange the list so even tickets appear first while keeping the original order among evens and among odds.",
+    "description": "Input: an array/list of integers. Steps: (1) Remove duplicate numbers while keeping only the first occurrence of each value. (2) Reorder the list by placing all even numbers first and all odd numbers after, preserving the relative order within the evens group and within the odds group. Output: the resulting array/list of integers.",
+    "sampleInput": "Sample Input 1:\n[5,2,3,2,4,5]\nSample Input 2:\n[2,2,2,2]\nSample Input 3:\n[1,3,5,7]",
+    "sampleOutput": "Sample Output 1:\n[2,4,5,3]\nSample Output 2:\n[2]\nSample Output 3:\n[1,3,5,7]",
+    "testCases": [
+      { "input": "[1]", "expectedOutput": "[1]" },
+      { "input": "[2]", "expectedOutput": "[2]" },
+      { "input": "[1,2,3,4]", "expectedOutput": "[2,4,1,3]" },
+      { "input": "[4,4,4,3,3,2,2,1,1]", "expectedOutput": "[4,2,3,1]" },
+      { "input": "[0,1,0,2,0,3]", "expectedOutput": "[0,2,1,3]" },
+      { "input": "[10,9,8,7,6,5]", "expectedOutput": "[10,8,6,9,7,5]" },
+      { "input": "[2,1,2,1,2,1]", "expectedOutput": "[2,1]" },
+      { "input": "[11,12,13,14,15,16,17,18]", "expectedOutput": "[12,14,16,18,11,13,15,17]" },
+      { "input": "[100,99,100,98,97,98]", "expectedOutput": "[100,98,99,97]" },
+      { "input": "[3,5,2,2,4,4,6,6]", "expectedOutput": "[2,4,6,3,5]" },
+      { "input": "[7,7,7]", "expectedOutput": "[7]" },
+      { "input": "[8,1,8,3,2,1,4]", "expectedOutput": "[8,2,4,1,3]" },
+      { "input": "[2,3,4,3,2,5]", "expectedOutput": "[2,4,3,5]" },
+      { "input": "[9,0,9,0,9]", "expectedOutput": "[0,9]" },
+      { "input": "[6,5,4,3,2,1,6,5,4,3,2,1]", "expectedOutput": "[6,4,2,5,3,1]" }
+    ],
+    "Difficulty": "Advanced"
+  }
+]

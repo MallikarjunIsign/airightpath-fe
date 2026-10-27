@@ -8,16 +8,8 @@ import { FileUpload } from '@/components/ui/FileUpload';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/components/ui/Toast';
-import api from '@/services/api.service';
-import { ENDPOINTS } from '@/config/api.endpoints';
-
-interface BatchResult {
-  fileName?: string;
-  candidateName?: string;
-  email?: string;
-  score: number;
-  [key: string]: unknown;
-}
+import { atsService, type BatchScreenResult } from '@/services/ats.service';
+import { MESSAGES } from '@/config/messages';
 
 export function AtsBatchPage() {
   const { showToast } = useToast();
@@ -25,15 +17,15 @@ export function AtsBatchPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [jobDescription, setJobDescription] = useState('');
   const [loading, setLoading] = useState(false);
-  const [results, setResults] = useState<BatchResult[]>([]);
+  const [results, setResults] = useState<BatchScreenResult[]>([]);
 
   async function handleSubmit() {
     if (files.length === 0) {
-      showToast('Please upload at least one resume', 'warning');
+      showToast(MESSAGES.admin.atsBatch.resumeRequired, 'warning');
       return;
     }
     if (!jobDescription.trim()) {
-      showToast('Please enter a job description', 'warning');
+      showToast(MESSAGES.admin.atsBatch.jobDescriptionRequired, 'warning');
       return;
     }
 
@@ -41,16 +33,14 @@ export function AtsBatchPage() {
     setResults([]);
     try {
       const formData = new FormData();
-      files.forEach((file) => formData.append('files', file));
+      files.forEach((file) => formData.append('resumes', file));
       formData.append('jobDescription', jobDescription.trim());
 
-      const res = await api.post<BatchResult[]>(ENDPOINTS.ATS.SCREEN_BATCH, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
+      const res = await atsService.screenBatch(formData);
 
       const sorted = [...(res.data ?? [])].sort((a, b) => b.score - a.score);
       setResults(sorted);
-      showToast(`Screened ${sorted.length} resumes successfully!`, 'success');
+      showToast(MESSAGES.admin.atsBatch.screened(sorted.length), 'success');
     } catch {
       // Error toast auto-handled by interceptor
     } finally {
@@ -67,9 +57,9 @@ export function AtsBatchPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-[var(--text)]">ATS Batch Screening</h1>
+        <h1 className="text-3xl font-bold text-[var(--text)]">Bulk ATS Check</h1>
         <p className="text-[var(--textSecondary)] mt-1">
-          Upload multiple resumes to screen and rank candidates against a job description
+          Upload a batch of resumes, paste any job description, and see who fits best — ranked in seconds
         </p>
       </div>
 
@@ -148,34 +138,67 @@ export function AtsBatchPage() {
             <CardTitle>Ranked Results ({results.length})</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Rank</TableHead>
-                  <TableHead>File / Candidate</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Score</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {results.map((r, idx) => (
-                  <TableRow key={idx}>
-                    <TableCell>
-                      <span className="text-sm font-bold text-[var(--text)]">#{idx + 1}</span>
-                    </TableCell>
-                    <TableCell className="font-medium">
-                      {r.candidateName || r.fileName || `Resume ${idx + 1}`}
-                    </TableCell>
-                    <TableCell>{r.email || '--'}</TableCell>
-                    <TableCell>
-                      <Badge variant={getScoreVariant(r.score)} size="md">
-                        {r.score}%
-                      </Badge>
-                    </TableCell>
+            {/* Mobile: one card per result. Filenames and emails are long free
+                text, so on a phone the table scrolled sideways and pushed the
+                score — the reason to read this screen — out of view. */}
+            <div className="md:hidden space-y-3">
+              {results.map((r, idx) => (
+                <div
+                  key={r.fileName ?? idx}
+                  className="rounded-2xl border border-[var(--borderMuted,var(--border))] bg-[var(--cardBg)] p-4"
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="flex-shrink-0 w-8 h-8 rounded-xl bg-[var(--bgSubtle,var(--surface1))] flex items-center justify-center text-xs font-bold text-[var(--text)]">
+                      {idx + 1}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-[var(--text)] break-words">
+                        {r.candidateName || r.fileName || `Resume ${idx + 1}`}
+                      </p>
+                      <p className="text-sm text-[var(--textSecondary)] break-all">
+                        {r.email || '--'}
+                      </p>
+                    </div>
+                    <Badge variant={getScoreVariant(r.score)} size="md">
+                      {r.score}%
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop: fixed layout so the two free-text columns wrap instead
+                of stretching the table past the card. */}
+            <div className="hidden md:block">
+              <Table className="table-fixed">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-16">Rank</TableHead>
+                    <TableHead className="w-[38%]">File / Candidate</TableHead>
+                    <TableHead className="w-[38%]">Email</TableHead>
+                    <TableHead className="w-24">Score</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {results.map((r, idx) => (
+                    <TableRow key={r.fileName ?? idx}>
+                      <TableCell className="align-top">
+                        <span className="text-sm font-bold text-[var(--text)]">#{idx + 1}</span>
+                      </TableCell>
+                      <TableCell className="font-medium align-top break-words">
+                        {r.candidateName || r.fileName || `Resume ${idx + 1}`}
+                      </TableCell>
+                      <TableCell className="align-top break-all">{r.email || '--'}</TableCell>
+                      <TableCell className="align-top">
+                        <Badge variant={getScoreVariant(r.score)} size="md">
+                          {r.score}%
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
       )}

@@ -7,15 +7,28 @@ const ERROR_MESSAGES: Record<string, string> = {
   AUTH_REFRESH_REUSE_DETECTED: 'For your security, this session has been terminated. Please sign in again.',
   AUTH_FORBIDDEN: "You don't have permission to do that.",
   INTERNAL_ERROR: 'Something went wrong on our end. Please try again in a moment.',
+  AI_SERVICE_ERROR: 'The AI service is temporarily unavailable. Please try again in a moment.',
+  // Compiler host problems, not candidate mistakes — worded so nobody reads
+  // them as an error in their own code.
+  COMPILER_UNAVAILABLE:
+    'The code runner is temporarily unavailable. Your code has not been lost — please try again in a moment.',
+  COMPILER_UNSUPPORTED_LANGUAGE:
+    'That language is not supported by the code runner. Please pick another one.',
   // Domain
   USER_NOT_FOUND: "We couldn't find an account with that email address.",
-  USER_ALREADY_EXISTS: 'An account with this email already exists. Try signing in instead.',
+  // Deliberately does not name a field: the backend raises this code for a
+  // duplicate email AND a duplicate mobile number, and naming the wrong one
+  // sends people off to check details that are fine. Registration reads the
+  // server's message to mark the offending field — see RegisterPage.
+  USER_ALREADY_EXISTS:
+    'An account with these details already exists. Try signing in instead.',
   USER_INACTIVE: 'This account has been deactivated. Please contact support.',
   PASSWORD_POLICY: 'Password must be between 8 and 64 characters.',
   PASSWORD_MISMATCH: "The passwords you entered don't match.",
   STORAGE_ERROR: 'There was a problem saving your file. Please try again.',
   INVALID_OTP: 'That code is invalid or has expired. Please request a new one.',
   // Resources
+  RESOURCE_NOT_FOUND: "The requested item couldn't be found. It may have been removed.",
   JOB_NOT_FOUND: "That job posting couldn't be found. It may have been removed.",
   ASSESSMENT_NOT_FOUND: 'Assessment not found. Please check and try again.',
   ASSESSMENT_EXPIRED: 'This assessment has expired and is no longer available.',

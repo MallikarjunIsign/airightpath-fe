@@ -1,3 +1,19 @@
+/**
+ * One path segment, encoded.
+ *
+ * <p>Job prefixes and emails go into the path on a dozen endpoints, and they
+ * were interpolated raw. A job created with the prefix `DEV-2026/29` produced
+ * the code `DEV-2026/29-055`, whose slash split one segment into two: the
+ * route stopped matching and every lookup for that job answered 404 with
+ * nothing on screen to say why.</p>
+ *
+ * <p>Encoding is the client's half. A slash specifically also needs the data
+ * fixed — Tomcat rejects `%2F` in a path by default — which is why the prefix
+ * is now validated at creation. This stops everything else: spaces, `#`, `?`,
+ * `+` in an email.</p>
+ */
+const seg = (value: string): string => encodeURIComponent(value);
+
 export const ENDPOINTS = {
   AUTH: {
     LOGIN: "/api/login",
@@ -12,6 +28,13 @@ export const ENDPOINTS = {
   },
   USERS: {
     GET_ALL: "/api/users",
+    // Staff accounts — anyone holding ADMIN or SUPER_ADMIN. GET_ALL above
+    // deliberately excludes them, so these are the two halves of the roster.
+    GET_STAFF: "/api/users/staff",
+    // Combined, paginated, filterable roster — what the admin screen reads.
+    // GET_ALL and GET_STAFF keep their own meanings for other callers.
+    GET_DIRECTORY: "/api/users/directory",
+    CREATE_STAFF: "/api/users/staff",
     GET_BY_EMAIL: (email: string) => `/api/profile-details/${email}`,
     UPDATE: (email: string) => `/api/update/${email}`,
     ACTIVATE: "/api/updateActive",
@@ -21,31 +44,60 @@ export const ENDPOINTS = {
   JOBS: {
     GET_ALL: "/api/jobs/getPost",
     CREATE: "/api/jobs/post",
+    // Pending backend delivery — see docs/backend-requirements-job-update.md
+    // and docs/backend-requirements-job-delete.md.
+    UPDATE: (id: number) => `/api/jobs/post/${id}`,
+    DELETE: (id: number) => `/api/jobs/post/${id}`,
+  },
+  QUESTION_BANK: {
+    ITEMS: "/api/question-bank/items",
+    ASSIGNMENTS: (id: number) => `/api/question-bank/items/${id}/assignments`,
+    SYNC: "/api/question-bank/sync",
+    SYNC_STATUS: "/api/question-bank/sync-status",
   },
   JOB_APPLICATIONS: {
     APPLY: "/api/job-applications/apply",
     UPDATE: "/api/job-applications/update",
-    GET_BY_EMAIL: (email: string) => `/api/job-applications/${email}`,
+    GET_BY_EMAIL: (email: string) => `/api/job-applications/${seg(email)}`,
+    /** Admin: every application, across all jobs. Needs JOB_APPLICATION_READ_ALL. */
+    GET_ALL: "/api/job-applications/getAllApplications",
     GET_BY_PREFIX: (prefix: string) =>
-      `/api/job-applications/byJobPrefix/${prefix}`,
+      `/api/job-applications/byJobPrefix/${seg(prefix)}`,
     GET_BY_PREFIX_AND_EMAIL: (prefix: string, email: string) =>
-      `/api/job-applications/byJobPrefixAndEmail/${prefix}/${email}`,
+      `/api/job-applications/byJobPrefixAndEmail/${seg(prefix)}/${seg(email)}`,
+    /** @deprecated Screens the whole job on every GET — use SCREEN instead. */
     FILTER_BY_PREFIX: (prefix: string) =>
-      `/api/job-applications/filterByPrefix/${prefix}`,
+      `/api/job-applications/filterByPrefix/${seg(prefix)}`,
+    // Screening run: whole job, or only the emails passed in.
+    SCREEN: "/api/job-applications/screen",
     SEND_ACK_MAIL: "/api/job-applications/send-ack-mail",
     SEND_REJECTION_MAIL: "/api/job-applications/send-rejection-mail",
     SEND_RECONFIRMATION_MAIL: "/api/job-applications/send-reconfirmation-mail",
     SEND_EXAM_LINK: "/api/job-applications/send-exam-link",
     SEND_SUCCESS_MAIL: "/api/job-applications/send-success-mail",
     SEND_FAILURE_MAIL: "/api/job-applications/send-failure-mail",
+    // Manually shortlist candidates without running ATS screening.
+    SHORTLIST: "/api/job-applications/shortlist",
+    // Admin sets a candidate's referral status (query params: jobPrefix, email, referralStatus).
+    REFERRAL_STATUS: "/api/job-applications/referral-status",
   },
   ASSESSMENTS: {
     UPLOAD: "/api/upload",
     ASSIGN: "/api/assign",
     ASSIGN_BLOB: "/api/assign-blob",
     GET_CONTENT: (id: number) => `/api/assessment-content/${id}`,
+    // Only assessments still to be sat — the backing query filters out
+    // expired = true and examAttended = true. Right for the candidate's
+    // "what do I have to do" list; useless for reviewing a finished attempt.
     GET_CANDIDATE_ASSESSMENTS: (email: string) =>
       `/api/getCandidateAssessments/${email}`,
+    // Every assessment for a candidate, attended ones included. What review
+    // screens need, since an attempt worth reviewing is attended by definition.
+    GET_ASSESSMENTS: "/api/getAssessments",
+    // Every assignment on a job in one response, as slim projections (no
+    // question paper, no answer key). GET_ASSESSMENTS filters by candidate
+    // only, so reviewing a job used to cost one request per candidate.
+    GET_ASSESSMENTS_BY_JOB_PREFIX: "/api/assessments/by-job-prefix",
     SUBMIT: (id: number) => `/api/submit/${id}`,
     MARK_ATTENDED: "/api/markExamAttended",
     SAVE_RESULT: "/api/result",
@@ -54,6 +106,27 @@ export const ENDPOINTS = {
     GENERATE_QUESTIONS: "/api/generate-questions",
     GENERATE_CODING_QUESTIONS: "/api/generate-coding-questions",
     FETCH_QUESTIONS: (id: number) => `/api/fetchAssessment/${id}`,
+    // Moves the exam window of a paper the candidate has not sat yet.
+    SCHEDULE: (id: number) => `/api/assessments/${id}/schedule`,
+  },
+  // Pre-exam proctoring captures (identity photo, room scan). Writes are
+  // candidate-facing; the reads below require ASSESSMENT_READ.
+  EXAM_PROCTORING: {
+    IDENTITY_PHOTO: "/api/exam-proctoring/identity-photo",
+    ROOM_SCAN: "/api/exam-proctoring/room-scan",
+    ASSESSMENT_CAPTURES: (assessmentId: number) =>
+      `/api/exam-proctoring/assessments/${assessmentId}/captures`,
+    // Interview twins. Separate paths rather than an extra parameter on the two
+    // above: assessment ids and interview-schedule ids are independent
+    // sequences, so one endpoint taking "an id" could file interview evidence
+    // under an assessment and nobody would see the mistake.
+    INTERVIEW_IDENTITY_PHOTO: "/api/exam-proctoring/interview/identity-photo",
+    INTERVIEW_ROOM_SCAN: "/api/exam-proctoring/interview/room-scan",
+    INTERVIEW_CAPTURES: (scheduleId: number) =>
+      `/api/exam-proctoring/interviews/${scheduleId}/captures`,
+    CANDIDATE_CAPTURES: "/api/exam-proctoring/captures",
+    CAPTURE_IMAGE: (captureId: number) =>
+      `/api/exam-proctoring/captures/${captureId}/image`,
   },
   INTERVIEWS: {
     ASSIGN: "/api/interview/assign-interview",
@@ -61,6 +134,28 @@ export const ENDPOINTS = {
     GET_ACTIVE: "/api/interview/active",
     GET_RESULTS: "/api/interview/results",
     GET_RESULT_DETAIL: (id: number) => `/api/interview/results/${id}`,
+    /** Soft-remove a result from the list, with a reason, and put it back. */
+    DELETE_RESULT: (id: number) => `/api/interview/results/${id}`,
+    RESTORE_RESULT: (id: number) => `/api/interview/results/${id}/restore`,
+    /** A reviewer's notes and override on one interview. */
+    REVIEW: (id: number) => `/api/interview/${id}/review`,
+    // A signed, playable link to a stored recording. The schedule holds an
+    // `s3://` reference, which no browser can open.
+    RECORDING_LINK: (id: number) => `/api/interview/${id}/recording`,
+    /**
+     * What became of a recording upload, filed over HTTP.
+     *
+     * Separate from the WebSocket proctoring event that reports the same
+     * thing, because the failures most worth auditing are the ones that have
+     * already taken the socket down with them.
+     */
+    RECORDING_OUTCOME: (id: number) => `/api/interview/${id}/recording-outcome`,
+    /** Stills from the candidate's paired phone: upload (candidate) and list (reviewer). */
+    MOBILE_PAIRING: (id: number) => `/api/interview/${id}/mobile-pairing`,
+    MOBILE_PAIRING_STATE: (id: number) => `/api/interview/${id}/mobile-pairing/state`,
+    MOBILE_PAIRING_REVOKE: (id: number) => `/api/interview/${id}/mobile-pairing/revoke`,
+    MOBILE_CAPTURES: (id: number) => `/api/interview/${id}/mobile-captures`,
+    MOBILE_CAPTURE_IMAGE: (captureId: number) => `/api/interview/mobile-captures/${captureId}/image`,
   },
   AI: {
     START_INTERVIEW: "/api/interview/start",
@@ -89,20 +184,26 @@ export const ENDPOINTS = {
   RESUME: {
     UPLOAD: "/api/upload-resume",
     UPDATE: "/api/update-resume",
-    VIEW: (email: string) => `/api/view-resume/${email}`,
-    VIEW_ALL: "/api/view-all-resumes",
+    VIEW: (email: string) => `/api/view-resume/${encodeURIComponent(email)}`,
     UPLOAD_MULTIPLE: "/api/upload-resumes",
   },
   ATS: {
     SCREEN_SINGLE: "/api/ats/screen",
-    SCREEN_BATCH: "/api/ats/screen-batch",
+    SCREEN_BATCH: "/api/upload-multiple-resumes",
   },
   PROMPTS: {
-    GET_BY_JOB: (prefix: string) => `/api/prompts/${prefix}`,
+    GET_BY_JOB: (prefix: string) => `/api/prompts/${seg(prefix)}`,
     SAVE: "/api/prompts",
+    JOBS_WITH_PROMPTS: "/api/prompts/jobs-with-prompts",
+    COPY: "/api/prompts/copy",
     GET_EVALUATION_CATEGORIES: (prefix: string) =>
-      `/api/prompts/evaluation-categories/${prefix}`,
+      `/api/prompts/evaluation-categories/${seg(prefix)}`,
     SAVE_EVALUATION_CATEGORIES: "/api/prompts/evaluation-categories",
+    /** What a round is actually scored on — stored list, or the defaults behind it. */
+    GET_EFFECTIVE_EVALUATION_CATEGORIES: (prefix: string) =>
+      `/api/prompts/evaluation-categories/${seg(prefix)}/effective`,
+    GET_INTERVIEW_TEMPLATE: (prefix: string) => `/api/prompts/interview-template/${seg(prefix)}`,
+    SAVE_INTERVIEW_TEMPLATE: "/api/prompts/interview-template",
   },
   COMPILE: "/api/compile",
 } as const;

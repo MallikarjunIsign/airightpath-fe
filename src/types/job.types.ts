@@ -20,6 +20,39 @@ export interface JobPostDTO {
   updatedAt?: string;
 }
 
+// ── ATS screening run (POST /api/job-applications/screen) ────────────
+
+/**
+ * One candidate's outcome from a screening run.
+ *
+ * `screened: false` is an outcome, not a failure — the row was scored but not
+ * saved, and `reason` explains why in words meant to be shown as-is.
+ * `status: null` with `screened: false` means no application exists for that
+ * email.
+ */
+export interface ScreeningResultRow {
+  email: string;
+  fullName?: string;
+  matchPercent?: number;
+  status?: JobApplicationStatus | null;
+  screened: boolean;
+  reason?: string | null;
+}
+
+export interface ScreeningRun {
+  jobPrefix: string;
+  /** Shortlist cut-off the run used, as a percentage. */
+  threshold?: number;
+  scope?: 'ALL' | 'SELECTED';
+  screenedCount: number;
+  skippedCount: number;
+  notFoundCount: number;
+  shortlistedCount: number;
+  rejectedCount: number;
+  message?: string;
+  results: ScreeningResultRow[];
+}
+
 export type JobApplicationStatus =
   | 'APPLIED'
   | 'SHORTLISTED'
@@ -48,6 +81,10 @@ export interface JobApplicationDTO {
   resumeFileName?: string;
   contentType?: string;
   matchPercent?: number;
+  /** ATS shortlisting outcome, e.g. "Shortlisted" / "Not Shortlisted". */
+  shortlistStatus?: string;
+  /** Whether the ATS scan has run, e.g. "Screening Completed" / "Pending". */
+  atsScanStatus?: string;
   confirmationStatus?: string;
   acknowledgedStatus?: string;
   reconfirmationStatus?: string;
@@ -61,4 +98,9 @@ export interface JobApplicationDTO {
   jobTitle?: string;
   companyName?: string;
   applicationDeadline?: string;
+  /** Optional referral captured at apply time (either may be null). */
+  referralId?: string | null;
+  referralName?: string | null;
+  /** Admin validation of the referral: PENDING | VALIDATED | REJECTED (or null). */
+  referralStatus?: string | null;
 }

@@ -1,3 +1,4 @@
+import { MIC_AUDIO_CONSTRAINTS } from '@/config/audio.config';
 import { useState, useRef, useCallback } from 'react';
 import { aiService } from '@/services/ai.service';
 import { APP_CONFIG } from '@/config/app.config';
@@ -35,7 +36,7 @@ export function useAudioChunking() {
 
   const start = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: MIC_AUDIO_CONSTRAINTS });
       streamRef.current = stream;
 
       const mimeType = APP_CONFIG.AUDIO_CHUNK_MIME_TYPE;

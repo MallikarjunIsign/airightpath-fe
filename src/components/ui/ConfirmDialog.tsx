@@ -13,6 +13,8 @@ interface ConfirmDialogProps {
   cancelText?: string;
   variant?: 'danger' | 'warning' | 'info' | 'success';
   isLoading?: boolean;
+  /** Blocks confirming until the dialog's own condition is met (e.g. a typed name). */
+  confirmDisabled?: boolean;
   icon?: ReactNode;
 }
 
@@ -26,6 +28,7 @@ export function ConfirmDialog({
   cancelText = 'Cancel',
   variant = 'danger',
   isLoading = false,
+  confirmDisabled = false,
   icon,
 }: ConfirmDialogProps) {
   const variantConfig = {
@@ -67,6 +70,7 @@ export function ConfirmDialog({
             variant={config.buttonVariant}
             onClick={onConfirm}
             isLoading={isLoading}
+            disabled={confirmDisabled}
           >
             {confirmText}
           </Button>

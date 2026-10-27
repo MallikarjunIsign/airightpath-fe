@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button';
 import { FileUpload } from '@/components/ui/FileUpload';
 import { useToast } from '@/components/ui/Toast';
 import { assessmentService } from '@/services/assessment.service';
+import { MESSAGES } from '@/config/messages';
 
 export function UploadQuestionPaperPage() {
   const { showToast } = useToast();
@@ -15,7 +16,7 @@ export function UploadQuestionPaperPage() {
 
   async function handleUpload() {
     if (files.length === 0) {
-      showToast('Please select a question paper file to upload', 'warning');
+      showToast(MESSAGES.admin.questionPaper.fileRequired, 'warning');
       return;
     }
 
@@ -26,7 +27,7 @@ export function UploadQuestionPaperPage() {
       formData.append('assessmentType', assessmentType);
 
       await assessmentService.upload(formData);
-      showToast('Question paper uploaded successfully!', 'success');
+      showToast(MESSAGES.admin.questionPaper.uploaded, 'success');
       setFiles([]);
     } catch {
       // Error toast auto-handled by interceptor

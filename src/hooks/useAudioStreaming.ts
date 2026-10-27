@@ -1,6 +1,8 @@
 import { useState, useRef, useCallback } from "react";
 import { APP_CONFIG } from "@/config/app.config";
+import { MIC_AUDIO_CONSTRAINTS, describeMicProcessing, micProcessingReport } from "@/config/audio.config";
 import { interviewWsService } from "@/services/interview-ws.service";
+import { getAccessToken } from "@/services/api.service";
 
 /**
  * Hook for streaming audio chunks to the backend for live transcription.
@@ -11,11 +13,49 @@ import { interviewWsService } from "@/services/interview-ws.service";
  * approach only puts headers in the first chunk, making subsequent
  * chunks undecodeable.
  */
-export function useAudioStreaming() {
+/**
+ * Level, on the same 0-100 scale as `audioLevel`, below which a chunk is
+ * treated as holding no speech.
+ *
+ * Was set at near-digital-silence, on the reasoning that dropping a chunk is
+ * unrecoverable while a hallucination is unlikely. In a real room it is the
+ * other way round: a fan, a keyboard, traffic through a window all clear
+ * digital silence easily, and Whisper does not return an empty string for
+ * them — it returns fluent invention, which lands in the transcript as
+ * something the candidate said and is then scored.
+ *
+ * Six is still well below speech. A candidate talking at any audible level
+ * clears it without trying; a quiet room with a fan in it does not. Tunable
+ * with VITE_TRANSCRIPTION_SILENCE_FLOOR, because what counts as background
+ * depends on the room and the microphone.
+ */
+/** Smallest blob worth sending; below this Whisper answers "audio too short". */
+const MIN_CHUNK_BYTES = 2000;
+
+const SILENCE_FLOOR =parseFloat(import.meta.env.VITE_TRANSCRIPTION_SILENCE_FLOOR ?? '') || 6;
+
+export function useAudioStreaming(scheduleId: number | null) {
   const [isRecording, setIsRecording] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  /**
+   * An audio source to record instead of this device's microphone.
+   *
+   * Set when the candidate chooses their paired phone. Held as a ref, not
+   * state, because it is read once at the moment recording starts and
+   * re-rendering the interview when it changes would buy nothing.
+   */
+  const externalSourceRef = useRef<MediaStream | null>(null);
+  /**
+   * Whether the stream being recorded is one this hook opened.
+   *
+   * It decides whether stopping may end the tracks. A phone's audio arrives
+   * over the same WebRTC connection as its video, so stopping its track would
+   * take the second camera down with it — and it would not come back for the
+   * next answer.
+   */
+  const ownsStreamRef = useRef(true);
   const chunkTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chunkIndexRef = useRef(0);
   const mimeTypeRef = useRef<string>("audio/webm");
@@ -25,16 +65,88 @@ export function useAudioStreaming() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
+  /**
+   * Loudest moment since the last chunk was sent.
+   *
+   * Whisper does not return an empty string for silence — it returns fluent
+   * invention, and "Thank you for joining us" reached a candidate's transcript
+   * that way. A chunk that never rose above the floor below held no speech, so
+   * it is dropped rather than transcribed.
+   */
+  const peakSinceChunkRef = useRef(0);
+  /**
+   * Whether the analyser has produced a single reading.
+   *
+   * The gate below has to fail open. An AudioContext can come back suspended,
+   * and level monitoring is best-effort inside a try/catch — in either case the
+   * analyser reports nothing, the peak stays zero, and gating on it alone would
+   * discard every chunk of every answer and leave the interview stuck on its
+   * first question with nothing said about why. Silence is only ever inferred
+   * from a measurement that actually happened.
+   */
+  const levelObservedRef = useRef(false);
 
   /** Send a complete audio blob to the backend via WebSocket. */
-  const sendChunk = useCallback((blob: Blob) => {
-    if (blob.size === 0 || !interviewWsService.connected) return;
+  const sendChunk = useCallback(
+    (blob: Blob) => {
+      if (blob.size === 0 || !interviewWsService.connected || !scheduleId)
+        return;
 
-    blob.arrayBuffer().then((buffer) => {
-      interviewWsService.sendBinary("audio-chunk", buffer);
-      chunkIndexRef.current++;
-    });
-  }, []);
+      // A webm/opus blob this small is a container header with no audio in it.
+      // Whisper rejects those with "audio too short" (400), so the backend
+      // logged an error and burned an API call for every one.
+      if (blob.size < MIN_CHUNK_BYTES) {
+        console.debug(`Skipping tiny audio chunk (${blob.size} bytes)`);
+        peakSinceChunkRef.current = 0;
+        return;
+      }
+
+      // Read and reset before the async work below, so the next chunk measures
+      // its own window rather than inheriting this one's peak.
+      const peak = peakSinceChunkRef.current;
+      peakSinceChunkRef.current = 0;
+      if (levelObservedRef.current && peak < SILENCE_FLOOR) {
+        console.debug(`Skipping silent audio chunk (peak ${peak} < ${SILENCE_FLOOR})`);
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = (reader.result as string).split(",")[1];
+        const destination = `/app/interview/${scheduleId}/audio-chunk`;
+
+        const token = getAccessToken();
+        const payload: {
+          audio: string;
+          chunkIndex: number;
+          token?: string;
+          accessToken?: string;
+        } = {
+          audio: base64,
+          chunkIndex: chunkIndexRef.current,
+        };
+
+        if (token) {
+          payload.token = token;
+          payload.accessToken = token;
+        }
+
+        console.log(
+          `Sending audio chunk ${chunkIndexRef.current}. Token present: ${!!token}`,
+        );
+
+        interviewWsService.send(
+          destination,
+          payload,
+          token ? { Authorization: `Bearer ${token}` } : {},
+        );
+
+        chunkIndexRef.current++;
+      };
+      reader.readAsDataURL(blob);
+    },
+    [scheduleId],
+  );
 
   /** Create a new MediaRecorder on the given stream and start it. */
   const createRecorder = useCallback(
@@ -97,6 +209,10 @@ export function useAudioStreaming() {
         const avg = sum / dataArray.length;
         const normalized = Math.min(100, Math.round((avg / 255) * 100 * 2)); // boost sensitivity
         setAudioLevel(normalized);
+        levelObservedRef.current = true;
+        if (normalized > peakSinceChunkRef.current) {
+          peakSinceChunkRef.current = normalized;
+        }
         animFrameRef.current = requestAnimationFrame(updateLevel);
       };
 
@@ -126,13 +242,32 @@ export function useAudioStreaming() {
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      // The phone's audio, if the candidate chose it and it is still live. A
+      // track that has ended — they closed the phone page, or the pairing
+      // dropped — is not an input any more, and recording it would produce
+      // silence that the candidate has no way to notice until their answer
+      // comes back empty. Falling back to the device microphone is the quiet,
+      // correct thing to do.
+      const external = externalSourceRef.current;
+      const externalTrack = external?.getAudioTracks().find((t) => t.readyState === "live");
+
+      let stream: MediaStream;
+      if (externalTrack) {
+        stream = new MediaStream([externalTrack]);
+        ownsStreamRef.current = false;
+      } else {
+        if (external) {
+          console.warn("Paired phone has no live audio track; using this device's microphone");
+        }
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: MIC_AUDIO_CONSTRAINTS,
+        });
+        ownsStreamRef.current = true;
+        // What the browser really did to this microphone, for whoever is asked why
+        // an answer was noisy. Asking is not the same as receiving.
+        console.info(describeMicProcessing(micProcessingReport(stream)));
+      }
+
       streamRef.current = stream;
       isStoppingRef.current = false;
 
@@ -193,7 +328,12 @@ export function useAudioStreaming() {
       }
 
       function cleanup() {
-        streamRef.current?.getTracks().forEach((t) => t.stop());
+        // Only tracks this hook opened. The phone's audio track belongs to the
+        // WebRTC connection that also carries its camera — stopping it here
+        // would kill the second camera feed at the end of the first answer.
+        if (ownsStreamRef.current) {
+          streamRef.current?.getTracks().forEach((t) => t.stop());
+        }
         streamRef.current = null;
         mediaRecorderRef.current = null;
         setIsRecording(false);
@@ -205,5 +345,23 @@ export function useAudioStreaming() {
 
   const getAudioStream = useCallback(() => streamRef.current, []);
 
-  return { isRecording, audioLevel, startRecording, stopRecording, getAudioStream };
+  /**
+   * Choose where the next answer is recorded from.
+   *
+   * Takes effect on the next {@link startRecording}, not mid-answer: swapping
+   * the source under a running MediaRecorder would cut the chunk in flight, and
+   * the words in it are not recoverable.
+   */
+  const setExternalAudioSource = useCallback((stream: MediaStream | null) => {
+    externalSourceRef.current = stream;
+  }, []);
+
+  return {
+    isRecording,
+    audioLevel,
+    startRecording,
+    stopRecording,
+    getAudioStream,
+    setExternalAudioSource,
+  };
 }

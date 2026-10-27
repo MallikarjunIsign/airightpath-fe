@@ -1,98 +1,204 @@
-import { Client, IMessage, StompSubscription } from "@stomp/stompjs";
+import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
-import { ENV } from "@/config/env";
-import { APP_CONFIG } from "@/config/app.config";
-import { getAccessToken } from "@/services/api.service";
+import { getAccessToken, refreshAccessToken } from "./api.service";
+import { isJwtExpired } from "@/utils/jwt.utils";
 
-type MessageHandler = (body: any) => void;
+/**
+ * Where SockJS should dial for the interview socket.
+ *
+ * The STOMP endpoint `/ws` is registered on the main application server, so this
+ * is always the same origin as the REST API — never a different port. That is
+ * why the fallback derives from `VITE_API_BASE_URL` rather than guessing a port
+ * number: the previous version hardcoded 8082, which is the stage port, so a dev
+ * machine dialled a port with nothing behind it and every interview opened on
+ * "Connection lost. Reconnecting..." with no first question.
+ */
+const getWsBaseUrl = () => {
+  // SockJS speaks http/https; ws/wss is the raw-WebSocket spelling and it
+  // rejects those outright.
+  const toHttp = (value: string) =>
+    value.trim().replace(/^ws:/, "http:").replace(/^wss:/, "https:").replace(/\/+$/, "");
 
-class InterviewWebSocketService {
+  const explicit = import.meta.env.VITE_WS_BASE_URL;
+  if (explicit) {
+    return toHttp(explicit);
+  }
+
+  // Same server as the API, by construction.
+  const apiBase = import.meta.env.VITE_API_BASE_URL;
+  if (apiBase) {
+    return toHttp(apiBase);
+  }
+
+  // Served from the backend itself (production build behind one origin).
+  return `${window.location.protocol}//${window.location.host}`;
+};
+
+const WS_BASE_URL = getWsBaseUrl();
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type SubscriptionCallback = (message: any) => void;
+
+class InterviewWsService {
   private client: Client | null = null;
-  private subscriptions: Map<string, StompSubscription> = new Map();
-  private subscriptionHandlers: Map<string, MessageHandler> = new Map();
-  private scheduleId: number | null = null;
-  private reconnectAttempts = 0;
-  private onConnectedCallback: (() => void) | null = null;
-  private onDisconnectedCallback: (() => void) | null = null;
-  private isConnecting = false;
-  private lastError: string | null = null;
-  private onErrorCallback: ((err: string) => void) | null = null;
-  // queue for small messages when socket is temporarily disconnected
-  private pendingSends: Array<{ destination: string; body: any }> = [];
-  private readonly MAX_PENDING_SENDS = 200;
+  private subscriptions: Map<
+    string,
+    { unsubscribe: () => void; callback: SubscriptionCallback }
+  > = new Map();
+  /** Milliseconds stompjs waits before each retry. 0 would disable retrying. */
+  private reconnectDelay = 2000;
+  private errorCallback: ((error: string) => void) | null = null;
+  /**
+   * How many times the socket has dropped since it was last up.
+   *
+   * stompjs owns the retry loop itself (see {@link reconnectDelay}); this only
+   * counts the drops so the candidate's banner can say something true. It used
+   * to be reset on connect and never incremented anywhere, so the banner always
+   * read "attempt 0" however long the socket had been down.
+   */
+  public currentReconnectAttempts = 0;
+  /**
+   * Who we are connected as — scheduleId, email, mobileToken.
+   *
+   * Deliberately excludes the JWT. It used to be part of this string, so a
+   * token refresh looked like a different connection and tore down a perfectly
+   * healthy socket.
+   */
+  private currentParams: string = "";
+  /** The non-credential half of the query, kept so each attempt can re-sign. */
+  private connectionParams: URLSearchParams = new URLSearchParams();
+  /**
+   * A token handed in by the caller, used until it expires.
+   *
+   * Cleared on expiry so later attempts fall back to the app's current token
+   * rather than pinning a stale one for the life of the connection.
+   */
+  private explicitToken: string | undefined;
 
-  connect(
-    scheduleId: number,
-    onConnected?: () => void,
-    onDisconnected?: () => void,
-  ): void {
-    if (this.isConnecting || this.client?.connected) return;
+  /** Pass null on teardown, so a dead component stops receiving socket errors. */
+  /**
+   * This connection's URL, signed with the token available right now.
+   *
+   * SockJS keeps the query string when it appends its transport path, so
+   * `/ws?token=…` becomes `/ws/{server}/{session}/websocket?token=…` and the
+   * credential survives to the handshake.
+   */
+  private buildUrl(): string {
+    const params = new URLSearchParams(this.connectionParams);
 
-    this.scheduleId = scheduleId;
-    this.onConnectedCallback = onConnected || null;
-    this.onDisconnectedCallback = onDisconnected || null;
-    this.isConnecting = true;
+    const jwt =
+      this.explicitToken || getAccessToken() || localStorage.getItem("accessToken");
+    if (jwt) {
+      // Four spellings because the server has read different ones over time;
+      // the interceptor looks for `token`.
+      for (const key of ["token", "accessToken", "jwt", "access_token"]) {
+        params.append(key, jwt);
+      }
+    }
 
-    const token = getAccessToken();
-    const wsUrl = token
-      ? `${ENV.API_BASE_URL}/ws?token=${encodeURIComponent(token)}`
-      : `${ENV.API_BASE_URL}/ws`;
+    const query = params.toString();
+    return `${WS_BASE_URL}/ws${query ? `?${query}` : ""}`;
+  }
 
-    console.info("WS connect attempt to:", wsUrl, "tokenPresent:", !!token);
+  setErrorCallback(cb: ((error: string) => void) | null) {
+    this.errorCallback = cb;
+  }
+
+  connect(options: {
+    scheduleId?: number;
+    token?: string;
+    email?: string;
+    mobileToken?: string;
+    onConnect?: () => void;
+    onDisconnect?: () => void;
+    /** Called on each drop, so the UI can hold the count in state. */
+    onReconnectAttempt?: (attempt: number) => void;
+  }) {
+    const { scheduleId, token, email, mobileToken, onConnect, onDisconnect, onReconnectAttempt } =
+      options;
+
+    const params = new URLSearchParams();
+    if (scheduleId) params.append("scheduleId", scheduleId.toString());
+    if (email) params.append("email", email);
+    if (mobileToken) params.append("mobileToken", mobileToken);
+
+    const paramsStr = params.toString();
+
+    if (
+      this.client &&
+      this.client.connected &&
+      this.currentParams === paramsStr
+    ) {
+      if (onConnect) onConnect();
+      return;
+    }
+
+    if (this.client) {
+      this.disconnect();
+    }
+
+    this.currentParams = paramsStr;
+    this.connectionParams = params;
+    this.currentReconnectAttempts = 0;
+    this.explicitToken = token;
+    console.log("Connecting to WebSocket. ScheduleId:", scheduleId);
 
     this.client = new Client({
-      debug: (msg: string) => {
-        if (import.meta.env.DEV) console.debug("STOMP:", msg);
-      },
-      // SockJS client for proper protocol compatibility with Spring's SockJS endpoint
-      webSocketFactory: () => new SockJS(wsUrl) as any,
-      reconnectDelay: APP_CONFIG.WS_RECONNECT_BASE_DELAY_MS,
-      heartbeatIncoming: 10000,
-      heartbeatOutgoing: 10000,
-      onWebSocketError: (event) => {
-        const msg = `websocket-error:${(event as any)?.message ?? "unknown"}`;
-        console.error("WebSocket error", event);
-        this.lastError = msg;
-        this.onErrorCallback?.(msg);
-      },
-
+      // Built per attempt, not once. The handshake is authenticated by a JWT in
+      // the query string, and access tokens live 10 minutes while an interview
+      // runs for an hour — so a URL captured at connect time carries a
+      // credential that expires mid-session. Every stompjs retry then replayed
+      // the same dead token, the handshake answered 401, and the candidate sat
+      // under "Connection lost. Reconnecting..." that could never succeed.
+      webSocketFactory: () => new SockJS(this.buildUrl()),
+      // Left empty on purpose: the browser cannot set headers on a WebSocket
+      // upgrade, so these never reached the server. The query string above is
+      // what the handshake interceptor actually reads.
+      connectHeaders: {},
+      reconnectDelay: this.reconnectDelay,
+      heartbeatIncoming: 4000,
+      heartbeatOutgoing: 4000,
       onConnect: () => {
-        console.info("WebSocket connected");
-        this.reconnectAttempts = 0;
-        this.isConnecting = false;
-        this.lastError = null;
-        this.resubscribeAll();
-        this.flushPendingSends();
-        this.onConnectedCallback?.();
+        console.log("STOMP connected successfully");
+        this.currentReconnectAttempts = 0;
+        if (onConnect) onConnect();
       },
-
-      onStompError: (frame) => {
-        const msg = frame?.headers?.["message"] ?? "STOMP error";
-        console.error("STOMP error:", msg, frame);
-        this.lastError = msg;
-        this.onErrorCallback?.(msg);
-        this.isConnecting = false;
-      },
-
       onDisconnect: () => {
-        console.warn("WebSocket disconnected");
-        this.lastError = "disconnected";
-        this.onErrorCallback?.(this.lastError);
-        this.isConnecting = false;
-        this.onDisconnectedCallback?.();
+        console.log("STOMP disconnected");
+        if (onDisconnect) onDisconnect();
       },
+      onWebSocketClose: () => {
+        // stompjs retries on its own; this is the only hook that fires per drop,
+        // so it is where the count has to come from.
+        this.currentReconnectAttempts += 1;
+        console.warn("WebSocket closed; retry", this.currentReconnectAttempts);
+        if (onReconnectAttempt) onReconnectAttempt(this.currentReconnectAttempts);
 
-      onWebSocketClose: (event) => {
-        const code = event?.code ?? 0;
-        const reason = event?.reason ?? "";
-        console.warn("WebSocket closed", code, reason);
-        this.lastError = `closed:${code}:${reason}`;
-        this.onErrorCallback?.(this.lastError);
-        this.isConnecting = false;
-        this.reconnectAttempts++;
+        // An expired access token is the one cause retrying cannot fix on its
+        // own, so spend the refresh cookie now and let the next attempt — two
+        // seconds later — sign itself with the new token. refreshAccessToken
+        // de-duplicates concurrent callers and no-ops while the token is still
+        // valid, so this is safe to call on every drop.
+        const current = this.explicitToken || getAccessToken();
+        if (!current || isJwtExpired(current)) {
+          this.explicitToken = undefined;
+          refreshAccessToken().catch((err) => {
+            console.error("Could not refresh the access token for the socket", err);
+          });
+        }
 
-        if (this.reconnectAttempts >= APP_CONFIG.WS_RECONNECT_MAX_ATTEMPTS) {
-          this.onDisconnectedCallback?.();
+        if (onDisconnect) onDisconnect();
+      },
+      onStompError: (frame) => {
+        console.error("STOMP error", frame);
+        if (this.errorCallback) {
+          this.errorCallback(frame.headers["message"] || "STOMP error");
+        }
+      },
+      onWebSocketError: (event) => {
+        console.error("WebSocket error", event);
+        if (this.errorCallback) {
+          this.errorCallback("WebSocket connection error");
         }
       },
     });
@@ -100,154 +206,77 @@ class InterviewWebSocketService {
     this.client.activate();
   }
 
-  disconnect(): void {
-    this.subscriptions.forEach((sub) => sub.unsubscribe());
+  // Legacy method for backward compatibility (optional)
+  connectLegacy(
+    scheduleId: number,
+    onConnect?: () => void,
+    onDisconnect?: () => void,
+  ) {
+    this.connect({ scheduleId, onConnect, onDisconnect });
+  }
+
+  disconnect() {
+    if (this.client) {
+      this.client.deactivate();
+      this.client = null;
+    }
     this.subscriptions.clear();
-    this.subscriptionHandlers.clear();
-    this.client?.deactivate();
-    this.client = null;
-    this.scheduleId = null;
-    this.reconnectAttempts = 0;
-    this.isConnecting = false;
   }
 
-  subscribe(topic: string, handler: MessageHandler): void {
-    // Always store the handler for resubscription on reconnect
-    this.subscriptionHandlers.set(topic, handler);
-
-    if (!this.client?.connected || this.scheduleId === null) {
-      console.warn(
-        "Cannot subscribe: not connected (handler stored for reconnect)",
-      );
+  send(destination: string, body: unknown, headers: Record<string, string> = {}) {
+    if (!this.client || !this.client.connected) {
+      console.error("WebSocket not connected");
       return;
     }
-
-    this.subscribeInternal(topic, handler);
-  }
-
-  private flushPendingSends(): void {
-    if (!this.client?.connected || this.scheduleId === null) return;
-    while (this.pendingSends.length > 0) {
-      const m = this.pendingSends.shift()!;
-      try {
-        this.client.publish({
-          destination: `/app/interview/${this.scheduleId}/${m.destination}`,
-          body: JSON.stringify(m.body),
-        });
-      } catch (e) {
-        console.warn("Failed to flush pending message", e);
-        // push back and stop flushing to avoid tight loop
-        this.pendingSends.unshift(m);
-        break;
-      }
-    }
-  }
-
-  private subscribeInternal(topic: string, handler: MessageHandler): void {
-    if (!this.client?.connected || this.scheduleId === null) return;
-
-    const destination = `/topic/interview/${this.scheduleId}/${topic}`;
-
-    if (this.subscriptions.has(destination)) {
-      this.subscriptions.get(destination)!.unsubscribe();
-    }
-
-    const subscription = this.client.subscribe(
+    this.client.publish({
       destination,
-      (message: IMessage) => {
-        try {
-          const body = JSON.parse(message.body);
-          handler(body);
-        } catch {
-          handler(message.body);
-        }
-      },
-    );
-
-    this.subscriptions.set(destination, subscription);
-  }
-
-  private resubscribeAll(): void {
-    if (!this.client?.connected || this.scheduleId === null) return;
-
-    this.subscriptionHandlers.forEach((handler, topic) => {
-      this.subscribeInternal(topic, handler);
+      body: JSON.stringify(body),
+      headers,
     });
   }
 
-  send(destination: string, body: any): void {
-    if (!this.client?.connected || this.scheduleId === null) {
-      // Queue small messages (proctoring, interrupts, metadata). Drop if queue too large.
-      if (this.pendingSends.length >= this.MAX_PENDING_SENDS) {
-        // drop oldest
-        this.pendingSends.shift();
-        console.warn("Pending send queue full; dropping oldest message");
+  subscribe(destination: string, callback: SubscriptionCallback) {
+    if (!this.client || !this.client.connected) {
+      console.error("WebSocket not connected, cannot subscribe");
+      return;
+    }
+    const subscription = this.client.subscribe(destination, (message) => {
+      try {
+        const parsed = JSON.parse(message.body);
+        callback(parsed);
+      } catch {
+        callback(message.body);
       }
-      this.pendingSends.push({ destination, body });
-      console.info("WS not connected — queued message for", destination);
-      return;
-    }
-
-    const jsonBody = JSON.stringify(body);
-    const sizeKB = jsonBody.length / 1024;
-    if (sizeKB > 100) {
-      console.warn(
-        `Large message being sent to ${destination}: ${sizeKB.toFixed(2)} KB`,
-      );
-    }
-
-    this.client.publish({
-      destination: `/app/interview/${this.scheduleId}/${destination}`,
-      body: jsonBody,
+    });
+    this.subscriptions.set(destination, {
+      unsubscribe: () => subscription.unsubscribe(),
+      callback,
     });
   }
 
-  sendBinary(destination: string, data: ArrayBuffer): void {
-    if (!this.client?.connected || this.scheduleId === null) {
-      console.warn("Cannot send binary: not connected — dropping audio chunk");
+  unsubscribe(destination: string) {
+    const sub = this.subscriptions.get(destination);
+    if (sub) {
+      sub.unsubscribe();
+      this.subscriptions.delete(destination);
+    }
+  }
+
+  get connected() {
+    return this.client !== null && this.client.connected;
+  }
+
+  sendBinary(destination: string, buffer: ArrayBuffer) {
+    if (!this.client || !this.client.connected) {
+      console.error("WebSocket not connected");
       return;
     }
-
-    const bytes = new Uint8Array(data);
-
-    // Guard: drop chunks larger than 512 KB to avoid hitting server buffer limits
-    if (bytes.length > 512 * 1024) {
-      console.warn(`Audio chunk too large (${(bytes.length / 1024).toFixed(0)} KB) — dropping`);
-      return;
-    }
-
-    // SockJS only supports text frames — encode binary as base64 JSON
-    let binary = "";
-    const chunkSize = 8192;
-    for (let i = 0; i < bytes.length; i += chunkSize) {
-      const chunk = bytes.subarray(i, i + chunkSize);
-      binary += String.fromCharCode.apply(null, Array.from(chunk));
-    }
-    const base64 = btoa(binary);
-
+    // STOMP allows sending binary data as the body
     this.client.publish({
-      destination: `/app/interview/${this.scheduleId}/${destination}`,
-      body: JSON.stringify({ audio: base64 }),
+      destination,
+      binaryBody: new Uint8Array(buffer),
     });
-  }
-
-  get connected(): boolean {
-    return this.client?.connected ?? false;
-  }
-
-  get currentReconnectAttempts(): number {
-    return this.reconnectAttempts;
-  }
-
-  // Error callback registration — caller can display errors or metrics
-  setErrorCallback(cb: ((err: string) => void) | null): void {
-    this.onErrorCallback = cb;
-  }
-
-  // Expose last error string for ad-hoc checks
-  get lastErrorString(): string | null {
-    return this.lastError;
   }
 }
 
-export const interviewWsService = new InterviewWebSocketService();
+export const interviewWsService = new InterviewWsService();

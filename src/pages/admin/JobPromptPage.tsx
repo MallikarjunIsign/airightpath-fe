@@ -1,16 +1,32 @@
+import { ReusePromptDialog } from '@/components/admin/ReusePromptDialog';
 import { useState, useEffect, useCallback } from 'react';
-import { Loader2, Sparkles, Save, Plus, X, BarChart3, Info, Copy, Check } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
+import { Loader2, Sparkles, Save, Plus, X, BarChart3, Info, Copy, Check, ArrowLeft, Search, Briefcase } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Textarea } from '@/components/ui/Textarea';
+import { Badge } from '@/components/ui/Badge';
 import { useToast } from '@/components/ui/Toast';
-import api from '@/services/api.service';
-import { ENDPOINTS } from '@/config/api.endpoints';
+import { BackLink } from '@/components/ui/BackLink';
 import { jobService } from '@/services/job.service';
+import { promptService } from '@/services/prompt.service';
+import { extractApiError } from '@/services/api.service';
+import { MESSAGES } from '@/config/messages';
 import type { JobPostDTO } from '@/types/job.types';
 import type { EvaluationCategory } from '@/types/interview.types';
+import { InterviewRoundSettingsPanel } from '@/components/admin/InterviewRoundSettingsPanel';
+
+function promptTypeLabels(prompts: { promptType: string }[]): string[] {
+  const labels = new Set<string>();
+  prompts.forEach((p) => {
+    if (p.promptType === 'APTITUDE') labels.add('Aptitude');
+    else if (p.promptType === 'CODING') labels.add('Coding');
+    else if (p.promptType === 'INTERVIEW') labels.add('Interview');
+  });
+  return Array.from(labels);
+}
 
 const DEFAULT_CATEGORIES: Omit<EvaluationCategory, 'jobPrefix'>[] = [
   { categoryName: 'Technical Skills', weight: 30, description: 'Core technical knowledge and expertise' },
@@ -28,6 +44,14 @@ interface PromptTab {
   description: string;
   placeholders: string[];
 }
+
+/**
+ * Ceiling for every prompt textarea on this page.
+ *
+ * Raised from 10,000: the generated coding prompt alone reached the old limit
+ * and the editor stopped accepting keystrokes mid-sentence.
+ */
+const MAX_PROMPT_LENGTH = 15000;
 
 const JOB_PLACEHOLDERS = ['{{skills}}', '{{jobTitle}}', '{{experience}}', '{{education}}', '{{jobDescription}}', '{{companyName}}', '{{location}}', '{{role}}', '{{department}}', '{{jobPrefix}}'];
 
@@ -49,21 +73,53 @@ const PROMPT_TABS: PromptTab[] = [
     placeholders: [],
   },
   {
+    key: 'interview-l2-start',
+    label: 'L2 Technical',
+    promptType: 'INTERVIEW_L2_TECHNICAL',
+    promptStage: 'START',
+    description:
+      'System prompt for the L2 technical interview. Sent at the start of the round. Left empty, the round falls back to the shared Interview prompt below.',
+    placeholders: [...JOB_PLACEHOLDERS, '{{email}}', '{{interviewerName}}', '{{categories}}'],
+  },
+  {
+    key: 'interview-l3-start',
+    label: 'L3 Behavioural',
+    promptType: 'INTERVIEW_L3_BEHAVIORAL',
+    promptStage: 'START',
+    description:
+      'System prompt for the L3 behavioural round — the one usually called the HR interview. Left empty, it falls back to the shared Interview prompt below.',
+    placeholders: [...JOB_PLACEHOLDERS, '{{email}}', '{{interviewerName}}', '{{categories}}'],
+  },
+  {
+    // Kept for jobs configured before rounds existed: both rounds fall back to
+    // this when they have no prompt of their own, so removing the tab would
+    // hide the prompt those jobs are actually interviewing with.
     key: 'interview-start',
-    label: 'Interview',
+    label: 'Interview (shared)',
     promptType: 'INTERVIEW',
     promptStage: 'START',
-    description: 'System prompt that guides the AI interviewer. This is sent at the start of every interview.',
+    description:
+      'Fallback system prompt, used by any round with no prompt of its own. Jobs set up before rounds existed use only this.',
     placeholders: [...JOB_PLACEHOLDERS, '{{email}}', '{{interviewerName}}', '{{categories}}'],
   },
 ];
 
 export function JobPromptPage() {
   const { showToast } = useToast();
+  const location = useLocation();
 
   const [jobs, setJobs] = useState<JobPostDTO[]>([]);
   const [selectedPrefix, setSelectedPrefix] = useState('');
   const [loadingJobs, setLoadingJobs] = useState(true);
+
+  // 'list' = browse existing prompts (default), 'edit' = configure a job's prompt
+  const [mode, setMode] = useState<'list' | 'edit'>('list');
+  const [listSearch, setListSearch] = useState('');
+  const [reuseFrom, setReuseFrom] = useState('');
+  const [reuseDialog, setReuseDialog] = useState(false);
+  // Which prompt types each job already has (built by scanning all jobs).
+  const [promptsByJob, setPromptsByJob] = useState<Record<string, string[]>>({});
+  const [scanning, setScanning] = useState(true);
 
   // Prompt tabs state
   const [activeTab, setActiveTab] = useState(PROMPT_TABS[0].key);
@@ -99,6 +155,15 @@ export function JobPromptPage() {
     fetchJobs();
   }, []);
 
+  // Open directly in edit mode for a job when navigated here (e.g. from Assign).
+  useEffect(() => {
+    const navState = location.state as { jobPrefix?: string } | null;
+    if (navState?.jobPrefix) {
+      openEditor(navState.jobPrefix);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (selectedPrefix) {
       fetchPrompts();
@@ -110,6 +175,38 @@ export function JobPromptPage() {
       setExistingPromptKeys(new Set());
     }
   }, [selectedPrefix]);
+
+  // Scan every job to find which already have prompts (for the reuse list).
+  useEffect(() => {
+    if (jobs.length === 0) {
+      setScanning(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setScanning(true);
+      const entries = await Promise.all(
+        jobs.map(async (job) => {
+          try {
+            const res = await promptService.getByJob(job.jobPrefix, { silent: true });
+            return [job.jobPrefix, promptTypeLabels(res.data ?? [])] as const;
+          } catch {
+            return [job.jobPrefix, [] as string[]] as const;
+          }
+        })
+      );
+      if (cancelled) return;
+      const map: Record<string, string[]> = {};
+      entries.forEach(([prefix, labels]) => {
+        map[prefix] = labels;
+      });
+      setPromptsByJob(map);
+      setScanning(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [jobs]);
 
   async function fetchJobs() {
     setLoadingJobs(true);
@@ -127,9 +224,7 @@ export function JobPromptPage() {
     if (!selectedPrefix) return;
     setLoadingPrompt(true);
     try {
-      const res = await api.get<{ id: number; jobPrefix: string; promptType: string; promptStage: string; prompt: string }[]>(
-        ENDPOINTS.PROMPTS.GET_BY_JOB(selectedPrefix)
-      );
+      const res = await promptService.getByJob(selectedPrefix);
       const prompts = res.data ?? [];
       const contents: Record<string, string> = {};
       for (const tab of PROMPT_TABS) {
@@ -162,9 +257,7 @@ export function JobPromptPage() {
     if (!selectedPrefix) return;
     setLoadingCategories(true);
     try {
-      const res = await api.get<EvaluationCategory[]>(
-        ENDPOINTS.PROMPTS.GET_EVALUATION_CATEGORIES(selectedPrefix)
-      );
+      const res = await promptService.getEvaluationCategories(selectedPrefix);
       const data = res.data ?? [];
       if (data.length > 0) {
         setCategories(data.map(({ categoryName, weight, description, id }) => ({
@@ -183,9 +276,71 @@ export function JobPromptPage() {
     }
   }
 
+  function openEditor(prefix: string) {
+    setReuseFrom('');
+    setSelectedPrefix(prefix);
+    setActiveTab(PROMPT_TABS[0].key);
+    setMode('edit');
+  }
+
+  function openCreate() {
+    openEditor('');
+  }
+
+  function backToList() {
+    setSelectedPrefix('');
+    setReuseFrom('');
+    setMode('list');
+    // Refresh which jobs have prompts so newly-saved ones show up.
+    setJobs((prev) => [...prev]);
+  }
+
+  // Copy an existing job's prompts/categories into the current editor so they
+  // can be reused for the selected job. The target job stays selectedPrefix.
+  async function handleReuseFrom(sourcePrefix: string) {
+    setReuseFrom(sourcePrefix);
+    if (!sourcePrefix) return;
+    setLoadingPrompt(true);
+    try {
+      const res = await promptService.getByJob(sourcePrefix, { silent: true });
+      const prompts = res.data ?? [];
+      const contents: Record<string, string> = {};
+      for (const tab of PROMPT_TABS) {
+        const match = prompts.find(
+          (p) => p.promptType === tab.promptType && (p.promptStage ?? null) === tab.promptStage
+        );
+        contents[tab.key] = match?.prompt ?? '';
+      }
+      setPromptContents(contents);
+
+      const summaryMatch = prompts.find((p) => p.promptType === 'INTERVIEW' && p.promptStage === 'SUMMARY');
+      setEvaluationInstructions(summaryMatch?.prompt ?? '');
+
+      try {
+        const catRes = await promptService.getEvaluationCategories(sourcePrefix, undefined, { silent: true });
+        const cats = catRes.data ?? [];
+        if (cats.length > 0) {
+          setCategories(cats.map(({ categoryName, weight, description }) => ({ categoryName, weight, description })));
+        }
+      } catch {
+        // keep existing categories
+      }
+
+      const source = jobs.find((j) => j.jobPrefix === sourcePrefix);
+      showToast(
+        MESSAGES.admin.prompts.reuseCopied(source ? source.jobTitle : sourcePrefix),
+        'info'
+      );
+    } catch {
+      showToast(MESSAGES.admin.prompts.loadReuseFailed, 'error');
+    } finally {
+      setLoadingPrompt(false);
+    }
+  }
+
   async function handleSave() {
     if (!selectedPrefix) {
-      showToast('Please select a job', 'warning');
+      showToast(MESSAGES.admin.common.selectJob, 'warning');
       return;
     }
 
@@ -194,22 +349,36 @@ export function JobPromptPage() {
 
     const content = promptContents[activeTab] ?? '';
     if (!content.trim()) {
-      showToast('Prompt content cannot be empty', 'warning');
+      showToast(MESSAGES.admin.prompts.contentEmpty, 'warning');
       return;
     }
 
     setSaving(true);
     try {
-      await api.post(ENDPOINTS.PROMPTS.SAVE, {
-        jobPrefix: selectedPrefix,
-        promptType: tab.promptType,
-        promptStage: tab.promptStage,
-        prompt: content,
-      });
-      showToast(`${tab.label} prompt saved successfully!`, 'success');
+      // Silent: the interceptor's generic toast cannot say which prompt failed,
+      // and on this page that is the only thing the admin needs to know.
+      await promptService.save(
+        {
+          jobPrefix: selectedPrefix,
+          promptType: tab.promptType,
+          promptStage: tab.promptStage,
+          prompt: content,
+        },
+        { silent: true },
+      );
+      showToast(MESSAGES.admin.prompts.promptSaved(tab.label), 'success');
       setExistingPromptKeys((prev) => new Set([...prev, activeTab]));
-    } catch {
-      // Error toast auto-handled by interceptor
+    } catch (err) {
+      // Pass the server's reason through when it has one — "prompt too long" or
+      // "job not found" are actionable in a way "please try again" is not.
+      const { code, message } = extractApiError(err);
+      const hasReason = message && !code.startsWith('HTTP_');
+      showToast(
+        hasReason
+          ? MESSAGES.admin.prompts.promptSaveFailedReason(tab.label, message)
+          : MESSAGES.admin.prompts.promptSaveFailed(tab.label),
+        'error',
+      );
     } finally {
       setSaving(false);
     }
@@ -217,48 +386,48 @@ export function JobPromptPage() {
 
   async function handleSaveInterview() {
     if (!selectedPrefix) {
-      showToast('Please select a job', 'warning');
+      showToast(MESSAGES.admin.common.selectJob, 'warning');
       return;
     }
 
     const startPrompt = promptContents['interview-start'] ?? '';
     if (!startPrompt.trim()) {
-      showToast('Interview prompt cannot be empty', 'warning');
+      showToast(MESSAGES.admin.prompts.interviewPromptEmpty, 'warning');
       return;
     }
 
     if (!evaluationInstructions.trim()) {
-      showToast('Evaluation prompt cannot be empty', 'warning');
+      showToast(MESSAGES.admin.prompts.evaluationPromptEmpty, 'warning');
       return;
     }
 
     const catTotal = categories.reduce((sum, c) => sum + c.weight, 0);
     if (catTotal !== 100) {
-      showToast(`Category weights must total 100% (currently ${catTotal}%)`, 'warning');
+      showToast(MESSAGES.admin.prompts.weightsMustTotal(catTotal), 'warning');
       return;
     }
 
     if (categories.some((c) => !c.categoryName.trim())) {
-      showToast('All categories must have a name', 'warning');
+      showToast(MESSAGES.admin.prompts.categoryNameRequired, 'warning');
       return;
     }
 
     setSavingInterview(true);
     try {
       const results = await Promise.allSettled([
-        api.post(ENDPOINTS.PROMPTS.SAVE, {
+        promptService.save({
           jobPrefix: selectedPrefix,
           promptType: 'INTERVIEW',
           promptStage: 'START',
           prompt: startPrompt,
         }),
-        api.post(ENDPOINTS.PROMPTS.SAVE, {
+        promptService.save({
           jobPrefix: selectedPrefix,
           promptType: 'INTERVIEW',
           promptStage: 'SUMMARY',
           prompt: evaluationInstructions,
         }),
-        api.post(ENDPOINTS.PROMPTS.SAVE_EVALUATION_CATEGORIES, {
+        promptService.saveEvaluationCategories({
           jobPrefix: selectedPrefix,
           categories: categories.map((c) => ({
             ...c,
@@ -273,16 +442,16 @@ export function JobPromptPage() {
         .filter(Boolean);
 
       if (failed.length === 0) {
-        showToast('Interview prompt saved successfully!', 'success');
+        showToast(MESSAGES.admin.prompts.interviewSaved, 'success');
         setExistingPromptKeys((prev) => new Set([...prev, 'interview-start']));
       } else if (failed.length === labels.length) {
-        showToast('Failed to save interview prompt. Please try again.', 'error');
+        showToast(MESSAGES.admin.prompts.interviewSaveFailed, 'error');
       } else {
-        showToast(`Partially saved. Failed: ${failed.join(', ')}`, 'warning');
+        showToast(MESSAGES.admin.prompts.partiallySaved(failed.join(', ')), 'warning');
         setExistingPromptKeys((prev) => new Set([...prev, 'interview-start']));
       }
     } catch {
-      showToast('An unexpected error occurred. Please try again.', 'error');
+      showToast(MESSAGES.admin.prompts.unexpectedError, 'error');
     } finally {
       setSavingInterview(false);
     }
@@ -310,6 +479,26 @@ export function JobPromptPage() {
     ...jobs.map((j) => ({ value: j.jobPrefix, label: `${j.jobTitle} (${j.jobPrefix})` })),
   ];
 
+  // Jobs that already have at least one prompt configured (for the list + reuse).
+  const jobsWithPrompts = jobs.filter((j) => (promptsByJob[j.jobPrefix]?.length ?? 0) > 0);
+
+  const listSearchLower = listSearch.toLowerCase();
+  const filteredPromptJobs = jobsWithPrompts.filter(
+    (j) =>
+      !listSearch ||
+      j.jobTitle.toLowerCase().includes(listSearchLower) ||
+      j.jobPrefix.toLowerCase().includes(listSearchLower) ||
+      (j.jobType ?? '').toLowerCase().includes(listSearchLower)
+  );
+
+  // Reuse source options: jobs with prompts, excluding the one being edited.
+  const reuseOptions = [
+    { value: '', label: 'Reuse prompts from…' },
+    ...jobsWithPrompts
+      .filter((j) => j.jobPrefix !== selectedPrefix)
+      .map((j) => ({ value: j.jobPrefix, label: `${j.jobTitle} (${j.jobType || j.jobPrefix})` })),
+  ];
+
   if (loadingJobs) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -319,14 +508,98 @@ export function JobPromptPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-[var(--text)]">Job Prompt</h1>
-        <p className="text-[var(--textSecondary)] mt-1">
-          Configure AI prompts and evaluation categories for each job
-        </p>
+    <div className={`mx-auto space-y-6 ${mode === 'list' ? 'max-w-5xl' : 'max-w-3xl'}`}>
+      {/* Shown only when another screen sent us here */}
+      <BackLink />
+
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-[var(--text)]">Job Prompt</h1>
+          <p className="text-[var(--textSecondary)] mt-1">
+            {mode === 'list'
+              ? 'Reuse an existing job prompt or create a new one'
+              : 'Configure AI prompts and evaluation categories for this job'}
+          </p>
+        </div>
+        {mode === 'list' ? (
+          <Button onClick={openCreate} leftIcon={<Plus size={18} />}>
+            Create New Prompt
+          </Button>
+        ) : (
+          <Button variant="ghost" onClick={backToList} leftIcon={<ArrowLeft size={18} />}>
+            Back to prompts
+          </Button>
+        )}
       </div>
 
+      {/* ── List view: existing prompts to reuse ─────────────────────── */}
+      {mode === 'list' && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Sparkles size={20} className="text-[var(--primary)]" />
+              <CardTitle>Configured Job Prompts</CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <Input
+                placeholder="Search by job title, type, or prefix..."
+                leftIcon={<Search size={18} />}
+                value={listSearch}
+                onChange={(e) => setListSearch(e.target.value)}
+              />
+
+              {scanning ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 size={24} className="animate-spin text-[var(--primary)]" />
+                </div>
+              ) : filteredPromptJobs.length === 0 ? (
+                <div className="text-center py-10">
+                  <Briefcase size={44} className="mx-auto text-[var(--textTertiary)] mb-3" />
+                  <p className="text-sm font-medium text-[var(--text)]">
+                    {jobsWithPrompts.length === 0
+                      ? 'No AI prompts configured yet'
+                      : 'No jobs match your search'}
+                  </p>
+                  <p className="text-sm text-[var(--textSecondary)] mt-1">
+                    Click “Create New Prompt” to configure one.
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {filteredPromptJobs.map((job) => (
+                    <button
+                      key={job.id ?? job.jobPrefix}
+                      type="button"
+                      onClick={() => openEditor(job.jobPrefix)}
+                      className="text-left p-4 rounded-xl border border-[var(--border)] bg-[var(--surface1)] hover:border-[var(--primary)] hover:bg-[var(--primary)]/[0.04] transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-[var(--text)] truncate">{job.jobTitle}</p>
+                          <p className="text-xs text-[var(--textSecondary)] mt-0.5">
+                            {job.jobType} · {job.jobPrefix}
+                          </p>
+                        </div>
+                        <Badge variant="secondary" size="sm">Reuse</Badge>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 mt-3">
+                        {(promptsByJob[job.jobPrefix] ?? []).map((t) => (
+                          <Badge key={t} variant="primary" size="sm">{t}</Badge>
+                        ))}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {mode === 'edit' && (
+      <>
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
@@ -343,6 +616,37 @@ export function JobPromptPage() {
               value={selectedPrefix}
               onChange={(e) => setSelectedPrefix(e.target.value)}
             />
+
+            {/* One step: copy every prompt, category and setting from another job and save them now. */}
+            {selectedPrefix && (
+              <div>
+                <Button variant="outline" size="sm" onClick={() => setReuseDialog(true)}>
+                  Copy everything from another job and save
+                </Button>
+              </div>
+            )}
+            <ReusePromptDialog
+              isOpen={reuseDialog}
+              onClose={() => setReuseDialog(false)}
+              targetPrefix={selectedPrefix}
+              jobs={jobs}
+              onCopied={() => {
+                void fetchPrompts();
+                void fetchCategories();
+                setJobs((prev) => [...prev]);
+              }}
+            />
+
+            {/* Reuse an existing prompt as a starting point */}
+            {selectedPrefix && reuseOptions.length > 1 && (
+              <Select
+                label="Reuse from existing job (optional)"
+                options={reuseOptions}
+                value={reuseFrom}
+                onChange={(e) => handleReuseFrom(e.target.value)}
+                helperText="Copies another job's prompts here so you can reuse and save them for this job."
+              />
+            )}
 
             {/* Prompt Content */}
             {selectedPrefix && (
@@ -409,7 +713,7 @@ export function JobPromptPage() {
                       placeholder={`Enter the ${currentTab.label.toLowerCase()} for this job...`}
                       value={promptContents[activeTab] ?? ''}
                       onChange={(e) => setPromptContents((prev) => ({ ...prev, [activeTab]: e.target.value }))}
-                      maxLength={10000}
+                      maxLength={MAX_PROMPT_LENGTH}
                       showCharCount
                       className="min-h-[250px]"
                     />
@@ -496,7 +800,7 @@ export function JobPromptPage() {
                     placeholder="Enter evaluation prompt for this job..."
                     value={evaluationInstructions}
                     onChange={(e) => setEvaluationInstructions(e.target.value)}
-                    maxLength={10000}
+                    maxLength={MAX_PROMPT_LENGTH}
                     showCharCount
                     className="min-h-[180px]"
                   />
@@ -510,6 +814,8 @@ export function JobPromptPage() {
                   <p className="text-sm text-[var(--textSecondary)]">
                     Define the categories and weights used to evaluate candidates.
                     These are injected via <code className="px-1 py-0.5 rounded bg-[var(--surface2)] text-xs font-mono">{'{{categories}}'}</code> into both the interview and evaluation prompts.
+                    {' '}This is the list <em>both</em> rounds use; a round can be scored
+                    differently under &ldquo;Interview setup by round&rdquo; below.
                   </p>
 
                   {/* Category rows */}
@@ -600,6 +906,13 @@ export function JobPromptPage() {
             )}
           </CardContent>
         </Card>
+      )}
+
+      {/* Budget, pitch and per-round scoring. Below the prompts because it is
+          the less-often-changed half: a recruiter iterates on wording far more
+          than on how many questions the interview asks. */}
+      {selectedPrefix && <InterviewRoundSettingsPanel jobPrefix={selectedPrefix} />}
+      </>
       )}
     </div>
   );

@@ -1,15 +1,26 @@
 import { useState, useEffect } from 'react';
-import { Loader2, Video, Send, Mail, Calendar } from 'lucide-react';
+import { Loader2, Video, Send, Mail, Calendar, AlertTriangle } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { DateTimeInput } from '@/components/ui/DateTimeInput';
+import { nowDateTimeLocal, isPast } from '@/utils/datetime.utils';
 import { Select } from '@/components/ui/Select';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { InterviewPromptPanel } from '@/components/admin/InterviewPromptPanel';
 import { useToast } from '@/components/ui/Toast';
 import { jobService } from '@/services/job.service';
 import { jobApplicationService } from '@/services/job-application.service';
 import { interviewService } from '@/services/interview.service';
+import { MESSAGES } from '@/config/messages';
 import type { JobPostDTO, JobApplicationDTO } from '@/types/job.types';
+import { INTERVIEW_ROUND_LABELS } from '@/types/interview.types';
+import type { InterviewRound } from '@/types/interview.types';
+
+const ROUND_OPTIONS = (Object.keys(INTERVIEW_ROUND_LABELS) as InterviewRound[]).map((value) => ({
+  value,
+  label: INTERVIEW_ROUND_LABELS[value],
+}));
 
 export function InterviewSchedulerPage() {
   const { showToast } = useToast();
@@ -19,7 +30,23 @@ export function InterviewSchedulerPage() {
   const [candidates, setCandidates] = useState<JobApplicationDTO[]>([]);
   const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set());
   const [deadlineTime, setDeadlineTime] = useState('');
+  /** Floor for the deadline picker, fixed on mount. */
+  const [minDateTime] = useState(nowDateTimeLocal);
+  const deadlineInPast = !!deadlineTime && isPast(deadlineTime);
   const [sendEmail, setSendEmail] = useState(true);
+  /**
+   * Which interview to book. L2 first because it is the round that follows the
+   * exam; L3 is scheduled after it, for candidates who passed.
+   */
+  const [round, setRound] = useState<InterviewRound>('L2_TECHNICAL');
+  /**
+   * Whether the selected round has a prompt behind it.
+   *
+   * Reported by the panel below, which resolves it the same way the server
+   * does. Booking is still allowed without one — the deadline may be the reason
+   * for booking now — but the button says what will happen.
+   */
+  const [promptConfigured, setPromptConfigured] = useState(true);
   const [questionsFromDate, setQuestionsFromDate] = useState('');
   const [questionsToDate, setQuestionsToDate] = useState('');
 
@@ -89,15 +116,19 @@ export function InterviewSchedulerPage() {
 
   async function handleSubmit() {
     if (!selectedPrefix) {
-      showToast('Please select a job', 'warning');
+      showToast(MESSAGES.admin.common.selectJob, 'warning');
       return;
     }
     if (selectedEmails.size === 0) {
-      showToast('Please select at least one candidate', 'warning');
+      showToast(MESSAGES.admin.common.selectCandidate, 'warning');
+      return;
+    }
+    if (deadlineTime && isPast(deadlineTime)) {
+      showToast(MESSAGES.admin.candidates.dateTimeInPast, 'warning');
       return;
     }
     if (!deadlineTime) {
-      showToast('Please set a deadline time', 'warning');
+      showToast(MESSAGES.admin.interviewScheduler.deadlineTimeRequired, 'warning');
       return;
     }
 
@@ -108,13 +139,11 @@ export function InterviewSchedulerPage() {
         jobPrefix: selectedPrefix,
         deadlineTime,
         sendEmail,
+        round,
         questionsFromDate: questionsFromDate || undefined,
         questionsToDate: questionsToDate || undefined,
       });
-      showToast(
-        `Interview${selectedEmails.size > 1 ? 's' : ''} scheduled for ${selectedEmails.size} candidate${selectedEmails.size > 1 ? 's' : ''}!`,
-        'success'
-      );
+      showToast(MESSAGES.admin.interviewScheduler.scheduled(selectedEmails.size), 'success');
       setSelectedEmails(new Set());
       setDeadlineTime('');
       setQuestionsFromDate('');
@@ -164,9 +193,37 @@ export function InterviewSchedulerPage() {
             <Select
               label="Job"
               options={jobOptions}
+              searchable
+              searchPlaceholder="Search by job title or prefix..."
               value={selectedPrefix}
               onChange={(e) => setSelectedPrefix(e.target.value)}
             />
+
+            {/* Round — what is being booked, so it sits above the candidate list
+                rather than next to the submit button. */}
+            {selectedPrefix && (
+              <div className="max-w-md">
+                <Select
+                  label="Interview round"
+                  options={ROUND_OPTIONS}
+                  value={round}
+                  onChange={(e) => setRound(e.target.value as InterviewRound)}
+                  helperText="Each round is booked separately and graded on its own prompt."
+                />
+              </div>
+            )}
+
+            {/* The prompt this round will interview with. Placed between the
+                round and the candidate list because it is a property of the
+                round being booked, and because an interview with no prompt
+                cannot be started by the people about to be selected. */}
+            {selectedPrefix && (
+              <InterviewPromptPanel
+                jobPrefix={selectedPrefix}
+                round={round}
+                onConfiguredChange={setPromptConfigured}
+              />
+            )}
 
             {/* Candidate Selection */}
             {selectedPrefix && (
@@ -223,29 +280,36 @@ export function InterviewSchedulerPage() {
               </div>
             )}
 
-            {/* Deadline */}
-            <Input
+            {/* Deadline. Native datetime-local, same as the date fields just
+                below it and everywhere else in the app. */}
+            <DateTimeInput
               label="Interview Deadline"
-              type="datetime-local"
+              required
+              min={minDateTime}
               value={deadlineTime}
-              onChange={(e) => setDeadlineTime(e.target.value)}
+              onChange={setDeadlineTime}
+              leftIcon={<Calendar size={16} />}
+              helperText={deadlineInPast ? undefined : 'Pick from the calendar — cannot be in the past'}
+              error={deadlineInPast ? 'The deadline has already passed' : undefined}
             />
 
             {/* Question Date Range */}
             <div className="grid grid-cols-2 gap-4">
               <Input
-                label="Questions From Date (optional)"
+                label="Use questions created from (optional)"
                 type="date"
                 value={questionsFromDate}
                 onChange={(e) => setQuestionsFromDate(e.target.value)}
                 leftIcon={<Calendar size={16} />}
+                helperText="Only AI-generated interview questions created on or after this date are used."
               />
               <Input
-                label="Questions To Date (optional)"
+                label="Use questions created until (optional)"
                 type="date"
                 value={questionsToDate}
                 onChange={(e) => setQuestionsToDate(e.target.value)}
                 leftIcon={<Calendar size={16} />}
+                helperText="Only questions created on or before this date are used. Leave both empty to use every question."
               />
             </div>
             <p className="text-xs text-[var(--textTertiary)] -mt-4">
@@ -269,7 +333,17 @@ export function InterviewSchedulerPage() {
             </label>
 
             {/* Submit */}
-            <div className="flex justify-end pt-4 border-t border-[var(--border)]">
+            <div className="flex flex-wrap items-center justify-end gap-3 pt-4 border-t border-[var(--border)]">
+              {/* Stated rather than enforced. Booking ahead of writing the
+                  prompt is legitimate — the deadline may be the reason to book
+                  today — but nobody should discover the gap from a candidate
+                  who cannot start. */}
+              {selectedPrefix && !promptConfigured && (
+                <p className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300">
+                  <AlertTriangle size={14} className="flex-shrink-0" />
+                  Add the prompt above before candidates try to start.
+                </p>
+              )}
               <Button
                 onClick={handleSubmit}
                 isLoading={submitting}

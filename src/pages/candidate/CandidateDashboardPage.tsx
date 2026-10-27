@@ -1,24 +1,27 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  LayoutDashboard,
   ClipboardCheck,
   Video,
   Briefcase,
   Trophy,
   ArrowRight,
   Loader2,
+  Clock,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { assessmentService } from '@/services/assessment.service';
 import { interviewService } from '@/services/interview.service';
+import { jobApplicationService } from '@/services/job-application.service';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { ROUTES } from '@/config/routes';
-import { formatDate } from '@/utils/format.utils';
+import { formatDate, formatDateTime } from '@/utils/format.utils';
+import { useNow } from '@/hooks/useNow';
 import type { Assessment } from '@/types/assessment.types';
 import type { InterviewSchedule } from '@/types/interview.types';
+import type { JobApplicationDTO } from '@/types/job.types';
 
 export function CandidateDashboardPage() {
   const { user } = useAuth();
@@ -26,6 +29,7 @@ export function CandidateDashboardPage() {
 
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [interviews, setInterviews] = useState<InterviewSchedule[]>([]);
+  const [applications, setApplications] = useState<JobApplicationDTO[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -33,12 +37,19 @@ export function CandidateDashboardPage() {
       if (!user?.email) return;
       setLoading(true);
       try {
-        const [assessRes, interviewRes] = await Promise.all([
-          assessmentService.getCandidateAssessments(user.email),
+        // getAllAssessmentsForCandidate, not getCandidateAssessments: the latter
+        // filters server-side to examAttended = false, so a "Completed Exams"
+        // count taken from it could only ever be zero.
+        // Applications are a separate resource — the count of assessments says
+        // nothing about how many jobs were applied to.
+        const [assessRes, interviewRes, applicationRes] = await Promise.all([
+          assessmentService.getAllAssessmentsForCandidate(user.email),
           interviewService.getActiveInterviews(user.email),
+          jobApplicationService.getByEmail(user.email).catch(() => null),
         ]);
         setAssessments(assessRes.data ?? []);
         setInterviews(interviewRes.data ?? []);
+        setApplications(applicationRes?.data ?? []);
       } catch {
         // Error toast auto-handled by interceptor
       } finally {
@@ -48,7 +59,24 @@ export function CandidateDashboardPage() {
     fetchData();
   }, [user?.email]);
 
-  const upcomingAssessments = assessments.filter((a) => !a.examAttended && !a.expired);
+  // `expired` is set by a scheduled sweep, so a deadline that passed minutes ago
+  // may not be flagged yet — check the date too, as the assessments table does.
+  const now = useNow().getTime();
+  const isExpired = (a: Assessment) =>
+    a.expired || new Date(a.deadline).getTime() < now;
+
+  /**
+   * An assignment can be scheduled to open later. Same rule as the assessments
+   * list — an exam still inside its window cannot be started from here either,
+   * or this card would be the way around it.
+   */
+  const startsLater = (a: Assessment) => {
+    if (!a.startTime) return false;
+    const startsAt = new Date(a.startTime).getTime();
+    return Number.isFinite(startsAt) && startsAt > now;
+  };
+
+  const upcomingAssessments = assessments.filter((a) => !a.examAttended && !isExpired(a));
   const upcomingInterviews = interviews.filter((i) => i.attemptStatus !== 'COMPLETED');
   const completedAssessments = assessments.filter((a) => a.examAttended);
 
@@ -102,15 +130,18 @@ export function CandidateDashboardPage() {
           </CardContent>
         </Card>
 
-        <Card hover onClick={() => navigate(ROUTES.CANDIDATE.EVENTS)}>
+        {/* Counts applications, and links to the page that lists them. It used
+            to show the assessment count under an "Application Status" label,
+            which made it a duplicate of the first card with a misleading name. */}
+        <Card hover onClick={() => navigate(ROUTES.CANDIDATE.APPLICATIONS)}>
           <CardContent>
             <div className="flex items-center gap-4">
               <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-[var(--successLight)] flex items-center justify-center">
                 <Briefcase className="w-6 h-6 text-[var(--success)]" />
               </div>
               <div>
-                <p className="text-sm text-[var(--textSecondary)]">Application Status</p>
-                <p className="text-2xl font-bold text-[var(--text)]">{assessments.length}</p>
+                <p className="text-sm text-[var(--textSecondary)]">Jobs Applied</p>
+                <p className="text-2xl font-bold text-[var(--text)]">{applications.length}</p>
               </div>
             </div>
           </CardContent>
@@ -161,27 +192,46 @@ export function CandidateDashboardPage() {
               {upcomingAssessments.slice(0, 5).map((assessment) => (
                 <div
                   key={assessment.id}
-                  className="flex items-center justify-between p-4 rounded-lg bg-[var(--surface1)] border border-[var(--border)]"
+                  className="flex items-center justify-between gap-3 p-4 rounded-lg bg-[var(--surface1)] border border-[var(--border)]"
                 >
-                  <div className="flex items-center gap-3">
-                    <Badge variant={assessment.assessmentType === 'APTITUDE' ? 'info' : 'warning'} size="sm">
+                  {/* min-w-0 down the chain: without it a long job prefix grows
+                      the row past the card and takes the Start button off the
+                      side of a phone screen. */}
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Badge
+                      variant={assessment.assessmentType === 'APTITUDE' ? 'info' : 'warning'}
+                      size="sm"
+                      className="flex-shrink-0"
+                    >
                       {assessment.assessmentType}
                     </Badge>
-                    <div>
-                      <p className="font-medium text-[var(--text)]">{assessment.jobPrefix}</p>
+                    <div className="min-w-0">
+                      <p className="font-medium text-[var(--text)] break-words">
+                        {assessment.jobPrefix}
+                      </p>
                       <p className="text-sm text-[var(--textSecondary)]">
-                        Deadline: {formatDate(assessment.deadline)}
+                        {startsLater(assessment)
+                          ? `Opens: ${formatDateTime(assessment.startTime!)}`
+                          : `Deadline: ${formatDate(assessment.deadline)}`}
                       </p>
                     </div>
                   </div>
-                  <Button
-                    size="sm"
-                    onClick={() =>
-                      navigate(ROUTES.CANDIDATE.INSTRUCTIONS, { state: { assessment } })
-                    }
-                  >
-                    Start
-                  </Button>
+                  {startsLater(assessment) ? (
+                    <span className="flex-shrink-0 flex items-center gap-1.5 text-sm text-[var(--textSecondary)]">
+                      <Clock size={14} />
+                      Scheduled
+                    </span>
+                  ) : (
+                    <Button
+                      size="sm"
+                      className="flex-shrink-0"
+                      onClick={() =>
+                        navigate(ROUTES.CANDIDATE.INSTRUCTIONS, { state: { assessment } })
+                      }
+                    >
+                      Start
+                    </Button>
+                  )}
                 </div>
               ))}
             </div>

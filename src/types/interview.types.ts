@@ -1,10 +1,38 @@
 export type AttemptStatus = "NOT_ATTEMPTED" | "IN_PROGRESS" | "COMPLETED";
 export type InterviewResult = "PENDING" | "PASSED" | "FAILED";
+
+/** A person's decision on a finished interview. */
+export interface InterviewReviewDTO {
+  reviewerEmail?: string;
+  notes?: string;
+  /** The result they imposed, or absent where the AI's stands. */
+  overriddenResult?: InterviewResult;
+  overrideReason?: string;
+  reviewedAt?: string;
+}
+
+export interface InterviewReviewRequest {
+  notes?: string;
+  /** Null leaves the AI's result standing. */
+  overriddenResult: InterviewResult | null;
+  /** Required whenever a result is imposed. */
+  overrideReason?: string;
+}
+/**
+ * The five verdicts the grader can return.
+ *
+ * The "lean" pair was missing and `STRONG_NO_HIRE` was invented — the server
+ * has never emitted it. That mattered: `LEAN_HIRE` is a pass on the server
+ * (`PASS_RECOMMENDATIONS`) but fell through the badge's colour check to red,
+ * so a candidate the AI recommended hiring was shown in the same colour as one
+ * it rejected.
+ */
 export type Recommendation =
   | "STRONG_HIRE"
   | "HIRE"
-  | "NO_HIRE"
-  | "STRONG_NO_HIRE";
+  | "LEAN_HIRE"
+  | "LEAN_NO_HIRE"
+  | "NO_HIRE";
 export type CompletionReason =
   | "NATURAL_COMPLETION"
   | "EARLY_TERMINATION_POOR_PERFORMANCE"
@@ -19,6 +47,15 @@ export interface EvaluationCategory {
   categoryName: string;
   weight: number;
   description?: string;
+}
+
+/** A stored prompt for a job (aptitude/coding/interview stages). */
+export interface PromptRecord {
+  id: number;
+  jobPrefix: string;
+  promptType: string;
+  promptStage: string;
+  prompt: string;
 }
 
 export interface EvaluationScore {
@@ -42,11 +79,65 @@ export interface InterviewEvaluation {
 //   sendEmail: boolean;
 // }
 
+/**
+ * Which interview a schedule is for.
+ *
+ * Distinct from `InterviewPhase`: a round is a separately scheduled event with
+ * its own deadline, prompt and result, while a phase is a stretch within one
+ * conversation.
+ */
+export type InterviewRound = 'L2_TECHNICAL' | 'L3_BEHAVIORAL';
+
+export const INTERVIEW_ROUND_LABELS: Record<InterviewRound, string> = {
+  L2_TECHNICAL: 'L2 — Technical',
+  L3_BEHAVIORAL: 'L3 — Behavioural',
+};
+
+/** How hard a round is pitched before the candidate has answered anything. */
+export type InterviewDifficulty = 'FOUNDATIONAL' | 'STANDARD' | 'ADVANCED';
+
+export const INTERVIEW_DIFFICULTY_LABELS: Record<InterviewDifficulty, string> = {
+  FOUNDATIONAL: 'Foundational',
+  STANDARD: 'Standard',
+  ADVANCED: 'Advanced',
+};
+
+export const INTERVIEW_DIFFICULTY_HINTS: Record<InterviewDifficulty, string> = {
+  FOUNDATIONAL: 'Core concepts and everyday usage. Assumes little commercial experience.',
+  STANDARD: 'Competent working level — what and why, and the common pitfalls.',
+  ADVANCED: 'Depth, trade-offs and scale. No time spent on definitions.',
+};
+
+/**
+ * What a round's interview actually runs on, once the job's template has been
+ * laid over the platform defaults.
+ */
+export interface EffectiveInterviewTemplate {
+  minQuestions: number;
+  maxQuestions: number;
+  baselineDifficulty: InterviewDifficulty;
+  adaptiveDifficulty: boolean;
+  /** False when none of this was set by the job and it is all platform defaults. */
+  configured: boolean;
+}
+
+export interface InterviewTemplateRequest {
+  jobPrefix: string;
+  round: InterviewRound;
+  /** Null clears the override and goes back to the platform default. */
+  minQuestions: number | null;
+  maxQuestions: number | null;
+  baselineDifficulty: InterviewDifficulty;
+  adaptiveDifficulty: boolean;
+}
+
 export interface BulkInterviewAssignRequest {
   jobPrefix: string;
   emails: string[];
   deadlineTime: string; // ISO datetime string
   sendEmail?: boolean;
+  /** Omitted books the technical round, matching the server's default. */
+  round?: InterviewRound;
   questionsFromDate?: string; // ISO datetime string or Unix timestamp
   questionsToDate?: string; // ISO datetime string or Unix timestamp
 }
@@ -63,22 +154,71 @@ export interface InterviewSchedule {
   attemptStatus: AttemptStatus;
   interviewResult: InterviewResult;
   recordReferences?: string;
+  /** Where the shared screen was stored, when the candidate shared one. */
+  screenRecordReferences?: string;
+  /** Where the paired phone's recording was stored, one part per line, when a phone was paired. */
+  mobileRecordReferences?: string;
   summaryReferences?: string;
   assignedAt: string;
   deadlineTime: string;
-  evaluation?: InterviewEvaluation;
+  /**
+   * The graded result, parsed by the server.
+   *
+   * Typed as the shape actually stored — `VoiceEvaluationResult`, not
+   * `InterviewEvaluation`, which describes the candidate-facing summary and
+   * carries fields (`overallFeedback`) that no stored evaluation has.
+   */
+  evaluation?: VoiceEvaluationResult;
   proctoringWarnings?: number;
   warningCount?: number;
   startedAt?: string;
   endedAt?: string;
+  /**
+   * The raw stored JSON. Kept for anything that wants the original text;
+   * prefer `evaluation`, which is the same thing already parsed.
+   */
   evaluationJson?: string;
   completionReason?: CompletionReason;
+  /**
+   * Which interview this was. Always sent by the server, including for
+   * schedules booked before rounds existed — those report the default round
+   * rather than null, so the optional marker here is only about older clients.
+   */
+  round?: InterviewRound;
+  /** Server-rendered label for `round`; prefer it over mapping the enum. */
+  roundLabel?: string;
+  /** Whether the AI's verdict was flagged for a person to look at. */
+  needsHumanReview?: boolean;
+  /** The result a reviewer imposed, or absent where the AI's stands. */
+  overriddenResult?: InterviewResult;
+  /** Who overturned it. */
+  overriddenBy?: string;
+  /**
+   * The removal audit, set only on results an admin has taken off the list.
+   *
+   * Removal is soft: the transcript, proctoring events, recordings and
+   * evaluation all survive, and these three say who removed the result, when
+   * and why. Absent on every result that still stands.
+   */
+  deletedAt?: string;
+  deletedBy?: string;
+  deleteReason?: string;
 }
 
 export interface StartInterviewRequest {
   email: string;
   jobPrefix: string;
   resumeSummary?: string;
+  mobileToken?: string;
+  /**
+   * Which booked interview to start.
+   *
+   * A candidate can have more than one outstanding — a repeat L2 alongside an
+   * L3 — and they have already chosen from a list by the time they reach the
+   * interview screen. Omitting this let the server fall back to whichever was
+   * assigned most recently, which discarded that choice.
+   */
+  scheduleId?: number;
 }
 
 export interface StartInterviewResponse {
@@ -109,7 +249,19 @@ export type ConversationEntry = {
   isCodingQuestion?: boolean;
   codeContent?: string;
   codeLanguage?: string;
+  /** Stdout/stderr from the candidate's last run; absent if they never ran it. */
+  codeOutput?: string;
 };
+
+/** A still taken from the candidate's paired phone during an interview. */
+export interface MobileCapture {
+  id: number;
+  interviewScheduleId: number;
+  /** ROOM_PHOTO when the phone's view of the room was approved; MONITOR_FRAME while the interview ran. */
+  kind: 'ROOM_PHOTO' | 'MONITOR_FRAME';
+  frameIndex: number;
+  capturedAt?: string;
+}
 
 // ==================== Voice Interview Types ====================
 
@@ -125,9 +277,28 @@ export type VoiceInterviewState =
 // Voice interview REST types
 export interface VoiceStartResponse {
   scheduleId: number;
+  /**
+   * When this interview runs out, as a server timestamp.
+   *
+   * The deadline rather than a duration, so the browser's clock cannot
+   * disagree with the one the server enforces — and so a reload cannot
+   * restart it. Optional only for older servers that do not send it.
+   */
+  expiresAt?: string;
   firstQuestion: string;
   interviewerName: string;
   firstQuestionAudio: string | null; // base64 mp3
+  /**
+   * True when the server picked up an interview already under way.
+   *
+   * The server always resumed correctly — it keeps the transcript and the
+   * question count — but the browser could not tell a resume from a fresh
+   * start, so it rebuilt the screen empty and the candidate saw an interview
+   * that had apparently lost everything they had said.
+   */
+  resumed?: boolean;
+  /** Turns taken so far, so a resumed screen shows the real position. */
+  questionsAsked?: number;
 }
 
 export interface VoiceSessionStatus {
@@ -194,6 +365,18 @@ export interface VoiceEvaluationResult {
   summary: string;
   strengths: string[];
   areasForImprovement: string[];
+  /**
+   * How sure the grader was of its own verdict, 0.0 to 1.0.
+   *
+   * Not `speechAnalysis.confidenceScore`, which is how confident the
+   * *candidate* sounded. The two being named alike is a trap: one is evidence
+   * about the person, the other is a caveat on the machine's reading of them.
+   */
+  confidence?: number;
+  /** Whether a person should look at this before it is acted on. */
+  needsHumanReview?: boolean;
+  /** Why it was flagged. Empty when it was not. */
+  reviewReasons?: string[];
 }
 
 export interface VoiceCategoryScore {

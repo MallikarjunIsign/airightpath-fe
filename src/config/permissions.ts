@@ -1,5 +1,21 @@
+/**
+ * Permission names as used in `hasPermission` checks.
+ *
+ * NOTE: this map has drifted from the backend's `PermissionName` enum — several
+ * entries below (USER_WRITE, USER_DELETE, ASSESSMENT_WRITE, JOB_READ, …) do not
+ * exist server-side, and several real ones are still missing. Only add names
+ * that the backend actually grants, or the check silently never passes.
+ */
 export const PERMISSIONS = {
   USER_READ: 'USER_READ',
+  /** Listing accounts. Seeded to SUPER_ADMIN only. */
+  USER_LIST: 'USER_LIST',
+  /** Granting roles and creating staff accounts. SUPER_ADMIN only. */
+  ROLE_MANAGE: 'ROLE_MANAGE',
+  /** Enabling an account. SUPER_ADMIN only. */
+  USER_ACTIVATE: 'USER_ACTIVATE',
+  /** Disabling an account. SUPER_ADMIN only. */
+  USER_DEACTIVATE: 'USER_DEACTIVATE',
   USER_WRITE: 'USER_WRITE',
   USER_UPDATE: 'USER_UPDATE',
   USER_DELETE: 'USER_DELETE',
@@ -11,6 +27,8 @@ export const PERMISSIONS = {
   ATS_WRITE: 'ATS_WRITE',
   INTERVIEW_READ: 'INTERVIEW_READ',
   INTERVIEW_WRITE: 'INTERVIEW_WRITE',
+  /** Take a finished interview result off the results list, with a reason. */
+  INTERVIEW_RESULT_DELETE: 'INTERVIEW_RESULT_DELETE',
   QUESTION_READ: 'QUESTION_READ',
   QUESTION_WRITE: 'QUESTION_WRITE',
   RESULT_READ: 'RESULT_READ',
