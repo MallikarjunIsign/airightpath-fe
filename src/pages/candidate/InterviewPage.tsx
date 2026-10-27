@@ -1088,8 +1088,30 @@ export function InterviewPage() {
     }
   };
 
+  /**
+   * Whether Begin has been pressed and is still being worked through (screen picker, camera, server start).
+   *
+   * The screen picker is the slow part, and nothing on the page said the press had registered. A candidate who
+   * took their time choosing the screen pressed Begin again, which opened a second picker and sent a second
+   * start to the server while the first was still waiting. One press runs once, and the button says it is busy.
+   */
+  const beginningRef = useRef(false);
+  const [beginning, setBeginning] = useState(false);
+
   // Start interview handler
   const handleStartInterview = async () => {
+    if (beginningRef.current) return;
+    beginningRef.current = true;
+    setBeginning(true);
+    try {
+      await beginInterview();
+    } finally {
+      beginningRef.current = false;
+      setBeginning(false);
+    }
+  };
+
+  const beginInterview = async () => {
     if (!interview || !user?.email) return;
 
     if (!mobileVerified) {
@@ -1343,7 +1365,7 @@ export function InterviewPage() {
         mobileSkipped={mobileSkipped}
         onMobileSkippedChange={handleMobileSkippedChange}
         error={voiceInterview.error ?? undefined}
-        starting={voiceInterview.state === 'starting'}
+        starting={voiceInterview.state === 'starting' || beginning}
         canStartInterview={canStartInterview}
         onStart={handleStartInterview}
         scheduleId={interview.id}
