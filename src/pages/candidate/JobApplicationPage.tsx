@@ -372,14 +372,19 @@ export function JobApplicationPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            <p className="text-xs text-[var(--textSecondary)]">
+              Fields marked <span className="text-[var(--error)]">*</span> are required.
+            </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Input
                 label="First Name"
+                required
                 {...register('firstName')}
                 error={errors.firstName?.message}
               />
               <Input
                 label="Last Name"
+                required
                 {...register('lastName')}
                 error={errors.lastName?.message}
               />
@@ -387,6 +392,7 @@ export function JobApplicationPage() {
 
             <Input
               label="Email"
+              required
               type="email"
               {...register('email')}
               error={errors.email?.message}
@@ -395,6 +401,7 @@ export function JobApplicationPage() {
 
             <Input
               label="Mobile Number"
+              required
               type="tel"
               inputMode="numeric"
               maxLength={10}
@@ -412,6 +419,7 @@ export function JobApplicationPage() {
 
             <Input
               label="Experience"
+              required
               {...register('experience')}
               error={errors.experience?.message}
               placeholder="e.g., 2 years"
@@ -419,6 +427,7 @@ export function JobApplicationPage() {
 
             <Input
               label="Address"
+              required
               {...register('address')}
               error={errors.address?.message}
               placeholder="Enter your address"
@@ -426,6 +435,7 @@ export function JobApplicationPage() {
 
             <Input
               label="Role"
+              required
               {...register('role')}
               error={errors.role?.message}
               placeholder="Applied role"
