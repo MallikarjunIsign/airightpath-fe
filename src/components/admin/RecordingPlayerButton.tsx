@@ -6,6 +6,7 @@ import { useToast } from '@/components/ui/Toast';
 import { interviewService } from '@/services/interview.service';
 import { extractApiError } from '@/services/api.service';
 import { parseServerInstant } from '@/utils/format.utils';
+import fixWebmDuration from 'fix-webm-duration';
 
 /**
  * Plays one of an interview's recordings, in place.
@@ -86,6 +87,9 @@ export function RecordingPlayerButton({
   /** When this file was recorded, as the server stamped it. */
   const [recordedAt, setRecordedAt] = useState<string | null>(null);
   const [speed, setSpeed] = useState(1);
+  /** The recording's real length in seconds, once the player has worked it out. */
+  const [lengthSeconds, setLengthSeconds] = useState<number | null>(null);
+  const [jumpTo, setJumpTo] = useState('');
 
   /**
    * Stop the media, rather than trusting the element's removal to do it.
@@ -121,6 +125,8 @@ export function RecordingPlayerButton({
     setParts(1);
     setRecordedAt(null);
     setSpeed(1);
+    setLengthSeconds(null);
+    setJumpTo('');
   }, [stopPlayback]);
 
   const play = useCallback(async (which = 0) => {
@@ -153,6 +159,26 @@ export function RecordingPlayerButton({
     video.currentTime = Math.min(Math.max(0, video.currentTime + seconds), end);
   }
 
+  /** "5", "5:00" or "1:05:30" as seconds, or null if it is not a time. */
+  function parseTime(text: string): number | null {
+    const parts = text.trim().split(':');
+    if (parts.length === 0 || parts.length > 3 || parts.some((p) => !/^\d+(\.\d+)?$/.test(p))) return null;
+    return parts.map(Number).reduce((total, n) => total * 60 + n, 0);
+  }
+
+  /** Play from an exact point, e.g. 5:00, instead of dragging the bar to find it. */
+  function goTo() {
+    const video = videoRef.current;
+    const seconds = parseTime(jumpTo);
+    if (!video || seconds === null) {
+      showToast('Enter a time such as 5:00 or 1:05:30.', 'warning');
+      return;
+    }
+    const end = Number.isFinite(video.duration) ? video.duration : Infinity;
+    video.currentTime = Math.min(seconds, end);
+    void video.play().catch(() => {});
+  }
+
   function changeSpeed(next: number) {
     setSpeed(next);
     if (videoRef.current) videoRef.current.playbackRate = next;
@@ -174,6 +200,30 @@ export function RecordingPlayerButton({
       // both play inline and save — the person has to say which they want.
       const res = await interviewService.getRecordingLink(scheduleId, kind, 'attachment', part);
       if (!res.data?.url) throw new Error('no url');
+
+      // A browser's recording has no length written into it, so the saved file opens in a player that cannot
+      // scroll: no bar to drag and no way to start at 5 minutes. Writing the length in makes it seekable. Done
+      // here, where the length is known, and skipped (the plain download below) if the file cannot be fetched.
+      if (lengthSeconds && lengthSeconds > 0) {
+        try {
+          const response = await fetch(res.data.url);
+          if (response.ok) {
+            const raw = await response.blob();
+            const fixed = await fixWebmDuration(raw, Math.round(lengthSeconds * 1000), { logger: false });
+            const local = URL.createObjectURL(fixed);
+            const link = document.createElement('a');
+            link.href = local;
+            link.download = `interview-${scheduleId}-${kind}${parts > 1 ? `-part${part + 1}` : ''}.webm`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.setTimeout(() => URL.revokeObjectURL(local), 60_000);
+            return;
+          }
+        } catch {
+          // Fall through to the plain download.
+        }
+      }
       // A detached anchor, so an attachment response does not interrupt the
       // video playing behind it.
       const anchor = document.createElement('a');
@@ -278,9 +328,25 @@ export function RecordingPlayerButton({
                   // file; it is several only where the candidate stopped sharing
                   // and started again, and the reviewer should not have to notice
                   // the join and press play.
-                  onLoadedMetadata={() => {
+                  onLoadedMetadata={(e) => {
+                    const video = e.currentTarget;
                     // A new file starts at normal speed; carry the chosen one over to the next part.
-                    if (videoRef.current) videoRef.current.playbackRate = speed;
+                    video.playbackRate = speed;
+                    // A browser-made recording carries no length, so the player reports Infinity and has no
+                    // seek bar to drag. Asking for a point far past the end makes it find the real end, after
+                    // which it can be scrubbed and started anywhere.
+                    if (video.duration === Infinity) {
+                      const back = () => {
+                        video.removeEventListener('timeupdate', back);
+                        video.currentTime = 0;
+                      };
+                      video.addEventListener('timeupdate', back);
+                      video.currentTime = 1e101;
+                    }
+                  }}
+                  onDurationChange={(e) => {
+                    const length = e.currentTarget.duration;
+                    if (Number.isFinite(length) && length > 0) setLengthSeconds(length);
                   }}
                   onEnded={() => {
                     if (part + 1 < parts) void play(part + 1);
@@ -310,6 +376,29 @@ export function RecordingPlayerButton({
                     {s === 60 ? '1 min' : `${s} s`}
                   </Button>
                 ))}
+                <form
+                  className="flex items-center gap-1"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    goTo();
+                  }}
+                >
+                  <input
+                    value={jumpTo}
+                    onChange={(e) => setJumpTo(e.target.value)}
+                    placeholder="Go to 5:00"
+                    aria-label="Go to a time in the recording"
+                    className="w-28 rounded border border-[var(--border)] bg-[var(--surface1)] px-2 py-1 text-sm text-[var(--text)]"
+                  />
+                  <Button type="submit" variant="outline" size="sm">
+                    Go
+                  </Button>
+                </form>
+                {lengthSeconds ? (
+                  <span className="text-xs text-[var(--textTertiary)]">
+                    Length {Math.floor(lengthSeconds / 60)}:{String(Math.floor(lengthSeconds % 60)).padStart(2, '0')}
+                  </span>
+                ) : null}
                 <label className="ml-auto flex items-center gap-2 text-xs text-[var(--textSecondary)]">
                   Speed
                   <select

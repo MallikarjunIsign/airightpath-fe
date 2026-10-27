@@ -21,6 +21,7 @@
     "date-fns": "^4.1.0",
     "exceljs": "^4.4.0",
     "face-api.js": "^0.22.2",
+    "fix-webm-duration": "^1.0.6",
     "jspdf": "^4.2.1",
     "lucide-react": "^0.344.0",
     "qrcode.react": "^4.2.0",
