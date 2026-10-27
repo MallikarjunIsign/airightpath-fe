@@ -114,8 +114,10 @@ export function useVoiceInterview() {
   // Chunks of an answer that have been dealt with (text came back, or the send failed). Submit waits for them.
   const doneChunksRef = useRef<Set<number>>(new Set());
   const chunkTextsRef = useRef<Map<number, string>>(new Map());
-  const audioStreaming = useAudioStreaming(scheduleId, (index) => {
+  const failedChunksRef = useRef<Set<number>>(new Set());
+  const audioStreaming = useAudioStreaming(scheduleId, (index, ok) => {
     doneChunksRef.current.add(index);
+    if (!ok) failedChunksRef.current.add(index);
   });
   const audioPlayback = useAudioPlayback();
 
@@ -550,6 +552,7 @@ export function useVoiceInterview() {
     transcriptRef.current = "";
     wordTimestampsRef.current = [];
     doneChunksRef.current = new Set();
+    failedChunksRef.current = new Set();
     chunkTextsRef.current = new Map();
     setCurrentTranscript("");
 
@@ -589,6 +592,22 @@ export function useVoiceInterview() {
       // Code counts as an answer on its own. A coding question can be answered
       // entirely in the editor, and requiring speech as well left a candidate
       // with a working solution no way to submit it.
+      if (!transcript.trim() && !codeContent.trim() && failedChunksRef.current.size > 0) {
+        // The audio was there but did not get to the server: a connection or server problem, not the
+        // microphone. Saying "check your microphone" sent candidates round a loop that could not work.
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content:
+              "Your answer was recorded but could not be sent to the server. Check your connection, then press the mic and answer again.",
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+        setError("Your answer could not be sent. Please try again.");
+        setState("active");
+        return;
+      }
       if (!transcript.trim() && !codeContent.trim()) {
         // Say so. This used to return to "active" in silence: the candidate had
         // spoken, nothing was transcribed, no question advanced and no reason

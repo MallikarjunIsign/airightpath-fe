@@ -32,7 +32,7 @@ import { interviewWsService } from "@/services/interview-ws.service";
 /** Smallest blob worth sending; below this Whisper answers "audio too short". */
 const MIN_CHUNK_BYTES = 2000;
 
-const SILENCE_FLOOR = parseFloat(import.meta.env.VITE_TRANSCRIPTION_SILENCE_FLOOR ?? '') || 10;
+const SILENCE_FLOOR = parseFloat(import.meta.env.VITE_TRANSCRIPTION_SILENCE_FLOOR ?? '') || 6;
 
 /**
  * How many readings in a chunk must be above the floor.
@@ -41,7 +41,7 @@ const SILENCE_FLOOR = parseFloat(import.meta.env.VITE_TRANSCRIPTION_SILENCE_FLOO
  * transcribed, and Whisper turned it into sentences. Speech holds the level up across many readings, a
  * knock does not, so a chunk now needs a stretch of sound (about a sixth of a second) and not just a spike.
  */
-const MIN_SPEECH_READINGS = parseInt(import.meta.env.VITE_TRANSCRIPTION_MIN_SPEECH_READINGS ?? '', 10) || 10;
+const MIN_SPEECH_READINGS = parseInt(import.meta.env.VITE_TRANSCRIPTION_MIN_SPEECH_READINGS ?? '', 10) || 6;
 
 /** A pause this long is a place to cut the audio without splitting a word. */
 const PAUSE_MS = 700;
@@ -143,8 +143,9 @@ export function useAudioStreaming(
       peakSinceChunkRef.current = 0;
       loudReadingsRef.current = 0;
       if (levelObservedRef.current && (peak < SILENCE_FLOOR || loudReadings < MIN_SPEECH_READINGS)) {
-        console.debug(
-          `Skipping audio chunk with no sustained speech (peak ${peak}, ${loudReadings} readings above ${SILENCE_FLOOR})`,
+        // At info, not debug: when a candidate says their voice was not picked up, this is the evidence.
+        console.info(
+          `Skipping audio chunk with no sustained speech (speech-band peak ${peak}, ${loudReadings} readings above ${SILENCE_FLOOR}; needs ${MIN_SPEECH_READINGS})`,
         );
         return;
       }
@@ -239,11 +240,29 @@ export function useAudioStreaming(
         const avg = sum / dataArray.length;
         const normalized = Math.min(100, Math.round((avg / 255) * 100 * 2)); // boost sensitivity
         setAudioLevel(normalized);
-        levelObservedRef.current = true;
-        if (normalized > peakSinceChunkRef.current) {
-          peakSinceChunkRef.current = normalized;
+
+        // What decides whether a chunk holds speech is the energy in the speech band alone (300 to 3400 Hz),
+        // not the average over every frequency. Most of the spectrum is empty above 4 kHz, so the all-bin
+        // average sat low even for clear speech and a floor set against it threw real answers away: the page
+        // then reported "nothing was recorded" for a candidate who had spoken.
+        const binHz = ctx.sampleRate / analyser.fftSize;
+        const lo = Math.max(1, Math.floor(300 / binHz));
+        const hi = Math.min(dataArray.length - 1, Math.ceil(3400 / binHz));
+        let band = 0;
+        for (let i = lo; i <= hi; i++) band += dataArray[i];
+        const speechLevel = Math.min(100, Math.round((band / (hi - lo + 1) / 255) * 100 * 2));
+
+        // Only a context that is actually running can say anything about silence. A suspended one reports
+        // zero for everything, and treating that as a measurement dropped every chunk of every answer.
+        if (ctx.state === "running") {
+          levelObservedRef.current = true;
+        } else {
+          void ctx.resume().catch(() => {});
         }
-        if (normalized >= SILENCE_FLOOR) {
+        if (speechLevel > peakSinceChunkRef.current) {
+          peakSinceChunkRef.current = speechLevel;
+        }
+        if (speechLevel >= SILENCE_FLOOR) {
           loudReadingsRef.current += 1;
           quietSinceRef.current = null;
         } else if (quietSinceRef.current === null) {
