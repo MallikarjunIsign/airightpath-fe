@@ -65,7 +65,16 @@ export const APP_CONFIG = {
    * between each part. Kept as a lever only: setting it brings the gaps back.
    */
   RECORDING_SEGMENT_MINUTES: Number(import.meta.env.VITE_RECORDING_SEGMENT_MINUTES ?? 0) || 0,
-  AUDIO_CHUNK_SECONDS: 4,
+  /**
+   * How long an answer's audio runs before it is cut at the next pause and sent, and the longest it may go.
+   *
+   * Four seconds was a leftover from sending audio over the socket, which capped a message at a megabyte.
+   * It meant dozens of speech-to-text calls for one answer and a cut every four seconds, often mid-word.
+   * Now a chunk is two to three minutes, cut where the candidate pauses, so an ordinary answer is one call.
+   * At the 32 kbit/s the recorder is set to, three minutes is under a megabyte.
+   */
+  AUDIO_CHUNK_SECONDS: Number(import.meta.env.VITE_AUDIO_CHUNK_MIN_SECONDS) || 120,
+  AUDIO_CHUNK_MAX_SECONDS: Number(import.meta.env.VITE_AUDIO_CHUNK_MAX_SECONDS) || 180,
   AUDIO_CHUNK_MIME_TYPE: "audio/webm;codecs=opus",
   /**
    * Warnings before the candidate is told their conduct is being noted.

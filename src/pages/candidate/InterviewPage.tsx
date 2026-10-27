@@ -1705,11 +1705,9 @@ export function InterviewPage() {
                   that it is being heard, never the text. */}
               {voiceInterview.isRecording && (
                 <div className="mb-3 flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface1)] p-3">
-                  <Mic size={14} className={voiceInterview.currentTranscript ? 'text-emerald-500' : 'text-[var(--textTertiary)]'} />
+                  <Mic size={14} className="text-emerald-500" />
                   <p className="text-sm text-[var(--textSecondary)]">
-                    {voiceInterview.currentTranscript
-                      ? 'Your voice is being captured. Press submit when you have finished your answer.'
-                      : 'Listening… speak your answer.'}
+                    Listening… speak your answer, then press submit. It may take a few seconds to process.
                   </p>
                 </div>
               )}

@@ -1,8 +1,8 @@
+import { aiService } from "@/services/ai.service";
 import { useState, useRef, useCallback } from "react";
 import { APP_CONFIG } from "@/config/app.config";
 import { MIC_AUDIO_CONSTRAINTS, describeMicProcessing, micProcessingReport } from "@/config/audio.config";
 import { interviewWsService } from "@/services/interview-ws.service";
-import { getAccessToken } from "@/services/api.service";
 
 /**
  * Hook for streaming audio chunks to the backend for live transcription.
@@ -32,9 +32,34 @@ import { getAccessToken } from "@/services/api.service";
 /** Smallest blob worth sending; below this Whisper answers "audio too short". */
 const MIN_CHUNK_BYTES = 2000;
 
-const SILENCE_FLOOR =parseFloat(import.meta.env.VITE_TRANSCRIPTION_SILENCE_FLOOR ?? '') || 6;
+const SILENCE_FLOOR = parseFloat(import.meta.env.VITE_TRANSCRIPTION_SILENCE_FLOOR ?? '') || 10;
 
-export function useAudioStreaming(scheduleId: number | null) {
+/**
+ * How many readings in a chunk must be above the floor.
+ *
+ * One loud moment (a cough, a knock, a chair) set the peak and sent a whole chunk of room noise to be
+ * transcribed, and Whisper turned it into sentences. Speech holds the level up across many readings, a
+ * knock does not, so a chunk now needs a stretch of sound (about a sixth of a second) and not just a spike.
+ */
+const MIN_SPEECH_READINGS = parseInt(import.meta.env.VITE_TRANSCRIPTION_MIN_SPEECH_READINGS ?? '', 10) || 10;
+
+/** A pause this long is a place to cut the audio without splitting a word. */
+const PAUSE_MS = 700;
+/** Past the longest chunk, a shorter pause will do. */
+const SHORT_PAUSE_MS = 250;
+/** If no pause at all turns up this long after the longest chunk, cut anyway. */
+const HARD_CUT_GRACE_MS = 30_000;
+const MIN_CHUNK_MS = APP_CONFIG.AUDIO_CHUNK_SECONDS * 1000;
+const MAX_CHUNK_MS = Math.max(MIN_CHUNK_MS, APP_CONFIG.AUDIO_CHUNK_MAX_SECONDS * 1000);
+
+/**
+ * @param onChunkSettled called once for every chunk sent, with whether the audio was accepted. The page waits for
+ *        these before it submits, so it knows the last of the answer has been dealt with.
+ */
+export function useAudioStreaming(
+  scheduleId: number | null,
+  onChunkSettled?: (chunkIndex: number, ok: boolean) => void,
+) {
   const [isRecording, setIsRecording] = useState(false);
   const [audioLevel, setAudioLevel] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -58,6 +83,14 @@ export function useAudioStreaming(scheduleId: number | null) {
   const ownsStreamRef = useRef(true);
   const chunkTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chunkIndexRef = useRef(0);
+  /** Chunks sent for the answer being recorded; not reset when recording stops, so the page can still count them. */
+  const sentCountRef = useRef(0);
+  const onChunkSettledRef = useRef(onChunkSettled);
+  onChunkSettledRef.current = onChunkSettled;
+  /** When the recorder now running began, and since when the sound has been below the floor. */
+  const chunkStartedAtRef = useRef(0);
+  const quietSinceRef = useRef<number | null>(null);
+  const rotateRef = useRef<() => void>(() => {});
   const mimeTypeRef = useRef<string>("audio/webm");
   const isStoppingRef = useRef(false);
 
@@ -74,6 +107,8 @@ export function useAudioStreaming(scheduleId: number | null) {
    * it is dropped rather than transcribed.
    */
   const peakSinceChunkRef = useRef(0);
+  /** Readings above the floor since the last chunk was sent. */
+  const loudReadingsRef = useRef(0);
   /**
    * Whether the analyser has produced a single reading.
    *
@@ -89,8 +124,7 @@ export function useAudioStreaming(scheduleId: number | null) {
   /** Send a complete audio blob to the backend via WebSocket. */
   const sendChunk = useCallback(
     (blob: Blob) => {
-      if (blob.size === 0 || !interviewWsService.connected || !scheduleId)
-        return;
+      if (blob.size === 0 || !scheduleId) return;
 
       // A webm/opus blob this small is a container header with no audio in it.
       // Whisper rejects those with "audio too short" (400), so the backend
@@ -98,52 +132,43 @@ export function useAudioStreaming(scheduleId: number | null) {
       if (blob.size < MIN_CHUNK_BYTES) {
         console.debug(`Skipping tiny audio chunk (${blob.size} bytes)`);
         peakSinceChunkRef.current = 0;
+        loudReadingsRef.current = 0;
         return;
       }
 
       // Read and reset before the async work below, so the next chunk measures
       // its own window rather than inheriting this one's peak.
       const peak = peakSinceChunkRef.current;
+      const loudReadings = loudReadingsRef.current;
       peakSinceChunkRef.current = 0;
-      if (levelObservedRef.current && peak < SILENCE_FLOOR) {
-        console.debug(`Skipping silent audio chunk (peak ${peak} < ${SILENCE_FLOOR})`);
+      loudReadingsRef.current = 0;
+      if (levelObservedRef.current && (peak < SILENCE_FLOOR || loudReadings < MIN_SPEECH_READINGS)) {
+        console.debug(
+          `Skipping audio chunk with no sustained speech (peak ${peak}, ${loudReadings} readings above ${SILENCE_FLOOR})`,
+        );
         return;
       }
 
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64 = (reader.result as string).split(",")[1];
-        const destination = `/app/interview/${scheduleId}/audio-chunk`;
-
-        const token = getAccessToken();
-        const payload: {
-          audio: string;
-          chunkIndex: number;
-          token?: string;
-          accessToken?: string;
-        } = {
-          audio: base64,
-          chunkIndex: chunkIndexRef.current,
-        };
-
-        if (token) {
-          payload.token = token;
-          payload.accessToken = token;
+      // A file over HTTP, not base64 over the socket: the socket caps a message at a megabyte, which is what
+      // forced four second chunks in the first place. One retry, because a chunk can hold a whole answer.
+      const index = chunkIndexRef.current++;
+      sentCountRef.current += 1;
+      console.log(`Sending audio chunk ${index} (${Math.round(blob.size / 1024)} KB)`);
+      void (async () => {
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            await aiService.sendAudioChunk(scheduleId, blob, index);
+            return;
+          } catch (err) {
+            if (attempt === 2) {
+              console.warn(`Audio chunk ${index} could not be sent:`, err);
+              onChunkSettledRef.current?.(index, false);
+              return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+          }
         }
-
-        console.log(
-          `Sending audio chunk ${chunkIndexRef.current}. Token present: ${!!token}`,
-        );
-
-        interviewWsService.send(
-          destination,
-          payload,
-          token ? { Authorization: `Bearer ${token}` } : {},
-        );
-
-        chunkIndexRef.current++;
-      };
-      reader.readAsDataURL(blob);
+      })();
     },
     [scheduleId],
   );
@@ -153,6 +178,8 @@ export function useAudioStreaming(scheduleId: number | null) {
     (stream: MediaStream): MediaRecorder => {
       const recorder = new MediaRecorder(stream, {
         mimeType: mimeTypeRef.current,
+        // Speech needs little: 32 kbit/s keeps three minutes under a megabyte.
+        audioBitsPerSecond: 32_000,
       });
 
       recorder.ondataavailable = (e: BlobEvent) => {
@@ -163,6 +190,8 @@ export function useAudioStreaming(scheduleId: number | null) {
 
       // start() with no timeslice → records continuously until stop()
       recorder.start();
+      chunkStartedAtRef.current = performance.now();
+      quietSinceRef.current = null;
       return recorder;
     },
     [sendChunk],
@@ -186,6 +215,7 @@ export function useAudioStreaming(scheduleId: number | null) {
     // Start a fresh recorder on the same stream
     mediaRecorderRef.current = createRecorder(stream);
   }, [createRecorder]);
+  rotateRef.current = rotateRecorder;
 
   /** Item 12: Start audio level monitoring using AnalyserNode */
   const startLevelMonitoring = useCallback((stream: MediaStream) => {
@@ -212,6 +242,28 @@ export function useAudioStreaming(scheduleId: number | null) {
         levelObservedRef.current = true;
         if (normalized > peakSinceChunkRef.current) {
           peakSinceChunkRef.current = normalized;
+        }
+        if (normalized >= SILENCE_FLOOR) {
+          loudReadingsRef.current += 1;
+          quietSinceRef.current = null;
+        } else if (quietSinceRef.current === null) {
+          quietSinceRef.current = performance.now();
+        }
+
+        // Cut where the candidate pauses, never on a timer: a fixed cut lands mid-word, and the half-words on
+        // either side are what the speech service guesses at. After the minimum length, the next pause is the
+        // cut; past the maximum a shorter one will do; with no pause at all the cut is forced as a last resort.
+        if (!isStoppingRef.current) {
+          const now = performance.now();
+          const age = now - chunkStartedAtRef.current;
+          const quietFor = quietSinceRef.current === null ? 0 : now - quietSinceRef.current;
+          if (
+            (age >= MIN_CHUNK_MS && quietFor >= PAUSE_MS) ||
+            (age >= MAX_CHUNK_MS && quietFor >= SHORT_PAUSE_MS) ||
+            age >= MAX_CHUNK_MS + HARD_CUT_GRACE_MS
+          ) {
+            rotateRef.current();
+          }
         }
         animFrameRef.current = requestAnimationFrame(updateLevel);
       };
@@ -280,11 +332,16 @@ export function useAudioStreaming(scheduleId: number | null) {
       // Start the first recorder
       mediaRecorderRef.current = createRecorder(stream);
 
-      // Rotate every AUDIO_CHUNK_SECONDS so each blob is a complete file
-      chunkTimerRef.current = setInterval(
-        rotateRecorder,
-        APP_CONFIG.AUDIO_CHUNK_SECONDS * 1000,
-      );
+      sentCountRef.current = 0;
+      chunkIndexRef.current = 0;
+
+      // Backstop only, for a browser where level monitoring is unavailable and no pause can be seen: the
+      // normal cut happens in the level loop, at a pause.
+      chunkTimerRef.current = setInterval(() => {
+        if (performance.now() - chunkStartedAtRef.current >= MAX_CHUNK_MS + HARD_CUT_GRACE_MS - 1000) {
+          rotateRecorder();
+        }
+      }, 5000);
 
       // Item 12: Start audio level monitoring
       startLevelMonitoring(stream);
@@ -337,7 +394,6 @@ export function useAudioStreaming(scheduleId: number | null) {
         streamRef.current = null;
         mediaRecorderRef.current = null;
         setIsRecording(false);
-        chunkIndexRef.current = 0;
         stopLevelMonitoring();
       }
     });
@@ -356,7 +412,11 @@ export function useAudioStreaming(scheduleId: number | null) {
     externalSourceRef.current = stream;
   }, []);
 
+  /** How many chunks have been sent for the answer just recorded. */
+  const getSentChunkCount = useCallback(() => sentCountRef.current, []);
+
   return {
+    getSentChunkCount,
     isRecording,
     audioLevel,
     startRecording,

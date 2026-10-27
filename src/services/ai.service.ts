@@ -90,6 +90,20 @@ export const aiService = {
    * yet (an older backend), it falls back to the single request this replaced
    * — so the two halves can be deployed in either order.</p>
    */
+  /**
+   * Send a stretch of the candidate's answer to be transcribed. The text comes back on the interview's
+   * transcription topic, so this only reports whether the audio was accepted.
+   */
+  sendAudioChunk(scheduleId: number, audio: Blob, chunkIndex: number) {
+    const form = new FormData();
+    form.append("audio", audio, `answer_${chunkIndex}.webm`);
+    form.append("chunkIndex", String(chunkIndex));
+    return api.post(`/api/interview/voice/${scheduleId}/audio-chunk`, form, {
+      timeout: 2 * 60 * 1000,
+      _skipErrorToast: true,
+    } as never);
+  },
+
   async uploadRecording(
     scheduleId: number,
     kind: "camera" | "screen" | "mobile",

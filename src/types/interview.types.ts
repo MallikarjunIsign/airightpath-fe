@@ -323,6 +323,8 @@ export interface TranscriptionMessage {
   words: WordTimestamp[];
   duration: number;
   chunkIndex: number;
+  /** Set when this chunk has been dealt with, even if it held no speech. */
+  done?: boolean;
 }
 
 export interface AITokenMessage {

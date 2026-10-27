@@ -111,7 +111,12 @@ export function useVoiceInterview() {
 
   // Audio hooks
   // Takes the id only; the email was being passed and silently discarded.
-  const audioStreaming = useAudioStreaming(scheduleId);
+  // Chunks of an answer that have been dealt with (text came back, or the send failed). Submit waits for them.
+  const doneChunksRef = useRef<Set<number>>(new Set());
+  const chunkTextsRef = useRef<Map<number, string>>(new Map());
+  const audioStreaming = useAudioStreaming(scheduleId, (index) => {
+    doneChunksRef.current.add(index);
+  });
   const audioPlayback = useAudioPlayback();
 
   // Stable refs for audio playback functions (avoid recreating callbacks on every render)
@@ -167,8 +172,20 @@ export function useVoiceInterview() {
       interviewWsService.subscribe(
         `/topic/interview/${id}/transcription`,
         (msg: TranscriptionMessage) => {
-          transcriptRef.current +=
-            (transcriptRef.current ? " " : "") + msg.text;
+          if (typeof msg.chunkIndex === "number") {
+            doneChunksRef.current.add(msg.chunkIndex);
+          }
+          if (!msg.text) return; // A chunk with no speech: it only marks itself done.
+          if (typeof msg.chunkIndex === "number") {
+            // Joined in the order the audio was spoken, not the order the answers came back.
+            chunkTextsRef.current.set(msg.chunkIndex, msg.text);
+            transcriptRef.current = [...chunkTextsRef.current.entries()]
+              .sort((a, b) => a[0] - b[0])
+              .map(([, text]) => text)
+              .join(" ");
+          } else {
+            transcriptRef.current += (transcriptRef.current ? " " : "") + msg.text;
+          }
           setCurrentTranscript(transcriptRef.current);
           if (msg.words) {
             wordTimestampsRef.current.push(...msg.words);
@@ -532,6 +549,8 @@ export function useVoiceInterview() {
   const startAnswering = useCallback(async () => {
     transcriptRef.current = "";
     wordTimestampsRef.current = [];
+    doneChunksRef.current = new Set();
+    chunkTextsRef.current = new Map();
     setCurrentTranscript("");
 
     // Interrupt any playing audio
@@ -549,15 +568,15 @@ export function useVoiceInterview() {
       await audioStreaming.stopRecording();
 
       if (!manualTranscript) {
-        // Wait for the backend to transcribe the final chunk and send it back.
-        // The last chunk was just sent — give Whisper time to process it.
-        const transcriptBefore = transcriptRef.current;
+        // Wait for every chunk sent to be dealt with. The last one can hold most of the answer, so this is
+        // the speech service's whole turn on it, not a short grace period. Capped, so a lost reply cannot hold
+        // the candidate for ever.
+        const sent = audioStreaming.getSentChunkCount();
         await new Promise<void>((resolve) => {
           let elapsed = 0;
           const interval = setInterval(() => {
             elapsed += 200;
-            // Resolve once new transcription arrives or timeout after 3s
-            if (transcriptRef.current !== transcriptBefore || elapsed >= 3000) {
+            if (doneChunksRef.current.size >= sent || elapsed >= 45_000) {
               clearInterval(interval);
               resolve();
             }
