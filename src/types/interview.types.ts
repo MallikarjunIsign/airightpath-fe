@@ -134,6 +134,8 @@ export interface InterviewTemplateRequest {
 export interface BulkInterviewAssignRequest {
   jobPrefix: string;
   emails: string[];
+  /** When the interview opens. Omitted means now. */
+  assignedAt?: string;
   deadlineTime: string; // ISO datetime string
   sendEmail?: boolean;
   /** Omitted books the technical round, matching the server's default. */

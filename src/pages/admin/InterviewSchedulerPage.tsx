@@ -30,9 +30,12 @@ export function InterviewSchedulerPage() {
   const [candidates, setCandidates] = useState<JobApplicationDTO[]>([]);
   const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set());
   const [deadlineTime, setDeadlineTime] = useState('');
+  /** When the interview opens; the deadline is when it closes. Starts at now. */
+  const [startTime, setStartTime] = useState(nowDateTimeLocal);
   /** Floor for the deadline picker, fixed on mount. */
   const [minDateTime] = useState(nowDateTimeLocal);
   const deadlineInPast = !!deadlineTime && isPast(deadlineTime);
+  const endBeforeStart = !!deadlineTime && !!startTime && deadlineTime <= startTime;
   const [sendEmail, setSendEmail] = useState(true);
   /**
    * Which interview to book. L2 first because it is the round that follows the
@@ -131,12 +134,17 @@ export function InterviewSchedulerPage() {
       showToast(MESSAGES.admin.interviewScheduler.deadlineTimeRequired, 'warning');
       return;
     }
+    if (!startTime || endBeforeStart) {
+      showToast('The interview must end after it starts.', 'warning');
+      return;
+    }
 
     setSubmitting(true);
     try {
       await interviewService.assignInterviewBulk({
         emails: Array.from(selectedEmails),
         jobPrefix: selectedPrefix,
+        assignedAt: startTime,
         deadlineTime,
         sendEmail,
         round,
@@ -146,6 +154,7 @@ export function InterviewSchedulerPage() {
       showToast(MESSAGES.admin.interviewScheduler.scheduled(selectedEmails.size), 'success');
       setSelectedEmails(new Set());
       setDeadlineTime('');
+      setStartTime(nowDateTimeLocal());
       setQuestionsFromDate('');
       setQuestionsToDate('');
 
@@ -283,14 +292,29 @@ export function InterviewSchedulerPage() {
             {/* Deadline. Native datetime-local, same as the date fields just
                 below it and everywhere else in the app. */}
             <DateTimeInput
-              label="Interview Deadline"
+              label="Start date & time"
               required
               min={minDateTime}
+              value={startTime}
+              onChange={setStartTime}
+              leftIcon={<Calendar size={16} />}
+              helperText="The interview opens for the candidate at this time"
+            />
+            <DateTimeInput
+              label="End date & time (deadline)"
+              required
+              min={startTime || minDateTime}
               value={deadlineTime}
               onChange={setDeadlineTime}
               leftIcon={<Calendar size={16} />}
-              helperText={deadlineInPast ? undefined : 'Pick from the calendar — cannot be in the past'}
-              error={deadlineInPast ? 'The deadline has already passed' : undefined}
+              helperText={deadlineInPast || endBeforeStart ? undefined : 'The interview closes at this time — cannot be in the past'}
+              error={
+                deadlineInPast
+                  ? 'The deadline has already passed'
+                  : endBeforeStart
+                    ? 'The end must be after the start'
+                    : undefined
+              }
             />
 
             {/* Question Date Range */}
@@ -348,7 +372,7 @@ export function InterviewSchedulerPage() {
                 onClick={handleSubmit}
                 isLoading={submitting}
                 leftIcon={!submitting ? <Send size={16} /> : undefined}
-                disabled={!selectedPrefix || selectedEmails.size === 0 || !deadlineTime}
+                disabled={!selectedPrefix || selectedEmails.size === 0 || !deadlineTime || !startTime || endBeforeStart}
               >
                 Schedule Interview{selectedEmails.size > 1 ? `s (${selectedEmails.size})` : ''}
               </Button>

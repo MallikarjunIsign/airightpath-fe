@@ -306,6 +306,8 @@ export function CandidateDetailsPage() {
     repeats: 0,
   });
   const [modalDateTime, setModalDateTime] = useState('');
+  /** When a booked interview opens; `modalDateTime` is when it closes. */
+  const [modalStartDateTime, setModalStartDateTime] = useState('');
   const [modalContent, setModalContent] = useState('');
   const [sending, setSending] = useState(false);
 
@@ -505,6 +507,8 @@ export function CandidateDetailsPage() {
     }
     setModalAction(action);
     setModalDateTime('');
+    // Opens now unless the recruiter picks a later start, so the common case is a single choice.
+    setModalStartDateTime(action === 'interview' ? nowDateTimeLocal() : '');
     setModalContent('');
     if (action === 'interview') {
       setModalRound('L2_TECHNICAL');
@@ -742,8 +746,12 @@ export function CandidateDetailsPage() {
     // An interview with no date and time has no deadline: it never expires and
     // never chases the candidate. The picker is marked required, but nothing
     // stopped Send being pressed with it empty.
-    if (modalAction === 'interview' && !modalDateTime) {
-      showToast('Choose a date and time for the interview before assigning it.', 'warning');
+    if (modalAction === 'interview' && (!modalDateTime || !modalStartDateTime)) {
+      showToast('Choose a start and an end date and time for the interview before assigning it.', 'warning');
+      return;
+    }
+    if (modalAction === 'interview' && modalDateTime <= modalStartDateTime) {
+      showToast('The interview must end after it starts.', 'warning');
       return;
     }
 
@@ -813,6 +821,8 @@ export function CandidateDetailsPage() {
           await interviewService.assignInterviewBulk({
             jobPrefix: selectedPrefix,
             emails: interviewEligibility.assignable,
+            // The start is when the interview opens (`assignedAt` on the server), the end its deadline.
+            assignedAt: modalStartDateTime,
             deadlineTime: modalDateTime,
             sendEmail: true,
             round: modalRound,
@@ -1174,11 +1184,13 @@ export function CandidateDetailsPage() {
           }
           sendDisabled={
             modalAction === 'interview' &&
-            (interviewEligibility.assignable.length === 0 || !modalDateTime)
+            (interviewEligibility.assignable.length === 0 || !modalDateTime || !modalStartDateTime)
           }
           sending={sending}
           dateTime={modalDateTime}
           onDateTimeChange={setModalDateTime}
+          startDateTime={modalAction === 'interview' ? modalStartDateTime : undefined}
+          onStartDateTimeChange={modalAction === 'interview' ? setModalStartDateTime : undefined}
           minDateTime={nowDateTimeLocal()}
           content={modalContent}
           onContentChange={setModalContent}

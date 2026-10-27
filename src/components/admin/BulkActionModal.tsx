@@ -14,6 +14,12 @@ interface BulkActionModalProps {
   sending: boolean;
   dateTime: string;
   onDateTimeChange: (value: string) => void;
+  /**
+   * When given, the modal asks for a window: this is when it opens, and `dateTime` becomes when it closes.
+   * Booking an interview needs both; the mail actions still take one time.
+   */
+  startDateTime?: string;
+  onStartDateTimeChange?: (value: string) => void;
   /** Earliest selectable moment (`YYYY-MM-DDTHH:mm`) — normally "now". */
   minDateTime?: string;
   content: string;
@@ -47,6 +53,8 @@ export function BulkActionModal({
   sending,
   dateTime,
   onDateTimeChange,
+  startDateTime,
+  onStartDateTimeChange,
   minDateTime,
   content,
   onContentChange,
@@ -58,6 +66,9 @@ export function BulkActionModal({
   // The picker blocks past times, but a value can still go stale while the
   // modal sits open — keep the guard on the Send button too.
   const scheduledInPast = !!dateTime && isPast(dateTime);
+  const hasWindow = startDateTime !== undefined && !!onStartDateTimeChange;
+  // A window that closes before it opens, or at the moment it opens, cannot be sat.
+  const endBeforeStart = hasWindow && !!startDateTime && !!dateTime && dateTime <= startDateTime;
 
   return (
     <Modal
@@ -70,7 +81,7 @@ export function BulkActionModal({
           <Button variant="ghost" onClick={onClose} disabled={sending}>
             Cancel
           </Button>
-          <Button onClick={onSend} isLoading={sending} disabled={scheduledInPast || sendDisabled}>
+          <Button onClick={onSend} isLoading={sending} disabled={scheduledInPast || endBeforeStart || sendDisabled}>
             Send
           </Button>
         </>
@@ -89,14 +100,36 @@ export function BulkActionModal({
             {/* Picker-only, so the past cannot be typed past `min`. The check
                 below still runs: an open modal can outlive the slot it was
                 showing, and arrow keys can still walk the value backwards. */}
+            {hasWindow && (
+              <DateTimeInput
+                label="Start date & time"
+                value={startDateTime ?? ''}
+                onChange={onStartDateTimeChange!}
+                min={minDateTime}
+                required
+                helperText="The interview opens for the candidate at this time"
+              />
+            )}
             <DateTimeInput
-              label="Date & Time"
+              label={hasWindow ? 'End date & time' : 'Date & Time'}
               value={dateTime}
               onChange={onDateTimeChange}
-              min={minDateTime}
+              min={hasWindow && startDateTime ? startDateTime : minDateTime}
               required={dateTimeRequired}
-              helperText={scheduledInPast ? undefined : 'Pick from the calendar — cannot be in the past'}
-              error={scheduledInPast ? 'That date & time has already passed' : undefined}
+              helperText={
+                scheduledInPast || endBeforeStart
+                  ? undefined
+                  : hasWindow
+                    ? 'The interview closes at this time — after it, it can no longer be started'
+                    : 'Pick from the calendar — cannot be in the past'
+              }
+              error={
+                scheduledInPast
+                  ? 'That date & time has already passed'
+                  : endBeforeStart
+                    ? 'The end must be after the start'
+                    : undefined
+              }
             />
 
             {/* Show the schedule exactly as the candidate will read it. Hidden
@@ -107,7 +140,11 @@ export function BulkActionModal({
                 <CalendarClock size={15} className="flex-shrink-0 mt-0.5" />
                 <span>
                   Candidates will see:{' '}
-                  <strong className="text-[var(--text)]">{formatScheduleForEmail(dateTime)}</strong>
+                  <strong className="text-[var(--text)]">
+                    {hasWindow && startDateTime
+                      ? `${formatScheduleForEmail(startDateTime)} to ${formatScheduleForEmail(dateTime)}`
+                      : formatScheduleForEmail(dateTime)}
+                  </strong>
                 </span>
               </div>
             )}

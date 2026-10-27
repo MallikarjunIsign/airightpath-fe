@@ -10,6 +10,13 @@ import { ROUTES } from '@/config/routes';
 import { formatDate } from '@/utils/format.utils';
 import type { InterviewSchedule } from '@/types/interview.types';
 
+/** Whether the interview's start time is still ahead. */
+function opensLater(interview: InterviewSchedule): boolean {
+  if (!interview.assignedAt) return false;
+  const opens = new Date(interview.assignedAt).getTime();
+  return !Number.isNaN(opens) && opens > Date.now();
+}
+
 export function InterviewListPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -103,7 +110,9 @@ export function InterviewListPage() {
                   <div className="space-y-2">
                     <div className="flex items-center gap-2 text-sm text-[var(--textSecondary)]">
                       <Calendar size={14} />
-                      <span>Assigned: {formatDate(interview.assignedAt)}</span>
+                      <span>
+                        {opensLater(interview) ? 'Opens' : 'Assigned'}: {formatDate(interview.assignedAt)}
+                      </span>
                     </div>
                     <div className="flex items-center gap-2 text-sm text-[var(--textSecondary)]">
                       <Calendar size={14} />
@@ -122,11 +131,18 @@ export function InterviewListPage() {
                     <Button
                       className="w-full"
                       leftIcon={<Play size={16} />}
+                      // Shut until the start time: the server refuses an early start anyway, and a button that
+                      // can only fail should not look available.
+                      disabled={interview.attemptStatus !== 'IN_PROGRESS' && opensLater(interview)}
                       onClick={() =>
                         navigate(ROUTES.CANDIDATE.INTERVIEW, { state: { interview } })
                       }
                     >
-                      {interview.attemptStatus === 'IN_PROGRESS' ? 'Continue Interview' : 'Start Interview'}
+                      {interview.attemptStatus === 'IN_PROGRESS'
+                        ? 'Continue Interview'
+                        : opensLater(interview)
+                          ? 'Not open yet'
+                          : 'Start Interview'}
                     </Button>
                   )}
 
