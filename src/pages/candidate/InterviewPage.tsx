@@ -1699,24 +1699,18 @@ export function InterviewPage() {
                   <span className="text-xs text-amber-700 dark:text-amber-300">Speech not captured: {voiceInterview.transcriptionError}</span>
                 </div>
               )}
-              {/* Captions, shown for the whole time the mic is open — not only
-                  once text arrives. An empty panel that says "listening" tells
-                  the candidate their microphone is live and nothing has been
-                  heard yet; rendering nothing at all told them neither, and a
-                  candidate whose speech was not being captured had no way to
-                  know before their answer was submitted empty. */}
+              {/* No live captions. The words were shown as they were heard, and background noise turned into
+                  stray words on the screen, which the candidate then took to be part of their answer. The
+                  audio is still recorded and converted to text for the interviewer; the candidate sees only
+                  that it is being heard, never the text. */}
               {voiceInterview.isRecording && (
-                <div className="mb-3 p-3 rounded-lg bg-[var(--surface1)] border border-[var(--border)]">
-                  <p className="text-xs text-[var(--textTertiary)] mb-1">
-                    Live captions — this is what gets sent to the interviewer
+                <div className="mb-3 flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface1)] p-3">
+                  <Mic size={14} className={voiceInterview.currentTranscript ? 'text-emerald-500' : 'text-[var(--textTertiary)]'} />
+                  <p className="text-sm text-[var(--textSecondary)]">
+                    {voiceInterview.currentTranscript
+                      ? 'Your voice is being captured. Press submit when you have finished your answer.'
+                      : 'Listening… speak your answer.'}
                   </p>
-                  {voiceInterview.currentTranscript ? (
-                    <p className="text-sm text-[var(--text)]">{voiceInterview.currentTranscript}</p>
-                  ) : (
-                    <p className="text-sm italic text-[var(--textTertiary)]">
-                      Listening… your words will appear here as you speak.
-                    </p>
-                  )}
                 </div>
               )}
               {voiceInterview.isRecording && (
