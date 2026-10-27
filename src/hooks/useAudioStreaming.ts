@@ -1,8 +1,8 @@
-import { aiService } from "@/services/ai.service";
 import { useState, useRef, useCallback } from "react";
 import { APP_CONFIG } from "@/config/app.config";
 import { MIC_AUDIO_CONSTRAINTS, describeMicProcessing, micProcessingReport } from "@/config/audio.config";
 import { interviewWsService } from "@/services/interview-ws.service";
+import { aiService } from "@/services/ai.service";
 
 /**
  * Hook for streaming audio chunks to the backend for live transcription.
@@ -150,8 +150,7 @@ export function useAudioStreaming(
         return;
       }
 
-      // A file over HTTP, not base64 over the socket: the socket caps a message at a megabyte, which is what
-      // forced four second chunks in the first place. One retry, because a chunk can hold a whole answer.
+      // A file over HTTP, with one retry: a chunk can hold most of an answer, so it is worth a second try.
       const index = chunkIndexRef.current++;
       sentCountRef.current += 1;
       console.log(`Sending audio chunk ${index} (${Math.round(blob.size / 1024)} KB)`);

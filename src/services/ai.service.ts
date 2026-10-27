@@ -93,12 +93,17 @@ export const aiService = {
   /**
    * Send a stretch of the candidate's answer to be transcribed. The text comes back on the interview's
    * transcription topic, so this only reports whether the audio was accepted.
+   *
+   * The multipart header is set by hand because the app's client defaults to JSON, and with that default axios
+   * turns a FormData into a JSON object instead of a file upload. The server then rejected every chunk, which
+   * the page could only report as a microphone that heard nothing.
    */
   sendAudioChunk(scheduleId: number, audio: Blob, chunkIndex: number) {
     const form = new FormData();
     form.append("audio", audio, `answer_${chunkIndex}.webm`);
     form.append("chunkIndex", String(chunkIndex));
     return api.post(`/api/interview/voice/${scheduleId}/audio-chunk`, form, {
+      headers: { "Content-Type": "multipart/form-data" },
       timeout: 2 * 60 * 1000,
       _skipErrorToast: true,
     } as never);
