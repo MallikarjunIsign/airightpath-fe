@@ -194,6 +194,8 @@ export const ENDPOINTS = {
   PROMPTS: {
     GET_BY_JOB: (prefix: string) => `/api/prompts/${seg(prefix)}`,
     SAVE: "/api/prompts",
+    JOBS_WITH_PROMPTS: "/api/prompts/jobs-with-prompts",
+    COPY: "/api/prompts/copy",
     GET_EVALUATION_CATEGORIES: (prefix: string) =>
       `/api/prompts/evaluation-categories/${seg(prefix)}`,
     SAVE_EVALUATION_CATEGORIES: "/api/prompts/evaluation-categories",

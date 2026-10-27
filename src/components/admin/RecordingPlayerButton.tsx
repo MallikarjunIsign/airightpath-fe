@@ -1,10 +1,11 @@
 import { useCallback, useRef, useState } from 'react';
-import { AlertTriangle, Download, ExternalLink, Loader2, Play, RotateCcw } from 'lucide-react';
+import { AlertTriangle, CalendarClock, Download, ExternalLink, FastForward, Loader2, Play, Rewind, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Modal } from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
 import { interviewService } from '@/services/interview.service';
 import { extractApiError } from '@/services/api.service';
+import { parseServerInstant } from '@/utils/format.utils';
 
 /**
  * Plays one of an interview's recordings, in place.
@@ -82,6 +83,9 @@ export function RecordingPlayerButton({
    */
   const [part, setPart] = useState(0);
   const [parts, setParts] = useState(1);
+  /** When this file was recorded, as the server stamped it. */
+  const [recordedAt, setRecordedAt] = useState<string | null>(null);
+  const [speed, setSpeed] = useState(1);
 
   /**
    * Stop the media, rather than trusting the element's removal to do it.
@@ -115,6 +119,8 @@ export function RecordingPlayerButton({
     setError(null);
     setPart(0);
     setParts(1);
+    setRecordedAt(null);
+    setSpeed(1);
   }, [stopPlayback]);
 
   const play = useCallback(async (which = 0) => {
@@ -127,6 +133,7 @@ export function RecordingPlayerButton({
       setUrl(res.data.url);
       setPart(res.data.part ?? which);
       setParts(res.data.parts ?? 1);
+      setRecordedAt(res.data.recordedAt ?? null);
     } catch (err) {
       // The server distinguishes "never recorded" from a failure to sign a
       // link, and only it can say which — so its wording is preferred over a
@@ -137,6 +144,28 @@ export function RecordingPlayerButton({
       setLoading(false);
     }
   }, [scheduleId, kind, stopPlayback]);
+
+  /** Jump by a number of seconds, staying inside the recording. */
+  function skip(seconds: number) {
+    const video = videoRef.current;
+    if (!video) return;
+    const end = Number.isFinite(video.duration) ? video.duration : Infinity;
+    video.currentTime = Math.min(Math.max(0, video.currentTime + seconds), end);
+  }
+
+  function changeSpeed(next: number) {
+    setSpeed(next);
+    if (videoRef.current) videoRef.current.playbackRate = next;
+  }
+
+  /** The recording's own date and time, in the reader's timezone, e.g. "Sat, 24 Oct 2026, 1:22 PM". */
+  const recordedLabel = (() => {
+    if (!recordedAt) return null;
+    const at = parseServerInstant(recordedAt);
+    return Number.isNaN(at.getTime())
+      ? null
+      : at.toLocaleString([], { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  })();
 
   async function download() {
     setDownloading(true);
@@ -227,6 +256,14 @@ export function RecordingPlayerButton({
                 </div>
               </div>
             )}
+            {recordedLabel && (
+              <p className="flex items-center gap-2 text-sm text-[var(--textSecondary)]">
+                <CalendarClock size={15} className="shrink-0 text-[var(--primary)]" />
+                <span>
+                  Recorded <strong className="text-[var(--text)]">{recordedLabel}</strong>
+                </span>
+              </p>
+            )}
             {/* Black behind the video so letterboxing on a portrait recording
                 does not read as a broken player. */}
             <div className="overflow-hidden rounded-lg bg-black">
@@ -241,6 +278,10 @@ export function RecordingPlayerButton({
                   // file; it is several only where the candidate stopped sharing
                   // and started again, and the reviewer should not have to notice
                   // the join and press play.
+                  onLoadedMetadata={() => {
+                    // A new file starts at normal speed; carry the chosen one over to the next part.
+                    if (videoRef.current) videoRef.current.playbackRate = speed;
+                  }}
                   onEnded={() => {
                     if (part + 1 < parts) void play(part + 1);
                   }}
@@ -255,6 +296,36 @@ export function RecordingPlayerButton({
                 />
               )}
             </div>
+            {/* Skip controls. The browser's seek bar is hard to hit precisely on a long recording, so these
+                jump by fixed steps, and the speed makes a long sitting quicker to get through. */}
+            {url && (
+              <div className="flex flex-wrap items-center gap-2">
+                {[-60, -10].map((s) => (
+                  <Button key={s} variant="outline" size="sm" leftIcon={<Rewind size={14} />} onClick={() => skip(s)}>
+                    {Math.abs(s) === 60 ? '1 min' : `${Math.abs(s)} s`}
+                  </Button>
+                ))}
+                {[10, 60].map((s) => (
+                  <Button key={s} variant="outline" size="sm" rightIcon={<FastForward size={14} />} onClick={() => skip(s)}>
+                    {s === 60 ? '1 min' : `${s} s`}
+                  </Button>
+                ))}
+                <label className="ml-auto flex items-center gap-2 text-xs text-[var(--textSecondary)]">
+                  Speed
+                  <select
+                    value={speed}
+                    onChange={(e) => changeSpeed(Number(e.target.value))}
+                    className="rounded border border-[var(--border)] bg-[var(--surface1)] px-2 py-1 text-[var(--text)]"
+                  >
+                    {[0.5, 1, 1.5, 2, 3].map((v) => (
+                      <option key={v} value={v}>
+                        {v}x
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            )}
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs text-[var(--textTertiary)]">
                 Use the player&apos;s fullscreen control to expand. The link expires in two hours.

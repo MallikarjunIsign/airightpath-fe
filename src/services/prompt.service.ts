@@ -32,6 +32,19 @@ const readConfig = (params?: Record<string, string>, opts?: SilentOpts) =>
   }) as never;
 
 export const promptService = {
+  /** Every job that already has prompts, with the kinds it has. */
+  getJobsWithPrompts() {
+    return api.get<Record<string, string[]>>(ENDPOINTS.PROMPTS.JOBS_WITH_PROMPTS);
+  },
+
+  /** Reuse one job's prompts, evaluation categories and interview settings for another, in one step. */
+  copy(fromJobPrefix: string, toJobPrefix: string) {
+    return api.post<{ prompts: number; categories: number; interviewSettings: number }>(
+      ENDPOINTS.PROMPTS.COPY,
+      { fromJobPrefix, toJobPrefix },
+    );
+  },
+
   /** All stored prompts for a job. */
   getByJob(jobPrefix: string, opts?: SilentOpts) {
     return api.get<PromptRecord[]>(ENDPOINTS.PROMPTS.GET_BY_JOB(jobPrefix), silentConfig(opts));

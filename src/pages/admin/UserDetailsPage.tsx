@@ -107,6 +107,11 @@ export function UserDetailsPage() {
   }, [user, showToast]);
 
   const back = () => navigate(ROUTES.ADMIN.USERS);
+  /**
+   * Handed to the result pages as where they were opened from. They fall back to their own list when told
+   * nothing, which is why "back" from a candidate's result landed on Assessment Results instead of here.
+   */
+  const cameFrom = { label: 'User details', path: ROUTES.ADMIN.userDetail(email) };
 
   if (loading) {
     return (
@@ -201,14 +206,14 @@ export function UserDetailsPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => navigate(ROUTES.ADMIN.candidateResultDetail(app.jobPrefix, email))}
+                      onClick={() => navigate(ROUTES.ADMIN.candidateResultDetail(app.jobPrefix, email), { state: { from: cameFrom } })}
                     >
                       Assessment result
                     </Button>
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => navigate(ROUTES.ADMIN.interviewResultDetail(app.jobPrefix, email))}
+                      onClick={() => navigate(ROUTES.ADMIN.interviewResultDetail(app.jobPrefix, email), { state: { from: cameFrom } })}
                     >
                       Interview result
                     </Button>

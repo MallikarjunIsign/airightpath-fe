@@ -17,6 +17,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { BackLink } from '@/components/ui/BackLink';
 import { QuestionBankPicker } from '@/components/admin/QuestionBankPicker';
+import { ReusePromptDialog } from '@/components/admin/ReusePromptDialog';
 import { QuestionPaperExportDialog } from '@/components/admin/QuestionPaperExportDialog';
 import { ExamDurationFields } from '@/components/admin/ExamDurationFields';
 import { PassMarkField } from '@/components/admin/PassMarkField';
@@ -286,6 +287,7 @@ export function AssignAssessmentPage() {
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
   // Which paper is being built from the question bank, if either.
+  const [reusePrompts, setReusePrompts] = useState(false);
   const [bankPicker, setBankPicker] = useState<'APTITUDE' | 'CODING' | null>(null);
   const [generatingAptitude, setGeneratingAptitude] = useState(generation.aptitude);
   const [generatingCoding, setGeneratingCoding] = useState(generation.coding);
@@ -830,6 +832,16 @@ export function AssignAssessmentPage() {
                     <Button
                       variant="ghost"
                       size="sm"
+                      onClick={() => (selectedPrefix ? setReusePrompts(true) : showToast(MESSAGES.admin.common.selectJobFirst, 'warning'))}
+                      leftIcon={<Library size={14} />}
+                      disabled={submitting}
+                      title="Copy another job's prompts to this job"
+                    >
+                      Reuse prompts
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       onClick={goToPromptScreen}
                       leftIcon={<FileCog size={14} />}
                       disabled={submitting}
@@ -950,6 +962,16 @@ export function AssignAssessmentPage() {
                       title="Pick questions that already exist — no waiting for the AI"
                     >
                       Choose from Question Bank
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => (selectedPrefix ? setReusePrompts(true) : showToast(MESSAGES.admin.common.selectJobFirst, 'warning'))}
+                      leftIcon={<Library size={14} />}
+                      disabled={submitting}
+                      title="Copy another job's prompts to this job"
+                    >
+                      Reuse prompts
                     </Button>
                     <Button
                       variant="ghost"
@@ -1149,6 +1171,14 @@ export function AssignAssessmentPage() {
       </Card>
 
       {/* Format picker for downloading a generated paper */}
+      <ReusePromptDialog
+        isOpen={reusePrompts}
+        onClose={() => setReusePrompts(false)}
+        targetPrefix={selectedPrefix}
+        jobs={jobs}
+        onCopied={() => void refreshConfiguredPrompts(selectedPrefix)}
+      />
+
       <QuestionBankPicker
         isOpen={bankPicker !== null}
         onClose={() => setBankPicker(null)}

@@ -215,7 +215,7 @@ export const interviewService = {
     // candidate can stop sharing mid-interview and pick it back up, and each
     // share is stored on its own. One file was being played and the rest were
     // invisible, which made an interrupted recording look like a short one.
-    return api.get<{ url: string; expiresInSeconds: number; part: number; parts: number }>(
+    return api.get<{ url: string; expiresInSeconds: number; part: number; parts: number; recordedAt?: string }>(
       ENDPOINTS.INTERVIEWS.RECORDING_LINK(scheduleId),
       { params: { kind, disposition, part } },
     );

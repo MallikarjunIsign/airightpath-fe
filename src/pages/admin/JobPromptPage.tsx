@@ -1,3 +1,4 @@
+import { ReusePromptDialog } from '@/components/admin/ReusePromptDialog';
 import { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Loader2, Sparkles, Save, Plus, X, BarChart3, Info, Copy, Check, ArrowLeft, Search, Briefcase } from 'lucide-react';
@@ -115,6 +116,7 @@ export function JobPromptPage() {
   const [mode, setMode] = useState<'list' | 'edit'>('list');
   const [listSearch, setListSearch] = useState('');
   const [reuseFrom, setReuseFrom] = useState('');
+  const [reuseDialog, setReuseDialog] = useState(false);
   // Which prompt types each job already has (built by scanning all jobs).
   const [promptsByJob, setPromptsByJob] = useState<Record<string, string[]>>({});
   const [scanning, setScanning] = useState(true);
@@ -613,6 +615,26 @@ export function JobPromptPage() {
               options={jobOptions}
               value={selectedPrefix}
               onChange={(e) => setSelectedPrefix(e.target.value)}
+            />
+
+            {/* One step: copy every prompt, category and setting from another job and save them now. */}
+            {selectedPrefix && (
+              <div>
+                <Button variant="outline" size="sm" onClick={() => setReuseDialog(true)}>
+                  Copy everything from another job and save
+                </Button>
+              </div>
+            )}
+            <ReusePromptDialog
+              isOpen={reuseDialog}
+              onClose={() => setReuseDialog(false)}
+              targetPrefix={selectedPrefix}
+              jobs={jobs}
+              onCopied={() => {
+                void fetchPrompts();
+                void fetchCategories();
+                setJobs((prev) => [...prev]);
+              }}
             />
 
             {/* Reuse an existing prompt as a starting point */}
