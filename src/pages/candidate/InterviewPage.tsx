@@ -1989,6 +1989,16 @@ export function InterviewPage() {
               Mobile Feed (Proctoring)
               {mobileConnected && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
             </h3>
+            {/* Skipped is said in a line. A black box with a phone icon read as a feed that had failed to
+                load; the candidate chose to go without, and nothing is being recorded from a phone. */}
+            {mobileSkipped && !mobileConnected ? (
+              <div className="flex items-center gap-2 rounded-lg border border-dashed border-[var(--border)] px-3 py-2.5">
+                <Smartphone size={16} className="flex-shrink-0 text-[var(--textTertiary)]" />
+                <p className="text-xs text-[var(--textSecondary)]">
+                  Phone camera skipped &mdash; not recording.
+                </p>
+              </div>
+            ) : (
             <div className={`aspect-video bg-black rounded-lg overflow-hidden relative shadow-inner ${!mobileConnected ? 'border-2 border-dashed border-[var(--border)]' : ''}`}>
               {!mobileConnected ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-[var(--textTertiary)] p-4 text-center">
@@ -2012,6 +2022,7 @@ export function InterviewPage() {
                 />
               )}
             </div>
+            )}
             {mobileConnected && (
               <div className="mt-2 flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
