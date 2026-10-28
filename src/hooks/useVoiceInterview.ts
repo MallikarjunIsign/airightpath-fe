@@ -45,6 +45,8 @@ function withCurrentTurn(
 export function useVoiceInterview() {
   // State
   const [state, setState] = useState<VoiceInterviewState>("pre-start");
+  /** Why the interview ended, when the server said: "ai_closed", "question_limit", or the reason text of a forced end. */
+  const [endReason, setEndReason] = useState<string | null>(null);
   const [scheduleId, setScheduleId] = useState<number | null>(null);
   /**
    * The same id, readable from a callback that was built before it arrived.
@@ -401,6 +403,7 @@ export function useVoiceInterview() {
           setQuestionsAsked(msg.questionsAsked);
 
           if (msg.isComplete || msg.terminated) {
+            setEndReason((prev) => prev ?? (msg.reason ? String(msg.reason) : msg.terminated ? "terminated" : "ai_closed"));
             setState("completed");
           } else {
             setState((prev) => (prev === "completed" ? prev : "active"));
@@ -982,6 +985,7 @@ export function useVoiceInterview() {
   return {
     // State
     state,
+    endReason,
     scheduleId,
     interviewerName,
     conversation,

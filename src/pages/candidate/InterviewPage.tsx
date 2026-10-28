@@ -138,6 +138,8 @@ export function InterviewPage() {
    * same list the instructions screen builds is one button away throughout.
    */
   const [showRules, setShowRules] = useState(false);
+  /** Why the interview is ending when the page itself decided (time up, ended by the candidate, too many skips). */
+  const endCauseRef = useRef<string | null>(null);
   const [postCompletionStep, setPostCompletionStep] = useState<PostCompletionStep>(null);
   const postCompletionStartedRef = useRef(false);
 
@@ -179,6 +181,7 @@ export function InterviewPage() {
     initialSeconds: APP_CONFIG.INTERVIEW_TIMER_MINUTES * 60,
     autoStart: false,
     onExpire: () => {
+      endCauseRef.current = 'time_up';
       showToast(MESSAGES.interview.timeUp, 'warning');
       runPostCompletionFlowRef.current(false);
     },
@@ -538,9 +541,8 @@ export function InterviewPage() {
         // Straight out. It used to pause here to show a confirmation, which is
         // a candidate watching a screen for no reason once they have pressed
         // submit. The recordings carry on uploading in the background.
+        // Stays on screen until the candidate leaves: an interview that ends by itself must say so and say why.
         setPostCompletionStep('done');
-        showToast('Interview submitted.', 'success');
-        navigate(ROUTES.CANDIDATE.INTERVIEWS);
       } catch (err) {
         console.error('Post-completion flow error:', err);
         navigate(ROUTES.CANDIDATE.INTERVIEWS);
@@ -589,6 +591,40 @@ export function InterviewPage() {
       setStillThereOpen(true);
     }, Math.max(APP_CONFIG.INTERVIEW_INACTIVITY_TIMEOUT_SECONDS, given + 120) * 1000);
   }, [clearInactivityTimers, showToast]);
+
+  // Recording starts by itself a moment after the interviewer finishes speaking, so the candidate does not have to
+  // press "Start answering" for every question. Once per question, never over a coding question (where they type
+  // first), and the button still works for anyone who wants to begin sooner.
+  const autoStartedForRef = useRef(-1);
+  useEffect(() => {
+    if (
+      voiceInterview.state !== 'active' ||
+      voiceInterview.isPlaying ||
+      voiceInterview.isCodingQuestion ||
+      !voiceInterview.isWsConnected ||
+      postCompletionStep ||
+      stillThereOpen ||
+      voiceInterview.conversation.length === 0 ||
+      autoStartedForRef.current === voiceInterview.conversation.length
+    ) {
+      return;
+    }
+    const turn = voiceInterview.conversation.length;
+    const id = window.setTimeout(() => {
+      autoStartedForRef.current = turn;
+      void voiceInterview.startAnswering();
+    }, APP_CONFIG.INTERVIEW_AUTO_RECORD_DELAY_MS);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    voiceInterview.state,
+    voiceInterview.isPlaying,
+    voiceInterview.isCodingQuestion,
+    voiceInterview.isWsConnected,
+    voiceInterview.conversation.length,
+    postCompletionStep,
+    stillThereOpen,
+  ]);
 
   useEffect(() => {
     // Restarted on every keystroke in the editor, because the code length is a
@@ -898,6 +934,40 @@ export function InterviewPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [interview?.id, mobileToken, mobileVerified, mobileSkipped]);
 
+  /**
+   * Once the phone is verified, keep asking whether it is still checking in. A phone swiped out of the recent
+   * apps, or a camera taken away, stops checking in; the page then says so, and the server files the same
+   * absence for the reviewer (see MobileDisconnectWatcher). The interview carries on either way.
+   */
+  useEffect(() => {
+    if (!interview?.id || !mobileToken || !mobileVerified || mobileSkipped) return;
+    let cancelled = false;
+    let wasLost = false;
+    const check = async () => {
+      if (document.hidden) return;
+      try {
+        const res = await interviewService.getMobilePairingState(interview.id, mobileToken);
+        if (cancelled) return;
+        const lost = !res.data?.connected;
+        setMobileConnected(!lost);
+        if (lost && !wasLost) {
+          showToast('Your phone camera has disconnected. Reopen the phone page to keep recording.', 'warning');
+        } else if (!lost && wasLost) {
+          showToast('Your phone camera is back.', 'success');
+        }
+        wasLost = lost;
+      } catch {
+        // Not reachable this time; the next tick asks again.
+      }
+    };
+    const timer = window.setInterval(check, 10_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [interview?.id, mobileToken, mobileVerified, mobileSkipped]);
+
   const getMobileBaseUrl = () => {
     // Use environment variable or fallback to window.location.origin (for desktop)
     const localIp = import.meta.env.VITE_LOCAL_IP;
@@ -1168,6 +1238,27 @@ export function InterviewPage() {
     if (stepIdx === currentIdx) return 'active';
     return 'pending';
   };
+  // What the candidate is told about how the interview ended: a thank-you when the interviewer closed it, and
+  // otherwise a plain statement that it was submitted and why.
+  const endCause = endCauseRef.current ?? voiceInterview.endReason;
+  const endMessage = (() => {
+    switch (endCause) {
+      case 'ai_closed':
+        return 'Thank you for your time. The interviewer has finished the interview and your answers have been submitted for review.';
+      case 'question_limit':
+        return 'You have answered all the questions for this interview, so it has been submitted for review. Thank you.';
+      case 'time_up':
+        return 'The time allowed for this interview is over, so it was submitted automatically with your answers so far.';
+      case 'candidate_ended':
+        return 'You ended the interview, so it has been submitted with your answers so far.';
+      case null:
+      case undefined:
+        return 'Your interview has been submitted with your answers so far.';
+      default:
+        return `Your interview was submitted automatically: ${endCause.replace(/^./, (c) => c.toUpperCase())}. Your answers so far are saved.`;
+    }
+  })();
+
   if (loadingInterview) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -1335,8 +1426,14 @@ export function InterviewPage() {
               </p>
             )}
 
+            {getStepStatus('ending') === 'done' && (
+              <p className="text-center text-sm text-[var(--text)]">{endMessage}</p>
+            )}
+
             {postCompletionStep === 'done' && (
-              <p className="text-center text-sm font-medium text-emerald-500">Taking you back…</p>
+              <Button className="w-full" onClick={() => navigate(ROUTES.CANDIDATE.INTERVIEWS)}>
+                Back to my interviews
+              </Button>
             )}
           </div>
         </div>
@@ -1346,7 +1443,10 @@ export function InterviewPage() {
       <ConfirmDialog
         isOpen={showEndConfirm}
         onClose={() => setShowEndConfirm(false)}
-        onConfirm={() => runPostCompletionFlow(false)}
+        onConfirm={() => {
+          endCauseRef.current = 'candidate_ended';
+          runPostCompletionFlow(false);
+        }}
         title="End Interview Early?"
         message="This action cannot be undone. Your responses so far will be evaluated, but unanswered questions may affect your overall score."
         confirmText="End Interview"
@@ -1795,8 +1895,10 @@ export function InterviewPage() {
                 size={18}
                 className={mobileVerified ? 'flex-shrink-0 text-emerald-500' : 'flex-shrink-0 text-[var(--textTertiary)]'}
               />
-              <p className={mobileVerified ? 'font-medium text-emerald-600 dark:text-emerald-400' : 'text-[var(--textSecondary)]'}>
-                {mobileVerified && !mobileSkipped
+              <p className={mobileVerified && !mobileSkipped && !mobileConnected ? 'font-medium text-red-600 dark:text-red-400' : mobileVerified ? 'font-medium text-emerald-600 dark:text-emerald-400' : 'text-[var(--textSecondary)]'}>
+                {mobileVerified && !mobileSkipped && !mobileConnected
+                  ? 'Disconnected — reopen the phone page'
+                  : mobileVerified && !mobileSkipped
                   ? 'Connected and recording'
                   : mobileSkipped
                     ? 'Skipped — not recording'

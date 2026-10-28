@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Smartphone, Loader2, ImageOff } from 'lucide-react';
+import { Smartphone, Loader2, ImageOff, ScanLine } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { interviewService } from '@/services/interview.service';
@@ -75,7 +75,7 @@ export function MobileCaptures({ scheduleId }: Readonly<{ scheduleId: number }>)
         <div className="flex items-center gap-2">
           <Smartphone size={18} className="text-[var(--primary)]" />
           <CardTitle>
-            Phone camera ({alerts.length} {alerts.length === 1 ? 'alert' : 'alerts'}, {room.length} room scan photos)
+            Phone camera ({alerts.length} {alerts.length === 1 ? 'alert' : 'alerts'})
           </CardTitle>
         </div>
       </CardHeader>
@@ -122,14 +122,16 @@ export function MobileCaptures({ scheduleId }: Readonly<{ scheduleId: number }>)
           )}
         </div>
 
+        {/* Laid out exactly as the desktop's room scan is in the Identity & Room Check card. */}
         {room.length > 0 && (
           <div className="mb-4">
-            <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-[var(--textTertiary)]">
-              Room scan, taken before the interview
+            <p className="mb-2.5 text-[10px] font-bold uppercase tracking-widest text-[var(--textTertiary)]">
+              <ScanLine size={12} className="-mt-0.5 mr-1 inline" />
+              Room scan ({room.length} {room.length === 1 ? 'frame' : 'frames'})
             </p>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex gap-2.5 overflow-x-auto pb-1">
               {room.map((capture) => (
-                <Thumb key={capture.id} capture={capture} onOpen={(url) => setOpen({ capture, url })} />
+                <Thumb key={capture.id} capture={capture} compact onOpen={(url) => setOpen({ capture, url })} />
               ))}
             </div>
           </div>
@@ -175,7 +177,11 @@ function captureTitle(capture: MobileCapture): string {
 }
 
 /** One still, fetched when it first scrolls into view. */
-function Thumb({ capture, onOpen }: Readonly<{ capture: MobileCapture; onOpen: (url: string) => void }>) {
+function Thumb({
+  capture,
+  onOpen,
+  compact = false,
+}: Readonly<{ capture: MobileCapture; onOpen: (url: string) => void; compact?: boolean }>) {
   const holder = useRef<HTMLButtonElement>(null);
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -224,7 +230,7 @@ function Thumb({ capture, onOpen }: Readonly<{ capture: MobileCapture; onOpen: (
       type="button"
       onClick={() => url && onOpen(url)}
       disabled={!url}
-      className="group relative aspect-video overflow-hidden rounded-lg bg-[var(--surface1)] ring-1 ring-[var(--border)] disabled:cursor-default"
+      className={`group relative overflow-hidden bg-[var(--surface1)] ring-1 ring-[var(--border)] disabled:cursor-default ${compact ? 'h-20 w-24 flex-shrink-0 rounded-xl' : 'aspect-video rounded-lg'}`}
       title={time}
     >
       {url ? (
