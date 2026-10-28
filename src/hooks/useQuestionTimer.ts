@@ -47,10 +47,16 @@ export function useQuestionTimer({ state, isPlaying, isCodingQuestion, onTimeout
     intervalRef.current = window.setInterval(() => {
       setSecondsLeft((prev) => {
         if (prev <= 1) {
-          // Fire the timeout callback and restart the countdown
-          // instead of auto-skipping the question
-          onTimeoutRef.current();
-          return timeout;
+          // The time given is up: say so once and stop. Restarting the countdown meant a question the candidate
+          // never answered was held open for ever, with the same reminder every few minutes. The page now moves the
+          // interview on, as an interviewer would when someone does not answer.
+          if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
+          }
+          setIsTimerActive(false);
+          window.setTimeout(() => onTimeoutRef.current(), 0);
+          return 0;
         }
         return prev - 1;
       });

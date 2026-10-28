@@ -108,12 +108,24 @@ export function InterviewPage() {
   const [micSource, setMicSource] = useState<'device' | 'phone'>('device');
 
   // Question timer
+  const questionTimerRef = useRef<{ incrementSkipCounter: () => void } | null>(null);
   const questionTimer = useQuestionTimer({
     state: voiceInterview.state,
     isPlaying: voiceInterview.isPlaying,
     isCodingQuestion: voiceInterview.isCodingQuestion,
     onTimeout: () => {
-      showToast(MESSAGES.interview.micToStart, 'warning');
+      // The time for this question has run out with no answer. Move on, as a person interviewing would: whatever is
+      // in the editor is submitted as the answer, and with nothing there the question is skipped, and the AI
+      // acknowledges it and asks something else. The skip is counted, so a run of them is noticed and recorded.
+      setStillThereOpen(false);
+      if (voiceInterview.codeContent.trim()) {
+        showToast(MESSAGES.interview.answerTimeLimit, 'warning');
+        void voiceInterview.submitAnswer();
+        return;
+      }
+      showToast(MESSAGES.interview.questionTimedOut, 'info');
+      questionTimerRef.current?.incrementSkipCounter();
+      voiceInterview.skipQuestion();
     },
     onMaxSkips: () => {
       // Warned, not ended. This used to close the interview after three
@@ -130,6 +142,8 @@ export function InterviewPage() {
       );
     },
   });
+
+  questionTimerRef.current = questionTimer;
 
   // Confirmation dialog
   const [showEndConfirm, setShowEndConfirm] = useState(false);

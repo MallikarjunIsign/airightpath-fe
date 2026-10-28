@@ -825,10 +825,9 @@ export function useVoiceInterview() {
     processingTimeoutRef.current = window.setTimeout(() => {
       console.error("Processing timeout — no response-complete received");
       processingTimeoutRef.current = null;
-      setState("active");
-      setError("Response timed out. Please try answering again.");
+      void recoverLostReply();
     }, APP_CONFIG.INTERVIEW_PROCESSING_TIMEOUT_MS);
-  }, [sendToInterview]);
+  }, [sendToInterview, recoverLostReply]);
 
   // Send proctoring event
   //

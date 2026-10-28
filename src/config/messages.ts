@@ -112,6 +112,7 @@ export const MESSAGES = {
 
   interview: {
     micToStart: 'Please click the microphone to start answering.',
+    questionTimedOut: 'No answer was given in time, so we are moving on to the next question.',
     // No longer announces an ending, because there is not one. The usual
     // cause is a microphone that is not working, and ending the interview
     // was the harshest possible response to the candidate's own equipment.
