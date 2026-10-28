@@ -41,6 +41,12 @@ import type { InterviewSchedule } from '@/types/interview.types';
 type PostCompletionStep = 'ending' | 'uploading-screen' | 'done' | null;
 
 
+/** Seconds as m:ss. */
+function formatClock(seconds: number): string {
+  const safe = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, '0')}`;
+}
+
 export function InterviewPage() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -306,12 +312,24 @@ export function InterviewPage() {
   }, [resumeScreenRecording, showToast]);
 
   // Fullscreen
+  // Leaving fullscreen is only a conduct matter once the interview is running. The screen-share picker itself takes
+  // the browser out of fullscreen, so the exits it caused used to be counted as warnings and reported to the
+  // reviewer before the interview had even begun.
+  const interviewRunningRef = useRef(false);
+  /** True while Begin is waiting for the candidate to enter fullscreen, so the box asking for it is shown. */
+  const [awaitingFullscreen, setAwaitingFullscreen] = useState(false);
   const { isFullscreen, enterFullscreen, fullscreenExitCount } = useFullscreen({
     onExitAttempt: (count) => {
+      if (!interviewRunningRef.current) return;
       showToast(MESSAGES.interview.fullscreenExit(count), 'warning');
       voiceInterview.sendProctoringEvent('fullscreen_exit', `Exit count: ${count}`);
     },
   });
+  /** How many exits had been counted when the interview began, so only the ones after it count. */
+  const fullscreenExitsAtStartRef = useRef(0);
+  const fullscreenExitsRef = useRef(0);
+  fullscreenExitsRef.current = fullscreenExitCount;
+  const fullscreenWarnings = Math.max(0, fullscreenExitCount - fullscreenExitsAtStartRef.current);
 
   // Face detection
   const {
@@ -522,7 +540,7 @@ export function InterviewPage() {
     }
   }, [interview, user?.email]);
 
-  const totalWarnings = faceWarnings + fullscreenExitCount + devToolsCount;
+  const totalWarnings = faceWarnings + fullscreenWarnings + devToolsCount;
 
   /**
    * Whether the camera is opened at all once the interview starts.
@@ -626,12 +644,20 @@ export function InterviewPage() {
     if (inactivityTimeoutRef.current) clearTimeout(inactivityTimeoutRef.current);
     inactivityWarningShownRef.current = false;
   }, []);
+  const isCodingRef = useRef(false);
+  isCodingRef.current = voiceInterview.isCodingQuestion;
   const startInactivityTimers = useCallback(() => {
     clearInactivityTimers();
+    // Measured against the time the question was given, not a fixed two minutes. The timer on screen says 300
+    // seconds (600 for code), and a warning at 120 and an "are you still there?" at 180 cut that window to a
+    // third of what the candidate was told.
+    const given = isCodingRef.current
+      ? APP_CONFIG.INTERVIEW_CODING_QUESTION_TIMEOUT_SECONDS
+      : APP_CONFIG.INTERVIEW_QUESTION_TIMEOUT_SECONDS;
     inactivityWarningRef.current = window.setTimeout(() => {
       inactivityWarningShownRef.current = true;
       showToast(MESSAGES.interview.inactivityWarning, 'warning');
-    }, APP_CONFIG.INTERVIEW_INACTIVITY_WARNING_SECONDS * 1000);
+    }, Math.max(APP_CONFIG.INTERVIEW_INACTIVITY_WARNING_SECONDS, given - 60) * 1000);
     inactivityTimeoutRef.current = window.setTimeout(() => {
       // Asks, rather than ends. Silence is not evidence of abandonment — a
       // candidate reading a question or writing code makes no sound at all,
@@ -639,7 +665,7 @@ export function InterviewPage() {
       // interview now finishes only on a proctoring violation, on running out
       // of time, or because the candidate said they were done.
       setStillThereOpen(true);
-    }, APP_CONFIG.INTERVIEW_INACTIVITY_TIMEOUT_SECONDS * 1000);
+    }, Math.max(APP_CONFIG.INTERVIEW_INACTIVITY_TIMEOUT_SECONDS, given + 120) * 1000);
   }, [clearInactivityTimers, showToast]);
 
   useEffect(() => {
@@ -1191,7 +1217,6 @@ export function InterviewPage() {
 
     stopInstruction();
     try {
-      if (PROCTORING_CONFIG.fullscreen.enabled) await enterFullscreen();
       // The models are a multi-megabyte download; fetching them for a check
       // that is switched off spends the candidate's bandwidth on nothing.
       if (PROCTORING_CONFIG.eyeDetection.enabled) await loadModels();
@@ -1221,6 +1246,27 @@ export function InterviewPage() {
         }
       }
 
+      // Fullscreen comes after the share, and before the interview starts. The screen picker takes the browser out
+      // of fullscreen, so entering it first meant the page dropped out as the interview began, the "return to
+      // fullscreen" box appeared over an interview that was already running behind it, and the candidate had to do
+      // it twice. Now it is entered once, here, and nothing starts until it is on.
+      if (PROCTORING_CONFIG.fullscreen.enabled && !document.fullscreenElement) {
+        await enterFullscreen();
+        // The picker can use up the click that allows this. The notice on screen has a button for it; wait for it.
+        const deadline = Date.now() + 5 * 60 * 1000;
+        setAwaitingFullscreen(true);
+        while (!document.fullscreenElement && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+        setAwaitingFullscreen(false);
+        if (!document.fullscreenElement) {
+          abortScreenRecording();
+          setScreenPermission('prompt');
+          showToast('Enter fullscreen to begin the interview.', 'warning');
+          return;
+        }
+      }
+
       const started = await voiceInterview.startInterview({
         email: user.email,
         jobPrefix: interview.jobPrefix,
@@ -1244,6 +1290,8 @@ export function InterviewPage() {
       if (started?.resumed) {
         showToast(MESSAGES.interview.resumed, 'info');
       }
+      interviewRunningRef.current = true;
+      fullscreenExitsAtStartRef.current = fullscreenExitsRef.current;
       // The recording audit, from the first moment. Says what this deployment
       // requires, so a reviewer who finds no recording can tell "it was
       // switched off" from "it was required and did not happen" — the two
@@ -1546,6 +1594,7 @@ export function InterviewPage() {
           screen from the first frame with a button that put the candidate into
           a mode the deployment had turned off. */}
       {PROCTORING_CONFIG.fullscreen.enabled && !isFullscreen
+        && (awaitingFullscreen || (voiceInterview.state !== 'pre-start' && voiceInterview.state !== 'starting'))
         && voiceInterview.state !== 'completed' && !postCompletionStep && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center backdrop-blur-sm p-4">
           <div className="bg-[var(--cardBg)] rounded-2xl p-6 sm:p-8 w-full max-w-md text-center space-y-4 shadow-2xl">
@@ -1610,7 +1659,7 @@ export function InterviewPage() {
                     <div className="flex justify-between"><span>Face / eye</span><span className="font-mono">{faceWarnings}</span></div>
                   )}
                   {PROCTORING_CONFIG.fullscreen.enabled && (
-                    <div className="flex justify-between"><span>Fullscreen exits</span><span className="font-mono">{fullscreenExitCount}</span></div>
+                    <div className="flex justify-between"><span>Fullscreen exits</span><span className="font-mono">{fullscreenWarnings}</span></div>
                   )}
                   <div className="flex justify-between"><span>DevTools</span><span className="font-mono">{devToolsCount}</span></div>
                 </div>
@@ -1839,7 +1888,8 @@ export function InterviewPage() {
                         className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 font-mono text-sm font-semibold ${answerSecondsLeft <= 30 ? 'bg-red-500/25 text-red-200' : answerSecondsLeft <= 60 ? 'bg-amber-500/25 text-amber-200' : 'bg-white/10 text-white'}`}
                       >
                         <Timer size={14} className={answerSecondsLeft <= 30 ? 'animate-pulse' : ''} />
-                        {Math.floor(answerSecondsLeft / 60)}:{String(answerSecondsLeft % 60).padStart(2, '0')}
+                        {formatClock(APP_CONFIG.INTERVIEW_ANSWER_TIMEOUT_SECONDS - answerSecondsLeft)}
+                        <span className="font-normal opacity-60">/ {formatClock(APP_CONFIG.INTERVIEW_ANSWER_TIMEOUT_SECONDS)}</span>
                       </span>
                     </div>
                   </div>

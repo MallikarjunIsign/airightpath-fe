@@ -260,6 +260,23 @@ export default function MobileConnect() {
         setConsented(true);
     };
 
+    // The preview is kept on its stream on every render. The element can mount after the stream is ready (the live view
+    // replaces the consent screen), and Chrome on a phone pauses a preview when the page is backgrounded; either left
+    // a black box that looked like a dead camera while the recording and the live picture were working.
+    useEffect(() => {
+        const video = videoRef.current;
+        if (!video || !captureStream) return;
+        if (video.srcObject !== captureStream) video.srcObject = captureStream;
+        if (video.paused) void video.play().catch(() => {});
+    });
+    useEffect(() => {
+        const resume = () => {
+            if (document.visibilityState === 'visible') void videoRef.current?.play().catch(() => {});
+        };
+        document.addEventListener('visibilitychange', resume);
+        return () => document.removeEventListener('visibilitychange', resume);
+    }, []);
+
     const toggleCamera = () => {
         setFacingMode(prev => prev === 'user' ? 'environment' : 'user');
     };
@@ -697,7 +714,7 @@ export default function MobileConnect() {
                             <div className="flex justify-end">
                                 <button
                                     onClick={toggleCamera}
-                                    className="text-xs bg-gray-100 hover:bg-gray-200 px-2 py-1 rounded flex items-center gap-1"
+                                    className="flex items-center gap-1 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-800 active:scale-95"
                                 >
                                     Switch Camera
                                 </button>
