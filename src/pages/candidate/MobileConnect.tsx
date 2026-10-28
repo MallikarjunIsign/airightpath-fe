@@ -446,7 +446,10 @@ export default function MobileConnect() {
         // while the live picture is up. The photos are kept as evidence now, and
         // a stream that failed to connect is exactly when they matter most.
         if (verified && !finished) {
-            interval = window.setInterval(monitorRoom, 20000); // Check every 20 seconds
+            // A still every minute is a record of the room at intervals; the phone's own recording is the
+            // continuous evidence. Tunable with VITE_MOBILE_FRAME_INTERVAL_SECONDS.
+            const seconds = Number(import.meta.env.VITE_MOBILE_FRAME_INTERVAL_SECONDS) || 60;
+            interval = window.setInterval(monitorRoom, seconds * 1000);
         }
         return () => {
             if (interval) clearInterval(interval);

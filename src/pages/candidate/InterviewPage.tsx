@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -170,20 +170,6 @@ export function InterviewPage() {
   const inactivityWarningShownRef = useRef(false);
   /** "Are you still there?" — a question, never a countdown to ending. */
   const [stillThereOpen, setStillThereOpen] = useState(false);
-  /**
-   * The question on the table, for the panel above the code editor.
-   *
-   * The last thing the interviewer said, which is the question being answered.
-   * Fillers and system notices are skipped — neither is a question.
-   */
-  const currentQuestion = useMemo(() => {
-    const interviewerTurns = voiceInterview.conversation.filter(
-      (entry) => entry.role === 'interviewer',
-    );
-    return interviewerTurns.length > 0
-      ? interviewerTurns[interviewerTurns.length - 1].content
-      : null;
-  }, [voiceInterview.conversation]);
   const runPostCompletionFlowRef = useRef<(skip: boolean) => void>(() => { });
 
   // Global timer
@@ -739,7 +725,9 @@ export function InterviewPage() {
         code: voiceInterview.codeContent,
         language: voiceInterview.codeLanguage,
       });
-      const output = res.data.output || res.data.error;
+      // Both: a program that printed something and then crashed has output and an error, and the error is what
+      // explains where the output stops.
+      const output = [res.data.output, res.data.error].filter(Boolean).join('\n');
       setCompileOutput(output);
       // Also held on the interview state, so it is submitted with the answer
       // rather than staying on this screen.
@@ -837,17 +825,9 @@ export function InterviewPage() {
    * row, which puts the question off-screen again.</p>
    */
   useEffect(() => {
+    // The editor is the last thing in the conversation now, so the bottom of it shows the question above the editor.
     const chat = chatContainerRef.current;
     if (chat) chat.scrollTop = chat.scrollHeight;
-
-    const column = columnRef.current;
-    if (!column) return;
-    const coding = codingSectionRef.current;
-    if (coding) {
-      column.scrollTo({ top: Math.max(0, coding.offsetTop - 8), behavior: 'smooth' });
-    } else {
-      column.scrollTop = column.scrollHeight;
-    }
   }, [voiceInterview.conversation, voiceInterview.streamingText]);
 
   /**
@@ -860,10 +840,11 @@ export function InterviewPage() {
   useEffect(() => {
     if (!voiceInterview.isCodingQuestion) return;
     const id = window.setTimeout(() => {
-      const column = columnRef.current;
+      const chat = chatContainerRef.current;
       const coding = codingSectionRef.current;
-      if (column && coding) {
-        column.scrollTo({ top: Math.max(0, coding.offsetTop - 8), behavior: 'smooth' });
+      // A little above the editor, so the question it answers is on screen with it.
+      if (chat && coding) {
+        chat.scrollTo({ top: Math.max(0, coding.offsetTop - 200), behavior: 'smooth' });
       }
     }, 150);
     return () => window.clearTimeout(id);
@@ -1691,7 +1672,7 @@ export function InterviewPage() {
           {/* Conversation area */}
           <div
             ref={chatContainerRef}
-            className="flex-1 min-h-[12rem] overflow-y-auto p-4 sm:p-6 space-y-4"
+            className="relative flex-1 min-h-[12rem] overflow-y-auto p-4 sm:p-6 space-y-4"
           >
             {voiceInterview.conversation.map((entry, idx) => (
               <div key={idx} className={`flex items-start gap-3 ${entry.role === 'candidate' ? 'flex-row-reverse' : ''} ${entry.role === 'filler' ? 'opacity-60' : ''}`}>
@@ -1712,78 +1693,47 @@ export function InterviewPage() {
             {voiceInterview.state === 'completed' && !postCompletionStep && (
               <div className="text-center py-4"><Badge variant="success" size="lg">Interview Complete</Badge><p className="text-sm text-[var(--textSecondary)] mt-2">Generating evaluation...</p></div>
             )}
-          </div>
 
-          {/* A way to the editor that does not depend on the model. In the technical round a candidate is
-              sometimes asked to write code and the editor does not open, because the question was not tagged;
-              this opens it by hand, so a candidate can always write code when they are asked to. */}
-          {interview?.round === 'L2_TECHNICAL' &&
-            !voiceInterview.isCodingQuestion &&
-            voiceInterview.state !== 'completed' &&
-            voiceInterview.state !== 'pre-start' &&
-            !postCompletionStep && (
-              <div className="flex-shrink-0 border-t border-[var(--border)] px-3 py-2 text-right">
-                <Button size="sm" variant="outline" onClick={voiceInterview.openCodeEditor}>
-                  Open code editor
-                </Button>
-              </div>
-            )}
-
-          {/* Coding Editor & Compile.
-              No height cap of its own any more — the candidate sets the
-              editor's height with its grip, and the column scrolls. Capping it
-              at 55vh only meant a tall editor squeezed the transcript to
-              nothing and pushed the controls off-screen. */}
-          {voiceInterview.isCodingQuestion && voiceInterview.state !== 'completed' && !postCompletionStep && (
-            <div ref={codingSectionRef} className="flex-shrink-0 min-w-0 border-t border-[var(--border)] px-2 sm:px-4 py-2 sm:py-3 space-y-2">
-              {/* The question, pinned above the editor. The chat scrolls, and
-                  once the editor and its output are open the question that was
-                  asked is usually off the top of it — leaving the candidate
-                  writing code against something they can no longer read. It
-                  scrolls inside its own box so a long one cannot push the
-                  editor off the screen. */}
-              {currentQuestion && (
-                <details open className="rounded-lg border border-[var(--border)] bg-[var(--surface1)]">
-                  <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wider text-[var(--textSecondary)]">
-                    The question
-                  </summary>
-                  <p className="max-h-24 sm:max-h-48 overflow-y-auto whitespace-pre-wrap px-3 pb-3 text-sm text-[var(--text)]">
-                    {currentQuestion}
-                  </p>
-                </details>
-              )}
-              <CodingEditor code={voiceInterview.codeContent} language={voiceInterview.codeLanguage} onCodeChange={voiceInterview.setCodeContent} onLanguageChange={voiceInterview.setCodeLanguage} disabled={voiceInterview.state === 'processing'} />
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <Button size="sm" variant="outline" onClick={handleCompile} disabled={compiling || !voiceInterview.codeContent.trim()}>
-                  {compiling ? <Loader2 size={14} className="animate-spin mr-2" /> : <Play size={14} className="mr-2" />}
-                  Compile & Run
-                </Button>
-                {/* There was no way to submit code at all. The only route was
-                    to speak and stop the mic, so a candidate who had written a
-                    working solution and had nothing to say about it was stuck.
-                    Any spoken explanation already recorded goes with it. */}
-                <Button
-                  size="sm"
-                  onClick={() => voiceInterview.submitAnswer()}
-                  disabled={
-                    voiceInterview.state === 'processing' || !voiceInterview.codeContent.trim()
-                  }
-                  leftIcon={<Send size={14} />}
-                >
-                  Submit answer
-                </Button>
-              </div>
-              {compileOutput && (
-                <div className="mt-2 min-w-0 p-3 rounded-lg bg-[#1e1e1e] text-gray-200 font-mono text-xs sm:text-sm overflow-auto max-h-32 sm:max-h-48">
-                  {/* break-words as well as wrap: a stack trace or a long
-                      compiler path has no spaces to wrap at, and without it
-                      the panel stretches the whole column wider than the
-                      phone and the page scrolls sideways. */}
-                  <pre className="whitespace-pre-wrap break-words">{compileOutput}</pre>
+              {/* Coding Editor & Compile, inline in the conversation: it follows the question it belongs to and scrolls with it.
+                  No height cap of its own any more — the candidate sets the
+                  editor's height with its grip, and the column scrolls. Capping it
+                  at 55vh only meant a tall editor squeezed the transcript to
+                  nothing and pushed the controls off-screen. */}
+              {voiceInterview.isCodingQuestion && voiceInterview.state !== 'completed' && !postCompletionStep && (
+                <div ref={codingSectionRef} className="min-w-0 space-y-2 rounded-xl border border-[var(--border)] bg-[var(--surface1)] p-2 sm:p-3">
+                  <CodingEditor code={voiceInterview.codeContent} language={voiceInterview.codeLanguage} onCodeChange={voiceInterview.setCodeContent} onLanguageChange={voiceInterview.setCodeLanguage} disabled={voiceInterview.state === 'processing'} />
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <Button size="sm" variant="outline" onClick={handleCompile} disabled={compiling || !voiceInterview.codeContent.trim()}>
+                      {compiling ? <Loader2 size={14} className="animate-spin mr-2" /> : <Play size={14} className="mr-2" />}
+                      Compile & Run
+                    </Button>
+                    {/* There was no way to submit code at all. The only route was
+                        to speak and stop the mic, so a candidate who had written a
+                        working solution and had nothing to say about it was stuck.
+                        Any spoken explanation already recorded goes with it. */}
+                    <Button
+                      size="sm"
+                      onClick={() => voiceInterview.submitAnswer()}
+                      disabled={
+                        voiceInterview.state === 'processing' || !voiceInterview.codeContent.trim()
+                      }
+                      leftIcon={<Send size={14} />}
+                    >
+                      Submit answer
+                    </Button>
+                  </div>
+                  {compileOutput && (
+                    <div className="mt-2 min-w-0 p-3 rounded-lg bg-[#1e1e1e] text-gray-200 font-mono text-xs sm:text-sm overflow-auto max-h-32 sm:max-h-48">
+                      {/* break-words as well as wrap: a stack trace or a long
+                          compiler path has no spaces to wrap at, and without it
+                          the panel stretches the whole column wider than the
+                          phone and the page scrolls sideways. */}
+                      <pre className="whitespace-pre-wrap break-words">{compileOutput}</pre>
+                    </div>
+                  )}
                 </div>
               )}
-            </div>
-          )}
+          </div>
 
           {/* Voice controls. Pinned to the bottom of the scrolling column: the
               mic is the one control the candidate must always be able to reach,

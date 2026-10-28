@@ -413,6 +413,16 @@ export function useVoiceInterview() {
         `/topic/interview/${id}/transcription-error`,
         (msg: { error: string }) => {
           console.error("Transcription error:", msg.error);
+          // The server refuses an answer to an interview that is already over, and said so only here, so the page
+          // sat on "Processing your answer…" for good. That refusal means the interview ended: show it ended.
+          if (/not active/i.test(msg.error ?? "")) {
+            if (processingTimeoutRef.current) {
+              window.clearTimeout(processingTimeoutRef.current);
+              processingTimeoutRef.current = null;
+            }
+            setState("completed");
+            return;
+          }
           setTranscriptionError(msg.error);
           setTimeout(() => setTranscriptionError(null), 5000);
         },
@@ -570,6 +580,40 @@ export function useVoiceInterview() {
     setState("answering");
   }, [audioStreaming, audioPlayback, sendToInterview]);
 
+  /**
+   * Notices an interview that ended without the page being told.
+   *
+   * The end is announced over the live connection, once. When the AI closed the interview, or the time ran out,
+   * and that message was missed, the phone (which asks the server) showed "thank you" while this page stayed on
+   * "Processing…" for ever, and pressing submit changed nothing. So while the interview is running the page also
+   * asks the server every few seconds whether it is still going.
+   */
+  useEffect(() => {
+    if (state !== "active" && state !== "answering" && state !== "processing") return;
+    let cancelled = false;
+    const check = async () => {
+      const id = scheduleIdRef.current;
+      if (id === null) return;
+      try {
+        const { data } = await aiService.getVoiceStatus(id);
+        if (!cancelled && String(data?.status ?? "").toUpperCase() === "COMPLETED") {
+          if (processingTimeoutRef.current) {
+            window.clearTimeout(processingTimeoutRef.current);
+            processingTimeoutRef.current = null;
+          }
+          setState("completed");
+        }
+      } catch {
+        // Not reachable this time; the next check asks again.
+      }
+    };
+    const timer = window.setInterval(check, 10_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [state]);
+
   /** Waits for the live connection, which reconnects by itself, for up to `ms`. */
   const waitForConnection = useCallback(async (ms: number): Promise<boolean> => {
     const deadline = Date.now() + ms;
@@ -592,6 +636,11 @@ export function useVoiceInterview() {
         const { data } = await aiService.resumeVoiceInterview(id);
         const history = data?.conversationHistory ?? [];
         const last = history[history.length - 1];
+        if (data && !data.hasActiveSession) {
+          // Nothing running on the server: the interview ended while the reply was on its way.
+          setState("completed");
+          return;
+        }
         if (data?.hasActiveSession && last && last.role !== "candidate") {
           const turn = detectAndCleanCodingTag(last.content);
           setIsCodingQuestion(turn.isCoding);
@@ -955,8 +1004,6 @@ export function useVoiceInterview() {
     setCodeOutput,
     setCodeContent,
     setCodeLanguage,
-    /** Opens the editor by hand, for a question the model did not tag as one that needs code. */
-    openCodeEditor: () => setIsCodingQuestion(true),
 
     // Audio state
     isRecording: audioStreaming.isRecording,
