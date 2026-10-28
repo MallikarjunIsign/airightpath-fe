@@ -759,12 +759,20 @@ export function InterviewPage() {
     setCompileOutput('');
   }, [voiceInterview.conversation.length, voiceInterview.isCodingQuestion]);
 
+  // The three previews (camera, shared screen, phone) sit in the sidebar, which is only on the page once the
+  // interview has left the instructions. Their streams arrive earlier than that: the screen is shared and the
+  // phone connects before Begin finishes. An effect keyed on the stream alone ran while the video elements did not
+  // exist yet and never ran again, so the panels stayed black or showed a placeholder while everything was in fact
+  // being recorded. Keying them on the interview's state as well re-attaches the stream once the panel is there.
+  const sidebarShown = voiceInterview.state !== 'pre-start';
+
   // Video preview
   useEffect(() => {
     if (videoRef.current && recorderStream) {
       videoRef.current.srcObject = recorderStream;
+      void videoRef.current.play().catch(() => {});
     }
-  }, [recorderStream]);
+  }, [recorderStream, sidebarShown]);
 
   // Screen-share preview. Cleared as well as set: a stopped share otherwise
   // leaves its last frame on screen, which reads as though it were still live.
@@ -772,7 +780,8 @@ export function InterviewPage() {
     const element = screenPreviewRef.current;
     if (!element) return;
     element.srcObject = screenStream;
-  }, [screenStream]);
+    if (screenStream) void element.play().catch(() => {});
+  }, [screenStream, sidebarShown]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -1084,7 +1093,7 @@ export function InterviewPage() {
         console.warn('Auto-play failed for mobile video:', err);
       });
     }
-  }, [remoteStream, mobileConnected]);
+  }, [remoteStream, mobileConnected, sidebarShown]);
 
   const getMobileBaseUrl = () => {
     // Use environment variable or fallback to window.location.origin (for desktop)
