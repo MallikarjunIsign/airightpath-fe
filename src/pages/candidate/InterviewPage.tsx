@@ -194,6 +194,23 @@ export function InterviewPage() {
     },
   });
 
+  // Said before the clock runs out, not only when it has. The interview ends the moment the timer does, in the
+  // middle of an answer if that is where the candidate is, and the only notice used to be the one at the end.
+  const timeNoticesRef = useRef({ five: false, one: false });
+  useEffect(() => {
+    const running = ['active', 'answering', 'processing'].includes(voiceInterview.state);
+    if (!running || globalSecondsLeft <= 0) return;
+    if (globalSecondsLeft <= 300 && !timeNoticesRef.current.five) {
+      timeNoticesRef.current.five = true;
+      showToast(MESSAGES.interview.fiveMinutesLeft, 'warning');
+    }
+    if (globalSecondsLeft <= 60 && !timeNoticesRef.current.one) {
+      timeNoticesRef.current.one = true;
+      showToast(MESSAGES.interview.oneMinuteLeft, 'warning');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [globalSecondsLeft, voiceInterview.state]);
+
   // Elapsed, for display. Derived from the countdown rather than kept as a
   // second clock so the two can never disagree, and so a reload — which
   // re-anchors the countdown to the server's deadline — resumes the count-up

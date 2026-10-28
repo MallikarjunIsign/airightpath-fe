@@ -118,6 +118,8 @@ export const MESSAGES = {
     consecutiveUnanswered:
       'Several questions have gone unanswered. Check your microphone is working — your interview is still running.',
     timeUp: 'Interview time is up. Ending interview.',
+    fiveMinutesLeft: 'About 5 minutes left in this interview. Start wrapping up your answer.',
+    oneMinuteLeft: 'About 1 minute left. The interview will end automatically when time is up.',
     screenShareStopped: 'Screen sharing stopped. This has been logged.',
     resumed: 'Picking up where you left off — your earlier answers are saved.',
     roomSecondPerson: (count: number) =>
