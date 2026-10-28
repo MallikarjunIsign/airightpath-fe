@@ -592,40 +592,6 @@ export function InterviewPage() {
     }, Math.max(APP_CONFIG.INTERVIEW_INACTIVITY_TIMEOUT_SECONDS, given + 120) * 1000);
   }, [clearInactivityTimers, showToast]);
 
-  // Recording starts by itself a moment after the interviewer finishes speaking, so the candidate does not have to
-  // press "Start answering" for every question. Once per question, never over a coding question (where they type
-  // first), and the button still works for anyone who wants to begin sooner.
-  const autoStartedForRef = useRef(-1);
-  useEffect(() => {
-    if (
-      voiceInterview.state !== 'active' ||
-      voiceInterview.isPlaying ||
-      voiceInterview.isCodingQuestion ||
-      !voiceInterview.isWsConnected ||
-      postCompletionStep ||
-      stillThereOpen ||
-      voiceInterview.conversation.length === 0 ||
-      autoStartedForRef.current === voiceInterview.conversation.length
-    ) {
-      return;
-    }
-    const turn = voiceInterview.conversation.length;
-    const id = window.setTimeout(() => {
-      autoStartedForRef.current = turn;
-      void voiceInterview.startAnswering();
-    }, APP_CONFIG.INTERVIEW_AUTO_RECORD_DELAY_MS);
-    return () => window.clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    voiceInterview.state,
-    voiceInterview.isPlaying,
-    voiceInterview.isCodingQuestion,
-    voiceInterview.isWsConnected,
-    voiceInterview.conversation.length,
-    postCompletionStep,
-    stillThereOpen,
-  ]);
-
   useEffect(() => {
     // Restarted on every keystroke in the editor, because the code length is a
     // dependency: someone typing is plainly still present, and the check exists
@@ -1280,6 +1246,21 @@ export function InterviewPage() {
   const isCountdownActive = instructionCountdown > 0;
   const canStartInterview = !isCountdownActive && micPermission !== 'denied';
 
+  // The box asking the candidate back into fullscreen. Shown over the running interview, and over the setup screen
+  // while Begin is waiting for fullscreen (the interview has not started then, so the main screen is not on show).
+  const fullscreenNotice = (
+    <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center backdrop-blur-sm p-4">
+      <div className="bg-[var(--cardBg)] rounded-2xl p-6 sm:p-8 w-full max-w-md text-center space-y-4 shadow-2xl">
+        <div className="w-16 h-16 mx-auto rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+          <Maximize className="w-8 h-8 text-amber-600 dark:text-amber-400" />
+        </div>
+        <h2 className="text-xl font-bold text-[var(--text)]">Fullscreen Required</h2>
+        <p className="text-sm text-[var(--textSecondary)]">Please return to fullscreen to continue.</p>
+        <Button onClick={enterFullscreen} size="lg">Return to Fullscreen</Button>
+      </div>
+    </div>
+  );
+
   // Pre-start screen with QR code.
   //
   // 'error' belongs here too. It used to fall through to the main interview
@@ -1294,6 +1275,8 @@ export function InterviewPage() {
     voiceInterview.state === 'error'
   ) {
     return (
+      <>
+      {PROCTORING_CONFIG.fullscreen.enabled && !isFullscreen && awaitingFullscreen && fullscreenNotice}
       <InterviewPreStartScreen
         jobPrefix={interview.jobPrefix}
         isSetupActive={isSetupActive}
@@ -1318,6 +1301,7 @@ export function InterviewPage() {
         capturesReady={capturesReady}
         onCapturesReadyChange={setCapturesReady}
       />
+      </>
     );
   }
 
@@ -1459,19 +1443,7 @@ export function InterviewPage() {
           screen from the first frame with a button that put the candidate into
           a mode the deployment had turned off. */}
       {PROCTORING_CONFIG.fullscreen.enabled && !isFullscreen
-        && (awaitingFullscreen || (voiceInterview.state !== 'pre-start' && voiceInterview.state !== 'starting'))
-        && voiceInterview.state !== 'completed' && !postCompletionStep && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center backdrop-blur-sm p-4">
-          <div className="bg-[var(--cardBg)] rounded-2xl p-6 sm:p-8 w-full max-w-md text-center space-y-4 shadow-2xl">
-            <div className="w-16 h-16 mx-auto rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
-              <Maximize className="w-8 h-8 text-amber-600 dark:text-amber-400" />
-            </div>
-            <h2 className="text-xl font-bold text-[var(--text)]">Fullscreen Required</h2>
-            <p className="text-sm text-[var(--textSecondary)]">Please return to fullscreen to continue.</p>
-            <Button onClick={enterFullscreen} size="lg">Return to Fullscreen</Button>
-          </div>
-        </div>
-      )}
+        && voiceInterview.state !== 'completed' && !postCompletionStep && fullscreenNotice}
 
 
       {/* Top bar */}
