@@ -361,6 +361,8 @@ export interface ResponseCompleteMessage {
   questionsAsked: number;
   isComplete: boolean;
   terminated: boolean;
+  /** Why the interview ended: ai_closed, question_limit, or the server's own reason for forcing it. */
+  reason?: string;
 }
 
 // Voice evaluation types

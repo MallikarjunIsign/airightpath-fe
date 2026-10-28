@@ -143,13 +143,9 @@ export function useVoiceInterview() {
       const tagRegex = /\[(CODING|THEORY|NON-TECH)\]\s*/i;
       const match = text.match(tagRegex);
       const cleanText = text.replace(tagRegex, "").trim();
-      // The tag is the model's say-so, and it sometimes leaves it off a question that plainly asks for code,
-      // which asks the candidate to write code with nowhere to write it. The server adds the tag in that case
-      // too; this covers a message that reached the browser without it (an older server, a resumed question).
-      const isCoding = match
-        ? match[1].toUpperCase() === "CODING"
-        : /\b(?:write|implement|code|program|develop|create|build|solve)\b[^.?!\n]{0,60}?\b(?:function|method|program|class|algorithm|code|query|script|snippet|solution|logic|loop|api|endpoint|component|regex|sql)\b/i.test(cleanText) &&
-          !/\b(?:explain|describe|what\s+(?:is|are|does|do)|difference\s+between|why\s+(?:do|does|is|are))\b/i.test(cleanText);
+      // The code editor opens only for the model's [CODING] tag. Guessing from the wording opened it for
+      // questions meant to be answered aloud.
+      const isCoding = !!match && match[1].toUpperCase() === "CODING";
       return { cleanText, isCoding };
     },
     [],
@@ -970,15 +966,20 @@ export function useVoiceInterview() {
     return null;
   }, [scheduleId]);
 
-  // Cleanup on unmount
+  // Cleanup on unmount. Held in refs so the cleanup runs once, on unmount, and not each time the hooks'
+  // returned objects change.
+  const audioStreamingRef = useRef(audioStreaming);
+  audioStreamingRef.current = audioStreaming;
+  const audioPlaybackRef = useRef(audioPlayback);
+  audioPlaybackRef.current = audioPlayback;
   useEffect(() => {
     return () => {
       if (processingTimeoutRef.current) {
         clearTimeout(processingTimeoutRef.current);
       }
       interviewWsService.disconnect();
-      audioStreaming.stopRecording();
-      audioPlayback.stopPlayback();
+      audioStreamingRef.current.stopRecording();
+      audioPlaybackRef.current.stopPlayback();
     };
   }, []);
 
