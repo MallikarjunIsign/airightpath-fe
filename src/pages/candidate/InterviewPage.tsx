@@ -774,6 +774,31 @@ export function InterviewPage() {
     }
   }, [recorderStream, sidebarShown]);
 
+  /**
+   * Keeps every preview showing its stream, whenever its element turns up.
+   *
+   * Keyed on the stream or on the interview's state, the connection still missed: the sidebar mounts a render
+   * after the state that was being watched changes, so the elements were still absent when the effect ran and the
+   * screen, camera and phone panels stayed black until a share was restarted. This checks on every render, which
+   * costs a few property reads, and connects whichever element is present but not yet showing its stream.
+   */
+  useEffect(() => {
+    const show = (element: HTMLVideoElement | null, stream: MediaStream | null, clearWhenNone: boolean) => {
+      if (!element) return;
+      if (stream) {
+        if (element.srcObject !== stream) {
+          element.srcObject = stream;
+          void element.play().catch(() => {});
+        }
+      } else if (clearWhenNone && element.srcObject) {
+        element.srcObject = null;
+      }
+    };
+    show(videoRef.current, recorderStream, false);
+    show(screenPreviewRef.current, screenStream, true);
+    show(mobileVideoRef.current, remoteStream, false);
+  });
+
   // Screen-share preview. Cleared as well as set: a stopped share otherwise
   // leaves its last frame on screen, which reads as though it were still live.
   useEffect(() => {
@@ -1554,7 +1579,7 @@ export function InterviewPage() {
 
       {/* Top bar */}
       <div className="sticky top-0 z-20 bg-[var(--cardBg)] border-b border-[var(--border)] px-3 sm:px-4 py-2 sm:py-3">
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 max-w-7xl mx-auto">
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 w-full">
           <div className="flex min-w-0 items-center gap-2 sm:gap-4">
             <Badge variant="info">Voice Interview</Badge>
             <span className="truncate text-sm text-[var(--textSecondary)]">{interview.jobPrefix}</span>
@@ -1627,7 +1652,7 @@ export function InterviewPage() {
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col lg:flex-row max-w-7xl mx-auto w-full min-h-0">
+      <div className="flex-1 flex flex-col lg:flex-row w-full min-h-0">
         {/* Left Column. min-w-0 so a long transcript line or a wide code editor
             shrinks the column rather than pushing the sidebar off-screen — a
             flex child defaults to min-width:auto, which is what let the editor
