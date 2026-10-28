@@ -105,7 +105,6 @@ interface InterviewPreStartScreenProps {
   /** QR value: the mobile-connect URL with token. */
   mobileConnectUrl: string;
   isSpeaking: boolean;
-  isAudioMuted: boolean;
   onToggleAudio: () => void;
   isCountdownActive: boolean;
   instructionCountdown: number;
@@ -145,7 +144,6 @@ export function InterviewPreStartScreen({
   mobileVerified,
   mobileConnectUrl,
   isSpeaking,
-  isAudioMuted,
   onToggleAudio,
   isCountdownActive,
   instructionCountdown,
@@ -286,7 +284,7 @@ export function InterviewPreStartScreen({
 
           {/* Audio narration */}
           <div className="flex flex-shrink-0 items-center gap-2">
-            {isSpeaking && !isAudioMuted && (
+            {isSpeaking && (
               <span className="flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1.5 dark:border-blue-800 dark:bg-blue-900/20">
                 <Volume2 size={13} className="animate-pulse text-blue-500" />
                 <span className="text-xs font-medium text-blue-700 dark:text-blue-300">
@@ -297,15 +295,11 @@ export function InterviewPreStartScreen({
             <button
               type="button"
               onClick={onToggleAudio}
-              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-                isAudioMuted
-                  ? 'bg-[var(--surface1)] text-[var(--textSecondary)] hover:bg-[var(--surface2)]'
-                  : 'bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/30'
-              }`}
-              title={isAudioMuted ? 'Audio narration muted' : 'Mute audio narration'}
+              className="flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/30"
+              title={isSpeaking ? 'Stop the audio narration' : 'Read the instructions aloud again'}
             >
-              {isAudioMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
-              {isAudioMuted ? 'Muted' : 'Audio On'}
+              {isSpeaking ? <VolumeX size={14} /> : <Volume2 size={14} />}
+              {isSpeaking ? 'Stop audio' : 'Play audio'}
             </button>
           </div>
         </div>

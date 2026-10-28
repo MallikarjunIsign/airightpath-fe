@@ -147,7 +147,6 @@ export function InterviewPage() {
   const [instructionCountdown, setInstructionCountdown] = useState<number>(
     APP_CONFIG.INTERVIEW_INSTRUCTION_COUNTDOWN_SECONDS,
   );
-  const [isAudioMuted, setIsAudioMuted] = useState(false);
   const { isSpeaking, speak: speakInstruction, stop: stopInstruction } = useSpeechSynthesis();
 
   // Answer timer
@@ -451,6 +450,14 @@ export function InterviewPage() {
   }, [voiceInterview.state, instructionCountdown]);
 
   // Audio narration of instructions
+  /** The narration, built from the rules as they are listed on screen. */
+  const buildInstructionScript = useCallback(
+    () =>
+      'Please read the instructions carefully before starting the interview. ' +
+      buildProctoringRules().map((rule) => rule.text.trim().replace(/([^.!?])$/, '$1.')).join(' ') +
+      ' When you are ready, press Start Interview.',
+    [],
+  );
   const instructionAudioFiredRef = useRef(false);
   useEffect(() => {
     if (voiceInterview.state !== 'pre-start') return;
@@ -460,11 +467,7 @@ export function InterviewPage() {
       // The rules exactly as they are written on screen, so what is heard is
       // what is read. Built from the same list the screen renders, so a rule
       // added or switched off there changes the narration with it.
-      const script =
-        'Please read the instructions carefully before starting the interview. ' +
-        buildProctoringRules().map((rule) => rule.text.trim().replace(/([^.!?])$/, '$1.')).join(' ') +
-        ' When you are ready, press Start Interview.';
-      speakInstruction(script, { rate: 0.95 });
+      speakInstruction(buildInstructionScript(), { rate: 0.95 });
     }, 500);
     return () => {
       clearTimeout(timerId);
@@ -473,14 +476,19 @@ export function InterviewPage() {
     };
   }, [voiceInterview.state, speakInstruction, stopInstruction]);
 
+  /**
+   * Stops the narration while it is reading and reads it again from the start when it is not.
+   *
+   * The button used to flip between On and Muted, so once the narration had finished, pressing it did nothing:
+   * a candidate who wanted to hear the rules a second time had no way to.
+   */
   const toggleInstructionAudio = useCallback(() => {
-    if (isAudioMuted) {
-      setIsAudioMuted(false);
-    } else {
+    if (isSpeaking) {
       stopInstruction();
-      setIsAudioMuted(true);
+    } else {
+      speakInstruction(buildInstructionScript(), { rate: 0.95 });
     }
-  }, [isAudioMuted, stopInstruction]);
+  }, [isSpeaking, stopInstruction, speakInstruction, buildInstructionScript]);
 
   // WebSocket error callback
   useEffect(() => {
@@ -1355,7 +1363,6 @@ export function InterviewPage() {
         mobileVerified={mobileVerified}
         mobileConnectUrl={`${getMobileBaseUrl()}/mobile-connect?token=${mobileToken}`}
         isSpeaking={isSpeaking}
-        isAudioMuted={isAudioMuted}
         onToggleAudio={toggleInstructionAudio}
         isCountdownActive={isCountdownActive}
         instructionCountdown={instructionCountdown}
