@@ -1699,7 +1699,7 @@ export function InterviewPage() {
                   </div>
                 )}
                 <div className={`max-w-[85%] sm:max-w-[70%] min-w-0 break-words p-3 sm:p-4 rounded-lg ${entry.role === 'interviewer' ? 'bg-[var(--surface1)] text-[var(--text)]' : entry.role === 'candidate' ? 'bg-[var(--primary)] text-white' : entry.role === 'system' ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 text-sm border border-amber-200 dark:border-amber-800' : 'bg-transparent text-[var(--textTertiary)] italic text-sm p-2'} ${entry.isStreaming ? 'border border-blue-300 dark:border-blue-700' : ''}`}>
-                  <p className="text-sm whitespace-pre-wrap">{entry.content}</p>
+                  <p className="text-base leading-relaxed whitespace-pre-wrap">{entry.content}</p>
                   {entry.role !== 'filler' && entry.role !== 'system' && <p className={`text-xs mt-2 ${entry.role === 'interviewer' ? 'text-[var(--textTertiary)]' : 'text-white/70'}`}>{new Date(entry.timestamp).toLocaleTimeString()}</p>}
                 </div>
               </div>
@@ -1930,7 +1930,7 @@ export function InterviewPage() {
               something that was never started. */}
           {PROCTORING_CONFIG.recording.screen.required && (
           <div className="p-3 rounded-xl bg-[var(--surface1)] border border-[var(--border)]">
-            <h3 className="text-[10px] font-bold text-[var(--textSecondary)] uppercase tracking-wider mb-2 flex items-center justify-between">
+            <h3 className="text-xs font-bold text-[var(--textSecondary)] uppercase tracking-wider mb-2 flex items-center justify-between">
               Shared Screen
               {isScreenRecording && (
                 <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
@@ -1951,7 +1951,7 @@ export function InterviewPage() {
               {!screenStream && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-2 text-center">
                   <MonitorUp size={18} className="text-[var(--textTertiary)]" />
-                  <span className="text-[10px] text-[var(--textTertiary)]">
+                  <span className="text-xs text-[var(--textTertiary)]">
                     Screen is not being shared
                   </span>
                 </div>
@@ -1963,7 +1963,7 @@ export function InterviewPage() {
                 nothing is being captured — so it reads as an alert, says why
                 it most likely happened, and offers the fix. */}
             {screenStream ? (
-              <p className="mt-2 text-[10px] text-[var(--textTertiary)]">
+              <p className="mt-2 text-xs text-[var(--textTertiary)]">
                 This is what is being recorded and sent with your interview.
               </p>
             ) : (
@@ -1974,7 +1974,7 @@ export function InterviewPage() {
                     <p className="text-[11px] font-semibold text-amber-800 dark:text-amber-200">
                       Screen sharing stopped
                     </p>
-                    <p className="mt-0.5 text-[10px] leading-snug text-amber-700 dark:text-amber-300">
+                    <p className="mt-0.5 text-xs leading-snug text-amber-700 dark:text-amber-300">
                       {screenShareStoppedEarly
                         ? 'You pressed Stop sharing, or the window you picked was closed. Nothing is being recorded until you share again.'
                         : 'Your screen is not being recorded. Share it to carry on.'}
@@ -1994,7 +1994,7 @@ export function InterviewPage() {
                   )}
                   {resharingScreen ? 'Waiting for your choice…' : 'Share my screen again'}
                 </button>
-                <p className="mt-1 text-[9px] leading-snug text-amber-700/80 dark:text-amber-300/80">
+                <p className="mt-1 text-[11px] leading-snug text-amber-700/80 dark:text-amber-300/80">
                   What you shared before this is already saved. Pick the same screen to keep the
                   recording consistent.
                 </p>
@@ -2017,52 +2017,36 @@ export function InterviewPage() {
           </div>
           )}
 
-          {/* Mobile stream (second view) - Promoted to top of sidebar */}
+          {/* The phone, as a status. The live picture used to be shown here and stayed a black box often enough
+              to read as broken, and nobody on this side needs to watch it: the phone records and uploads on
+              its own. The video element stays, out of sight, because the room check and the microphone choice
+              read from the stream it holds. */}
           <div className="p-3 rounded-xl bg-[var(--surface1)] border border-[var(--border)]">
-            <h3 className="text-[10px] font-bold text-[var(--textSecondary)] uppercase tracking-wider mb-2 flex items-center justify-between">
-              Mobile Feed (Proctoring)
-              {mobileConnected && <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+            <h3 className="text-xs font-bold text-[var(--textSecondary)] uppercase tracking-wider mb-2 flex items-center justify-between">
+              Phone camera
+              {mobileConnected && <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />}
             </h3>
-            {/* Skipped is said in a line. A black box with a phone icon read as a feed that had failed to
-                load; the candidate chose to go without, and nothing is being recorded from a phone. */}
-            {mobileSkipped && !mobileConnected ? (
-              <div className="flex items-center gap-2 rounded-lg border border-dashed border-[var(--border)] px-3 py-2.5">
-                <Smartphone size={16} className="flex-shrink-0 text-[var(--textTertiary)]" />
-                <p className="text-xs text-[var(--textSecondary)]">
-                  Phone camera skipped &mdash; not recording.
-                </p>
-              </div>
-            ) : (
-            <div className={`aspect-video bg-black rounded-lg overflow-hidden relative shadow-inner ${!mobileConnected ? 'border-2 border-dashed border-[var(--border)]' : ''}`}>
-              {!mobileConnected ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-[var(--textTertiary)] p-4 text-center">
-                  <Smartphone size={24} className="mb-2 opacity-30" />
-                  {/* "Waiting" was shown even to candidates who had explicitly
-                      ticked the waiver, so a deliberate choice looked like a
-                      pairing that had failed and was still retrying. */}
-                  <p className="text-[10px] leading-tight">
-                    {mobileSkipped
-                      ? 'Running without a second camera.'
-                      : 'Waiting for mobile proctoring stream...'}
-                  </p>
-                </div>
-              ) : (
-                <video
-                  ref={mobileVideoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-full object-cover"
-                />
-              )}
+            <video
+              ref={mobileVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className="absolute h-px w-px opacity-0 pointer-events-none"
+              aria-hidden="true"
+            />
+            <div className="flex items-center gap-2 text-sm">
+              <Smartphone
+                size={18}
+                className={mobileConnected ? 'flex-shrink-0 text-emerald-500' : 'flex-shrink-0 text-[var(--textTertiary)]'}
+              />
+              <p className={mobileConnected ? 'font-medium text-emerald-600 dark:text-emerald-400' : 'text-[var(--textSecondary)]'}>
+                {mobileConnected
+                  ? 'Connected and recording'
+                  : mobileSkipped
+                    ? 'Skipped — not recording'
+                    : 'Waiting for the phone…'}
+              </p>
             </div>
-            )}
-            {mobileConnected && (
-              <div className="mt-2 flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                <span className="text-[10px] text-emerald-500 font-semibold">SECURE CONNECTION ACTIVE</span>
-              </div>
-            )}
 
             {/* Offered only once the phone's microphone has actually arrived —
                 a control for a source that is not there yet is a control that
@@ -2071,7 +2055,7 @@ export function InterviewPage() {
                 effect later reads as a switch that failed. */}
             {mobileAudioAvailable && (
               <div className="mt-2 flex items-center justify-between gap-2 rounded-lg bg-[var(--surface1)] px-2 py-1.5">
-                <span className="text-[10px] font-medium text-[var(--textSecondary)]">
+                <span className="text-xs font-medium text-[var(--textSecondary)]">
                   Microphone
                 </span>
                 <div className="flex items-center gap-1">
@@ -2081,7 +2065,7 @@ export function InterviewPage() {
                       type="button"
                       disabled={voiceInterview.isRecording}
                       onClick={() => setMicSource(source)}
-                      className={`rounded-md px-2 py-0.5 text-[10px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                      className={`rounded-md px-2 py-0.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                         micSource === source
                           ? 'bg-[var(--primary)] text-white'
                           : 'text-[var(--textSecondary)] hover:bg-[var(--surface2)]'

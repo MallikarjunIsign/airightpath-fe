@@ -249,6 +249,12 @@ export default function MobileConnect() {
         };
     }, [token, finished]);
 
+    // The page opens at the top. The consent screen above it is tall and centred, and the browser kept its scroll
+    // position into the live view, so on a phone the page appeared part-way down with Exit out of sight.
+    useEffect(() => {
+        window.scrollTo({ top: 0 });
+    }, [consented, verified]);
+
     const acceptConsent = () => {
         consentedRef.current = true;
         setConsented(true);
@@ -599,7 +605,8 @@ export default function MobileConnect() {
 
     return (
         <div className="min-h-screen p-4 bg-gray-50 flex flex-col items-center">
-            <div className="mb-6 flex w-full max-w-md items-center justify-between">
+            {/* Pinned to the top, so Exit is always on screen however far the page is scrolled. */}
+            <div className="sticky top-0 z-20 mb-4 flex w-full max-w-md items-center justify-between bg-gray-50 py-2">
                 <h1 className="text-2xl font-bold text-gray-800">Mobile Proctoring</h1>
                 {/* Leaving deliberately releases the camera. Closing the tab
                     does too, eventually, but a candidate who has finished
