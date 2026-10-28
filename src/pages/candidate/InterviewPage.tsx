@@ -92,8 +92,6 @@ export function InterviewPage() {
   const [wsConnected, setWsConnected] = useState(false);
   const mobileVideoRef = useRef<HTMLVideoElement>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-  /** Whether the phone's picture is actually playing, as opposed to merely connected. */
-  const [phoneFeedPlaying, setPhoneFeedPlaying] = useState(false);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   /** Whether the paired phone is offering its microphone as well as its camera. */
   const [mobileAudioAvailable, setMobileAudioAvailable] = useState(false);
@@ -662,16 +660,15 @@ export function InterviewPage() {
   isCodingRef.current = voiceInterview.isCodingQuestion;
   const startInactivityTimers = useCallback(() => {
     clearInactivityTimers();
-    // Measured against the time the question was given, not a fixed two minutes. The timer on screen says 300
-    // seconds (600 for code), and a warning at 120 and an "are you still there?" at 180 cut that window to a
-    // third of what the candidate was told.
+    // Measured against the time the question was given, not a fixed figure: the warning comes thirty seconds before
+    // the time is up, and the "are you still there?" only after it.
     const given = isCodingRef.current
       ? APP_CONFIG.INTERVIEW_CODING_QUESTION_TIMEOUT_SECONDS
       : APP_CONFIG.INTERVIEW_QUESTION_TIMEOUT_SECONDS;
     inactivityWarningRef.current = window.setTimeout(() => {
       inactivityWarningShownRef.current = true;
       showToast(MESSAGES.interview.inactivityWarning, 'warning');
-    }, Math.max(APP_CONFIG.INTERVIEW_INACTIVITY_WARNING_SECONDS, given - 60) * 1000);
+    }, Math.max(30, given - 30) * 1000);
     inactivityTimeoutRef.current = window.setTimeout(() => {
       // Asks, rather than ends. Silence is not evidence of abandonment — a
       // candidate reading a question or writing code makes no sound at all,
@@ -1903,7 +1900,6 @@ export function InterviewPage() {
                       >
                         <Timer size={14} className={answerSecondsLeft <= 30 ? 'animate-pulse' : ''} />
                         {formatClock(APP_CONFIG.INTERVIEW_ANSWER_TIMEOUT_SECONDS - answerSecondsLeft)}
-                        <span className="font-normal opacity-60">/ {formatClock(APP_CONFIG.INTERVIEW_ANSWER_TIMEOUT_SECONDS)}</span>
                       </span>
                     </div>
                   </div>
@@ -2033,50 +2029,35 @@ export function InterviewPage() {
           </div>
           )}
 
-          {/* The phone's live picture, with its status underneath. The box says what it is waiting for until the first
-              frame is actually playing, so a feed that has not started reads as "connecting", not as a broken black
-              rectangle. The phone records and uploads on its own either way; this is only the view of it. */}
+          {/* The phone, as a status. Its live picture was shown here and did not reliably appear, so it is
+              not shown: the phone records and uploads on its own, and nothing is lost by not watching it.
+              The video element stays, out of sight, because the room check and the microphone choice read
+              from the stream it holds. */}
           <div className="p-3 rounded-xl bg-[var(--surface1)] border border-[var(--border)]">
             <h3 className="text-xs font-bold text-[var(--textSecondary)] uppercase tracking-wider mb-2 flex items-center justify-between">
               Phone camera
-              {phoneFeedPlaying && <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />}
+              {mobileConnected && <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />}
             </h3>
-            <div className="aspect-video bg-black rounded-lg overflow-hidden relative shadow-inner">
-              <video
-                ref={mobileVideoRef}
-                autoPlay
-                playsInline
-                muted
-                onPlaying={() => setPhoneFeedPlaying(true)}
-                onEmptied={() => setPhoneFeedPlaying(false)}
-                className="w-full h-full object-cover"
+            <video
+              ref={mobileVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className="absolute h-px w-px opacity-0 pointer-events-none"
+              aria-hidden="true"
+            />
+            <div className="flex items-center gap-2 text-sm">
+              <Smartphone
+                size={18}
+                className={mobileConnected ? 'flex-shrink-0 text-emerald-500' : 'flex-shrink-0 text-[var(--textTertiary)]'}
               />
-              {!phoneFeedPlaying && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-3 text-center text-[var(--textTertiary)]">
-                  <Smartphone size={26} className="opacity-40" />
-                  <p className="text-xs leading-snug">
-                    {mobileSkipped && !mobileConnected
-                      ? 'Phone camera skipped — not recording.'
-                      : mobileConnected
-                        ? 'Connected. Waiting for the picture…'
-                        : 'Waiting for the phone…'}
-                  </p>
-                </div>
-              )}
-            </div>
-            <div className="mt-2 flex items-center gap-2 text-xs">
-              <span
-                className={`w-2 h-2 rounded-full ${phoneFeedPlaying ? 'bg-emerald-500' : mobileConnected ? 'bg-amber-400' : 'bg-[var(--textTertiary)]'}`}
-              />
-              <span className={phoneFeedPlaying ? 'font-semibold text-emerald-600 dark:text-emerald-400' : 'text-[var(--textSecondary)]'}>
-                {phoneFeedPlaying
+              <p className={mobileConnected ? 'font-medium text-emerald-600 dark:text-emerald-400' : 'text-[var(--textSecondary)]'}>
+                {mobileConnected
                   ? 'Connected and recording'
-                  : mobileSkipped && !mobileConnected
-                    ? 'Skipped'
-                    : mobileConnected
-                      ? 'Connected'
-                      : 'Not connected'}
-              </span>
+                  : mobileSkipped
+                    ? 'Skipped — not recording'
+                    : 'Waiting for the phone…'}
+              </p>
             </div>
 
             {/* Offered only once the phone's microphone has actually arrived —
