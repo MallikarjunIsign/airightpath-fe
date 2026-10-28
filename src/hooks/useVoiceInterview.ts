@@ -140,8 +140,14 @@ export function useVoiceInterview() {
     (text: string): { cleanText: string; isCoding: boolean } => {
       const tagRegex = /\[(CODING|THEORY|NON-TECH)\]\s*/i;
       const match = text.match(tagRegex);
-      const isCoding = match ? match[1].toUpperCase() === "CODING" : false;
       const cleanText = text.replace(tagRegex, "").trim();
+      // The tag is the model's say-so, and it sometimes leaves it off a question that plainly asks for code,
+      // which asks the candidate to write code with nowhere to write it. The server adds the tag in that case
+      // too; this covers a message that reached the browser without it (an older server, a resumed question).
+      const isCoding = match
+        ? match[1].toUpperCase() === "CODING"
+        : /\b(?:write|implement|code|program|develop|create|build|solve)\b[^.?!\n]{0,60}?\b(?:function|method|program|class|algorithm|code|query|script|snippet|solution|logic|loop|api|endpoint|component|regex|sql)\b/i.test(cleanText) &&
+          !/\b(?:explain|describe|what\s+(?:is|are|does|do)|difference\s+between|why\s+(?:do|does|is|are))\b/i.test(cleanText);
       return { cleanText, isCoding };
     },
     [],
@@ -564,6 +570,53 @@ export function useVoiceInterview() {
     setState("answering");
   }, [audioStreaming, audioPlayback, sendToInterview]);
 
+  /** Waits for the live connection, which reconnects by itself, for up to `ms`. */
+  const waitForConnection = useCallback(async (ms: number): Promise<boolean> => {
+    const deadline = Date.now() + ms;
+    while (!interviewWsService.connected) {
+      if (Date.now() >= deadline) return false;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    return true;
+  }, []);
+
+  /**
+   * The interviewer's reply never arrived. Ask the server what it has before telling the candidate to repeat
+   * themselves: the answer may have been received and the reply produced, with only the message lost on the way.
+   * If the server has moved on, show where it got to; if not, say so and let them answer again.
+   */
+  const recoverLostReply = useCallback(async () => {
+    const id = scheduleIdRef.current;
+    if (id !== null) {
+      try {
+        const { data } = await aiService.resumeVoiceInterview(id);
+        const history = data?.conversationHistory ?? [];
+        const last = history[history.length - 1];
+        if (data?.hasActiveSession && last && last.role !== "candidate") {
+          const turn = detectAndCleanCodingTag(last.content);
+          setIsCodingQuestion(turn.isCoding);
+          setLastQuestionText(turn.cleanText);
+          setConversation((prev) => [
+            ...prev,
+            {
+              role: "interviewer",
+              content: turn.cleanText,
+              timestamp: last.timestamp ?? new Date().toISOString(),
+              isCodingQuestion: turn.isCoding,
+            },
+          ]);
+          setError(null);
+          setState("active");
+          return;
+        }
+      } catch (err) {
+        console.warn("Could not ask the server what happened to the reply", err);
+      }
+    }
+    setState("active");
+    setError("Response timed out. Please try answering again.");
+  }, [detectAndCleanCodingTag]);
+
   // Submit answer — stops recording, waits for final transcription, then sends
   const submitAnswer = useCallback(
     async (manualTranscript?: string) => {
@@ -628,6 +681,24 @@ export function useVoiceInterview() {
         return;
       }
 
+      // The answer is only sent if the connection is up. A send on a dead socket is dropped without a word, the
+      // page then sat in "processing" for the full timeout, and the candidate repeated an answer the server
+      // already had. The client reconnects on its own within a couple of seconds, so wait for it first.
+      if (!(await waitForConnection(12_000))) {
+        setConversation((prev) => [
+          ...prev,
+          {
+            role: "system",
+            content:
+              "The connection dropped before your answer was sent. It is reconnecting. Please check your internet, then press the mic and answer again.",
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+        setError("Connection lost. Your answer was not sent.");
+        setState("active");
+        return;
+      }
+
       // Capture current code state before resetting
       const submittedCode = codeContent;
       const submittedLanguage = codeLanguage;
@@ -671,11 +742,10 @@ export function useVoiceInterview() {
       processingTimeoutRef.current = window.setTimeout(() => {
         console.error("Processing timeout — no response-complete received");
         processingTimeoutRef.current = null;
-        setState("active");
-        setError("Response timed out. Please try answering again.");
+        void recoverLostReply();
       }, APP_CONFIG.INTERVIEW_PROCESSING_TIMEOUT_MS);
     },
-    [audioStreaming, codeContent, codeLanguage, codeOutput, sendToInterview],
+    [audioStreaming, codeContent, codeLanguage, codeOutput, sendToInterview, waitForConnection, recoverLostReply],
   );
 
   // Skip question — sends a skipped answer bypassing the empty-transcript guard
@@ -885,6 +955,8 @@ export function useVoiceInterview() {
     setCodeOutput,
     setCodeContent,
     setCodeLanguage,
+    /** Opens the editor by hand, for a question the model did not tag as one that needs code. */
+    openCodeEditor: () => setIsCodingQuestion(true),
 
     // Audio state
     isRecording: audioStreaming.isRecording,

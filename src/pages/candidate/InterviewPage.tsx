@@ -1661,6 +1661,21 @@ export function InterviewPage() {
             )}
           </div>
 
+          {/* A way to the editor that does not depend on the model. In the technical round a candidate is
+              sometimes asked to write code and the editor does not open, because the question was not tagged;
+              this opens it by hand, so a candidate can always write code when they are asked to. */}
+          {interview?.round === 'L2_TECHNICAL' &&
+            !voiceInterview.isCodingQuestion &&
+            voiceInterview.state !== 'completed' &&
+            voiceInterview.state !== 'pre-start' &&
+            !postCompletionStep && (
+              <div className="flex-shrink-0 border-t border-[var(--border)] px-3 py-2 text-right">
+                <Button size="sm" variant="outline" onClick={voiceInterview.openCodeEditor}>
+                  Open code editor
+                </Button>
+              </div>
+            )}
+
           {/* Coding Editor & Compile.
               No height cap of its own any more — the candidate sets the
               editor's height with its grip, and the column scrolls. Capping it
