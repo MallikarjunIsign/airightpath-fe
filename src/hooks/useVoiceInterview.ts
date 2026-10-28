@@ -216,6 +216,7 @@ export function useVoiceInterview() {
 
             // Always reset editor when question changes
             setCodeContent("");
+            setCodeOutput("");
 
             if (!isCoding) {
               setCodeLanguage("java"); // optional reset
@@ -373,12 +374,12 @@ export function useVoiceInterview() {
             const { cleanText, isCoding } = detectAndCleanCodingTag(responseText);
 
             setIsCodingQuestion(isCoding);
-            if (isCoding) {
-              setCodeContent("");
-              // Cleared with the editor: output from the previous problem would
-              // otherwise be submitted as evidence for this one.
-              setCodeOutput("");
-            }
+            // Cleared for every question, coding or not. Left in place after a
+            // non-coding one, the last problem's code and output were attached
+            // to each later spoken answer. The output goes with the editor, or
+            // it would be submitted as evidence for the next problem.
+            setCodeContent("");
+            setCodeOutput("");
             setLastQuestionText(cleanText);
             // The previous question's audio must not outlive it: a turn that is
             // never spoken (a code-explanation question skips TTS) would
@@ -748,9 +749,11 @@ export function useVoiceInterview() {
       }
 
       // Capture current code state before resetting
-      const submittedCode = codeContent;
+      // Only a coding question takes code: on any other, the editor is not on screen, so whatever is
+      // left in it is not part of the answer.
+      const submittedCode = isCodingQuestion ? codeContent : "";
       const submittedLanguage = codeLanguage;
-      const submittedOutput = codeOutput;
+      const submittedOutput = isCodingQuestion ? codeOutput : "";
 
       // Add candidate answer to conversation
       setConversation((prev) => [
@@ -793,7 +796,7 @@ export function useVoiceInterview() {
         void recoverLostReply();
       }, APP_CONFIG.INTERVIEW_PROCESSING_TIMEOUT_MS);
     },
-    [audioStreaming, codeContent, codeLanguage, codeOutput, sendToInterview, waitForConnection, recoverLostReply],
+    [audioStreaming, codeContent, codeLanguage, codeOutput, isCodingQuestion, sendToInterview, waitForConnection, recoverLostReply],
   );
 
   // Skip question — sends a skipped answer bypassing the empty-transcript guard
