@@ -16,10 +16,14 @@ import type { MobileCapture } from '@/types/interview.types';
  * and shown from an object URL — and only once it scrolls into view, because an
  * hour-long interview has well over a hundred of them.
  */
+/** How many alerts are listed before "View more". */
+const ALERTS_SHOWN = 4;
+
 export function MobileCaptures({ scheduleId }: Readonly<{ scheduleId: number }>) {
   const [captures, setCaptures] = useState<MobileCapture[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<{ capture: MobileCapture; url: string } | null>(null);
+  const [showAllAlerts, setShowAllAlerts] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,7 +65,9 @@ export function MobileCaptures({ scheduleId }: Readonly<{ scheduleId: number }>)
   if (!captures || captures.length === 0) return null;
 
   const room = captures.filter((c) => c.kind === 'ROOM_PHOTO');
-  const frames = captures.filter((c) => c.kind === 'MONITOR_FRAME');
+  const alerts = captures.filter((c) => c.kind === 'EXTRA_PERSON' || c.kind === 'NO_CANDIDATE');
+  const periodic = captures.filter((c) => c.kind === 'MONITOR_FRAME');
+  const shownAlerts = showAllAlerts ? alerts : alerts.slice(0, ALERTS_SHOWN);
 
   return (
     <Card>
@@ -69,11 +75,53 @@ export function MobileCaptures({ scheduleId }: Readonly<{ scheduleId: number }>)
         <div className="flex items-center gap-2">
           <Smartphone size={18} className="text-[var(--primary)]" />
           <CardTitle>
-            Phone camera ({captures.length} {captures.length === 1 ? 'capture' : 'captures'})
+            Phone camera ({alerts.length} {alerts.length === 1 ? 'alert' : 'alerts'}, {room.length} room scan photos)
           </CardTitle>
         </div>
       </CardHeader>
       <CardContent>
+        {/* What the phone saw go wrong while the interview ran: a second person in its view, or nobody. A photo is
+            kept only then, so this is a short list to read down, not a gallery to search. */}
+        <div className="mb-4">
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-[var(--textTertiary)]">
+            Alerts during the interview
+          </p>
+          {alerts.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-[var(--border)] p-3 text-sm text-[var(--textSecondary)]">
+              The phone saw nothing wrong: no second person, and the candidate stayed in view.
+            </p>
+          ) : (
+            <>
+              <ul className="max-h-[26rem] space-y-2 overflow-y-auto pr-1">
+                {shownAlerts.map((capture) => (
+                  <li key={capture.id} className="flex items-center gap-3 rounded-lg border border-[var(--border)] p-2">
+                    <div className="w-32 flex-shrink-0">
+                      <Thumb capture={capture} onOpen={(url) => setOpen({ capture, url })} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-[var(--text)]">
+                        {capture.kind === 'EXTRA_PERSON' ? 'A second person in view' : 'Candidate not in view'}
+                      </p>
+                      <p className="text-xs text-[var(--textSecondary)]">
+                        {capture.capturedAt ? new Date(capture.capturedAt).toLocaleString() : ''}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              {alerts.length > ALERTS_SHOWN && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllAlerts((current) => !current)}
+                  className="mt-2 text-sm font-medium text-[var(--primary)] hover:underline"
+                >
+                  {showAllAlerts ? 'Show fewer' : `View more (${alerts.length - ALERTS_SHOWN} more)`}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+
         {room.length > 0 && (
           <div className="mb-4">
             <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-[var(--textTertiary)]">
@@ -86,17 +134,18 @@ export function MobileCaptures({ scheduleId }: Readonly<{ scheduleId: number }>)
             </div>
           </div>
         )}
-        {frames.length > 0 && (
-          <div>
-            <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-[var(--textTertiary)]">
-              During the interview
-            </p>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
-              {frames.map((capture) => (
+
+        {periodic.length > 0 && (
+          <details>
+            <summary className="cursor-pointer text-xs font-semibold text-[var(--textSecondary)]">
+              Earlier periodic photos ({periodic.length}) — no longer taken
+            </summary>
+            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
+              {periodic.map((capture) => (
                 <Thumb key={capture.id} capture={capture} onOpen={(url) => setOpen({ capture, url })} />
               ))}
             </div>
-          </div>
+          </details>
         )}
       </CardContent>
 
@@ -114,7 +163,15 @@ export function MobileCaptures({ scheduleId }: Readonly<{ scheduleId: number }>)
 
 function captureTitle(capture: MobileCapture): string {
   const when = capture.capturedAt ? new Date(capture.capturedAt).toLocaleTimeString() : '';
-  return `${capture.kind === 'ROOM_PHOTO' ? 'Room scan photo' : 'Phone frame'}${when ? ` · ${when}` : ''}`;
+  const what =
+    capture.kind === 'ROOM_PHOTO'
+      ? 'Room scan photo'
+      : capture.kind === 'EXTRA_PERSON'
+        ? 'A second person in view'
+        : capture.kind === 'NO_CANDIDATE'
+          ? 'Candidate not in view'
+          : 'Phone frame';
+  return `${what}${when ? ` · ${when}` : ''}`;
 }
 
 /** One still, fetched when it first scrolls into view. */

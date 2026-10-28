@@ -259,8 +259,11 @@ export type ConversationEntry = {
 export interface MobileCapture {
   id: number;
   interviewScheduleId: number;
-  /** ROOM_PHOTO when the phone's view of the room was approved; MONITOR_FRAME while the interview ran. */
-  kind: 'ROOM_PHOTO' | 'MONITOR_FRAME';
+  /**
+   * ROOM_PHOTO from the room scan; EXTRA_PERSON or NO_CANDIDATE when the phone saw a second person or nobody while the
+   * interview ran; MONITOR_FRAME is the older periodic still, no longer taken.
+   */
+  kind: 'ROOM_PHOTO' | 'MONITOR_FRAME' | 'EXTRA_PERSON' | 'NO_CANDIDATE';
   frameIndex: number;
   capturedAt?: string;
 }

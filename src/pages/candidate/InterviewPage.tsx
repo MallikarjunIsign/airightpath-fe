@@ -89,22 +89,6 @@ export function InterviewPage() {
   const [mobileConnected, setMobileConnected] = useState(false);
   const [mobileVerified, setMobileVerified] = useState(false);
   const [isSetupActive, setIsSetupActive] = useState(false);
-  const [wsConnected, setWsConnected] = useState(false);
-  const mobileVideoRef = useRef<HTMLVideoElement>(null);
-  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
-  /** Whether the paired phone is offering its microphone as well as its camera. */
-  const [mobileAudioAvailable, setMobileAudioAvailable] = useState(false);
-  /**
-   * Which microphone answers are recorded from.
-   *
-   * Starts on this device and stays there unless the candidate says otherwise.
-   * The phone is often on a stand across the room for the second camera angle,
-   * where it is the worse microphone, not the better one — so switching to it
-   * automatically would quietly degrade the interview it is meant to improve.
-   */
-  const [micSource, setMicSource] = useState<'device' | 'phone'>('device');
-
   // Question timer
   const questionTimerRef = useRef<{ incrementSkipCounter: () => void } | null>(null);
   const questionTimer = useQuestionTimer({
@@ -371,66 +355,6 @@ export function InterviewPage() {
     },
   });
 
-  /**
-   * A second watcher on the paired phone's wide shot.
-   *
-   * <p>Its own instance rather than re-pointing the one above: both cameras
-   * need watching at the same time, and they are looking for different things.
-   * face-api caches its models and the dynamic import is module-scoped, so the
-   * second instance costs a detection loop, not a second model download.</p>
-   *
-   * <p>Only {@code onMultipleFaces} is wired. "No face" and "looking away" are
-   * meaningless on a room angle — the phone is often side-on and may not see
-   * the candidate's face at all — and firing them would bury the one signal
-   * that matters in noise the candidate cannot act on.</p>
-   *
-   * <p>{@code maxWarnings} is effectively infinite, so this can never end an
-   * interview. That is by construction rather than by configuration: a room
-   * angle picks up far more innocent movement than a face-on camera, and the
-   * decision about what it saw belongs to a reviewer.</p>
-   */
-  const roomWatch = useFaceDetection({
-    maxWarnings: Number.MAX_SAFE_INTEGER,
-    checkIntervalMs: PROCTORING_CONFIG.mobileCompanion.roomWatch.checkIntervalMs,
-    multipleFacesConsecutiveFrames: 2,
-    onMultipleFaces: (count) => {
-      showToast(MESSAGES.interview.roomSecondPerson(count), 'warning');
-      // A distinct type from the laptop camera's `multiple_faces`: a reviewer
-      // reading the log needs to know which camera saw it, because a second
-      // person in the wide shot and one leaning into the laptop frame are
-      // different situations.
-      voiceInterview.sendProctoringEvent(
-        'room_multiple_faces',
-        `${count} people visible on the phone camera`
-      );
-    },
-  });
-
-  /**
-   * Start watching the room once the phone is streaming and the interview is
-   * under way, and stop when either goes away.
-   *
-   * <p>Keyed on the stream rather than started alongside the laptop camera:
-   * the phone can pair before or after the interview begins, and a detector
-   * pointed at a video element with no source silently does nothing.</p>
-   */
-  useEffect(() => {
-    if (!PROCTORING_CONFIG.mobileCompanion.roomWatch.enabled) return;
-    if (voiceInterview.state !== 'active' && voiceInterview.state !== 'answering') return;
-    if (!remoteStream || !mobileVideoRef.current) return;
-
-    let cancelled = false;
-    const element = mobileVideoRef.current;
-    roomWatch.loadModels().then(() => {
-      if (!cancelled) roomWatch.startDetection(element);
-    });
-
-    return () => {
-      cancelled = true;
-      roomWatch.stopDetection();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [remoteStream, voiceInterview.state]);
 
   // DevTools detection
   const { detectionCount: devToolsCount } = useDevToolsDetection();
@@ -598,19 +522,6 @@ export function InterviewPage() {
             if (result.status === 'rejected') console.error('A recording could not be finalised:', result.reason);
           });
         });
-
-        // Tell the paired phone to switch its camera off. Without this it
-        // kept filming an interview that had finished, and the candidate was
-        // left holding a page that still said "Live Proctoring".
-        if (mobileToken) {
-          try {
-            interviewWsService.send(`/app/mobile/ended/${mobileToken}`, { status: 'ended' });
-          } catch {
-            // The socket may already be closing. The phone releases the camera
-            // when the page closes anyway; this is the tidy path, not the only
-            // one.
-          }
-        }
 
         // The submission itself. Bounded (the call retries internally, so this
         // allows for that): a slow reply must not hold the candidate on this
@@ -823,7 +734,6 @@ export function InterviewPage() {
     };
     show(videoRef.current, recorderStream, false);
     show(screenPreviewRef.current, screenStream, true);
-    show(mobileVideoRef.current, remoteStream, false);
   });
 
   // Screen-share preview. Cleared as well as set: a stopped share otherwise
@@ -846,7 +756,6 @@ export function InterviewPage() {
       if (videoRef.current?.srcObject) {
         (videoRef.current.srcObject as MediaStream).getTracks().forEach(t => t.stop());
       }
-      if (peerConnectionRef.current) peerConnectionRef.current.close();
     };
   }, []);
 
@@ -948,11 +857,8 @@ export function InterviewPage() {
   /**
    * The phone's verification, read from the server.
    *
-   * The live socket used to be the only way the desktop learned the phone had passed its room scan, so a
-   * message that went astray left the phone saying "Verified" and this page still asking the candidate to
-   * pair, with Begin shut. The scan is now on the server's record, and this asks for it every few seconds
-   * until it appears. The socket still brings the live picture; it no longer decides whether the candidate
-   * can start.
+   * There is no live connection to the phone any more, so this is the only way the page learns that the phone has
+   * been scanned and that its room scan is done: it asks the server every few seconds until both are on record.
    */
   useEffect(() => {
     if (!interview?.id || !mobileToken || mobileVerified || mobileSkipped) return;
@@ -960,7 +866,10 @@ export function InterviewPage() {
     const check = async () => {
       try {
         const res = await interviewService.getMobilePairingState(interview.id, mobileToken);
-        if (!cancelled && res.data?.verified) {
+        if (cancelled) return;
+        // Scanned and on the page, but the room scan is not done yet.
+        if (res.data?.connected) setMobileConnected(true);
+        if (res.data?.verified) {
           setMobileConnected(true);
           setMobileVerified(true);
           showToast(MESSAGES.interview.mobileVerified, 'success');
@@ -988,157 +897,6 @@ export function InterviewPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [interview?.id, mobileToken, mobileVerified, mobileSkipped]);
-
-  // 2. Connect WebSocket and register desktop
-  useEffect(() => {
-    const token = mobileToken;
-    if (!token) return;
-
-    interviewWsService.connect({
-      mobileToken: token,
-      onConnect: () => {
-        console.log('Desktop WS connected with mobileToken');
-        setWsConnected(true);
-        interviewWsService.send('/app/desktop/register', { token });
-      },
-      onDisconnect: () => {
-        console.log('Desktop WebSocket disconnected');
-        setWsConnected(false);
-      },
-    });
-
-    return () => {
-      interviewWsService.disconnect();
-    };
-  }, [mobileToken]);
-
-  // 3. WebRTC peer connection (only ONE)
-  useEffect(() => {
-    const token = mobileToken;
-    if (!token) return;
-
-    const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
-    peerConnectionRef.current = pc;
-
-    pc.ontrack = (event) => {
-      console.log('Mobile track received', event.track.kind, event.streams[0]);
-      if (event.streams[0]) {
-        setRemoteStream(event.streams[0]);
-        setMobileConnected(true);
-      }
-      // Tracked separately because the stream object is the same one on both
-      // the video and the audio track's arrival — React sees no change, so
-      // reading getAudioTracks() off it during render would never update.
-      if (event.track.kind === 'audio') {
-        setMobileAudioAvailable(true);
-        event.track.addEventListener('ended', () => setMobileAudioAvailable(false));
-      }
-    };
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        console.log('Desktop sending ICE candidate to mobile');
-        interviewWsService.send('/app/mobile/ice/' + token, { candidate: event.candidate, target: 'mobile' });
-      }
-    };
-
-    return () => {
-      pc.close();
-    };
-  }, [mobileToken]);
-
-  // 4. Subscriptions for Mobile
-  useEffect(() => {
-    const token = mobileToken;
-    const pc = peerConnectionRef.current;
-    const isReady = token && pc && (wsConnected || voiceInterview.isWsConnected);
-
-    if (!isReady) return;
-
-    console.log('Setting up/refreshing mobile signaling subscriptions on desktop. WS Connected:', { local: wsConnected, global: voiceInterview.isWsConnected });
-
-    const handleOffer = (offer: RTCSessionDescriptionInit) => {
-      console.log('Received WebRTC offer from mobile', offer);
-      pc.setRemoteDescription(new RTCSessionDescription(offer))
-        .then(() => pc.createAnswer())
-        .then(answer => pc.setLocalDescription(answer))
-        .then(() => {
-          console.log('Sending WebRTC answer to mobile');
-          interviewWsService.send('/app/mobile/answer/' + token, pc.localDescription);
-        })
-        .catch(err => console.error('Error handling WebRTC offer:', err));
-    };
-    const handleIce = (data: { candidate: RTCIceCandidateInit; target: string }) => {
-      if (data.target === 'desktop' && data.candidate) {
-        console.log('Adding ICE candidate from mobile');
-        pc.addIceCandidate(new RTCIceCandidate(data.candidate))
-          .catch(err => console.error('Error adding ICE candidate:', err));
-      }
-    };
-
-    const handleReady = () => {
-      console.log('Mobile device reported ready');
-      setMobileConnected(true);
-    };
-    const handleVerified = () => {
-      setMobileVerified(true);
-      showToast(MESSAGES.interview.mobileVerified, 'success');
-    };
-    const handleWarning = (warning: { type: string; reason: string }) => {
-      showToast(MESSAGES.interview.proctoringWarning(warning.reason), 'error');
-      voiceInterview.sendProctoringEvent('mobile_malpractice', warning.reason);
-    };
-
-    interviewWsService.subscribe('/user/queue/mobile/offer', handleOffer);
-    interviewWsService.subscribe('/user/queue/mobile/ice', handleIce);
-    interviewWsService.subscribe('/user/queue/mobile/ready', handleReady);
-    interviewWsService.subscribe('/user/queue/mobile/verified', handleVerified);
-    interviewWsService.subscribe('/user/queue/mobile/warning', handleWarning);
-
-    // Re-register desktop to the token-session map on backend
-    interviewWsService.send('/app/desktop/register', { token });
-
-    // Signal to mobile that we are ready to receive stream
-    const timeout = setTimeout(() => {
-      console.log('Sending ready signal to mobile');
-      interviewWsService.send('/app/mobile/ready/' + token, { status: 'ready' });
-    }, 1000);
-
-    return () => {
-      clearTimeout(timeout);
-      interviewWsService.unsubscribe('/user/queue/mobile/offer');
-      interviewWsService.unsubscribe('/user/queue/mobile/ice');
-      interviewWsService.unsubscribe('/user/queue/mobile/ready');
-      interviewWsService.unsubscribe('/user/queue/mobile/verified');
-      interviewWsService.unsubscribe('/user/queue/mobile/warning');
-    };
-  }, [mobileToken, wsConnected, voiceInterview.isWsConnected]);
-
-  /**
-   * Point the recorder at whichever microphone the candidate picked.
-   *
-   * Also the recovery path: if the phone drops mid-interview,
-   * `mobileAudioAvailable` goes false and this hands the recorder back to the
-   * device microphone before the next answer, rather than letting them speak
-   * into a track that has ended.
-   */
-  useEffect(() => {
-    const usePhone = micSource === 'phone' && mobileAudioAvailable && remoteStream;
-    voiceInterview.setExternalAudioSource(usePhone ? remoteStream : null);
-  }, [micSource, mobileAudioAvailable, remoteStream, voiceInterview.setExternalAudioSource]);
-
-  // Effect to attach mobile stream when connected and video ref is available
-  useEffect(() => {
-    if (remoteStream && mobileVideoRef.current) {
-      console.log('Attaching mobile stream to video element');
-      mobileVideoRef.current.srcObject = remoteStream;
-
-      // Ensure the video plays
-      mobileVideoRef.current.play().catch(err => {
-        console.warn('Auto-play failed for mobile video:', err);
-      });
-    }
-  }, [remoteStream, mobileConnected, sidebarShown]);
 
   const getMobileBaseUrl = () => {
     // Use environment variable or fallback to window.location.origin (for desktop)
@@ -1220,10 +978,6 @@ export function InterviewPage() {
       }
       setMobileVerified(true);
       showToast(MESSAGES.interview.proceedingWithoutRoom, 'info');
-    }
-
-    if (wsConnected) {
-      interviewWsService.disconnect(); // disconnect mobile pairing WS
     }
 
     stopInstruction();
@@ -2029,66 +1783,29 @@ export function InterviewPage() {
           </div>
           )}
 
-          {/* The phone, as a status. Its live picture was shown here and did not reliably appear, so it is
-              not shown: the phone records and uploads on its own, and nothing is lost by not watching it.
-              The video element stays, out of sight, because the room check and the microphone choice read
-              from the stream it holds. */}
+          {/* The phone, as a status. There is no live picture: the phone records and uploads on its own, and keeps a
+              photo only when a second person, or nobody, is in its view. */}
           <div className="p-3 rounded-xl bg-[var(--surface1)] border border-[var(--border)]">
             <h3 className="text-xs font-bold text-[var(--textSecondary)] uppercase tracking-wider mb-2 flex items-center justify-between">
               Phone camera
-              {mobileConnected && <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />}
+              {mobileVerified && <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />}
             </h3>
-            <video
-              ref={mobileVideoRef}
-              autoPlay
-              playsInline
-              muted
-              className="absolute h-px w-px opacity-0 pointer-events-none"
-              aria-hidden="true"
-            />
             <div className="flex items-center gap-2 text-sm">
               <Smartphone
                 size={18}
-                className={mobileConnected ? 'flex-shrink-0 text-emerald-500' : 'flex-shrink-0 text-[var(--textTertiary)]'}
+                className={mobileVerified ? 'flex-shrink-0 text-emerald-500' : 'flex-shrink-0 text-[var(--textTertiary)]'}
               />
-              <p className={mobileConnected ? 'font-medium text-emerald-600 dark:text-emerald-400' : 'text-[var(--textSecondary)]'}>
-                {mobileConnected
+              <p className={mobileVerified ? 'font-medium text-emerald-600 dark:text-emerald-400' : 'text-[var(--textSecondary)]'}>
+                {mobileVerified && !mobileSkipped
                   ? 'Connected and recording'
                   : mobileSkipped
                     ? 'Skipped — not recording'
-                    : 'Waiting for the phone…'}
+                    : mobileConnected
+                      ? 'Connected'
+                      : 'Waiting for the phone…'}
               </p>
             </div>
 
-            {/* Offered only once the phone's microphone has actually arrived —
-                a control for a source that is not there yet is a control that
-                does nothing when pressed. Disabled mid-answer because the swap
-                lands on the next recording, and a switch that silently takes
-                effect later reads as a switch that failed. */}
-            {mobileAudioAvailable && (
-              <div className="mt-2 flex items-center justify-between gap-2 rounded-lg bg-[var(--surface1)] px-2 py-1.5">
-                <span className="text-xs font-medium text-[var(--textSecondary)]">
-                  Microphone
-                </span>
-                <div className="flex items-center gap-1">
-                  {(['device', 'phone'] as const).map((source) => (
-                    <button
-                      key={source}
-                      type="button"
-                      disabled={voiceInterview.isRecording}
-                      onClick={() => setMicSource(source)}
-                      className={`rounded-md px-2 py-0.5 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                        micSource === source
-                          ? 'bg-[var(--primary)] text-white'
-                          : 'text-[var(--textSecondary)] hover:bg-[var(--surface2)]'
-                      }`}
-                    >
-                      {source === 'device' ? 'This device' : 'Phone'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
 
           {/* The counters that used to live here — face warnings, fullscreen

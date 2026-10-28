@@ -39,6 +39,13 @@ export const mobileUploadService = {
     }
   },
 
+  /** A photo taken because a second person, or no one, was in the phone's view. Kept for the reviewer. */
+  async proctorCapture(token: string, reason: 'EXTRA_PERSON' | 'NO_CANDIDATE', photo: Blob): Promise<void> {
+    const form = new FormData();
+    form.append('photo', photo, `${reason.toLowerCase()}.jpg`);
+    await http().post('/api/mobile/proctor-capture', form, { params: { token, reason }, timeout: 60_000 });
+  },
+
   /** The room scan photos, saved with the interview. The server does not judge them; a reviewer looks. */
   async roomScan(token: string, photos: Blob[]): Promise<void> {
     const form = new FormData();
