@@ -104,6 +104,11 @@ const PROMPT_TABS: PromptTab[] = [
   },
 ];
 
+/** The parts of the categories that are saved, as one string to compare with. */
+function categoriesKey(list: Array<{ categoryName: string; weight: number; description?: string | null }>): string {
+  return JSON.stringify(list.map((c) => [c.categoryName, c.weight, c.description ?? '']));
+}
+
 export function JobPromptPage() {
   const { showToast } = useToast();
   const location = useLocation();
@@ -150,6 +155,11 @@ export function JobPromptPage() {
   // Combined interview save state + existing prompt tracking
   const [savingInterview, setSavingInterview] = useState(false);
   const [existingPromptKeys, setExistingPromptKeys] = useState<Set<string>>(new Set());
+  // What is saved on the server, as last loaded or saved here. The save buttons stay off until the editor differs
+  // from it, so pressing one always means something changed.
+  const [savedContents, setSavedContents] = useState<Record<string, string>>({});
+  const [savedEvaluation, setSavedEvaluation] = useState('');
+  const [savedCategoriesJson, setSavedCategoriesJson] = useState('');
 
   useEffect(() => {
     fetchJobs();
@@ -232,10 +242,12 @@ export function JobPromptPage() {
         contents[tab.key] = match?.prompt ?? '';
       }
       setPromptContents(contents);
+      setSavedContents(contents);
 
       // Extract INTERVIEW/SUMMARY prompt into evaluation instructions
       const summaryMatch = prompts.find((p) => p.promptType === 'INTERVIEW' && p.promptStage === 'SUMMARY');
       setEvaluationInstructions(summaryMatch?.prompt ?? '');
+      setSavedEvaluation(summaryMatch?.prompt ?? '');
 
       // Track which prompts already exist (for Save vs Update label)
       const keys = new Set<string>();
@@ -246,7 +258,9 @@ export function JobPromptPage() {
       setExistingPromptKeys(keys);
     } catch {
       setPromptContents({});
+      setSavedContents({});
       setEvaluationInstructions('');
+      setSavedEvaluation('');
       setExistingPromptKeys(new Set());
     } finally {
       setLoadingPrompt(false);
@@ -260,17 +274,21 @@ export function JobPromptPage() {
       const res = await promptService.getEvaluationCategories(selectedPrefix);
       const data = res.data ?? [];
       if (data.length > 0) {
-        setCategories(data.map(({ categoryName, weight, description, id }) => ({
+        const loaded = data.map(({ categoryName, weight, description, id }) => ({
           id,
           categoryName,
           weight,
           description,
-        })));
+        }));
+        setCategories(loaded);
+        setSavedCategoriesJson(categoriesKey(loaded));
       } else {
         setCategories([...DEFAULT_CATEGORIES]);
+        setSavedCategoriesJson(categoriesKey(DEFAULT_CATEGORIES));
       }
     } catch {
       setCategories([...DEFAULT_CATEGORIES]);
+      setSavedCategoriesJson(categoriesKey(DEFAULT_CATEGORIES));
     } finally {
       setLoadingCategories(false);
     }
@@ -368,6 +386,7 @@ export function JobPromptPage() {
       );
       showToast(MESSAGES.admin.prompts.promptSaved(tab.label), 'success');
       setExistingPromptKeys((prev) => new Set([...prev, activeTab]));
+      setSavedContents((prev) => ({ ...prev, [activeTab]: content }));
     } catch (err) {
       // Pass the server's reason through when it has one — "prompt too long" or
       // "job not found" are actionable in a way "please try again" is not.
@@ -444,6 +463,9 @@ export function JobPromptPage() {
       if (failed.length === 0) {
         showToast(MESSAGES.admin.prompts.interviewSaved, 'success');
         setExistingPromptKeys((prev) => new Set([...prev, 'interview-start']));
+        setSavedContents((prev) => ({ ...prev, 'interview-start': startPrompt }));
+        setSavedEvaluation(evaluationInstructions);
+        setSavedCategoriesJson(categoriesKey(categories));
       } else if (failed.length === labels.length) {
         showToast(MESSAGES.admin.prompts.interviewSaveFailed, 'error');
       } else {
@@ -473,6 +495,11 @@ export function JobPromptPage() {
 
   const totalWeight = categories.reduce((sum, c) => sum + c.weight, 0);
   const currentTab = PROMPT_TABS.find((t) => t.key === activeTab)!;
+  const promptChanged = (promptContents[activeTab] ?? '') !== (savedContents[activeTab] ?? '');
+  const interviewChanged =
+    (promptContents['interview-start'] ?? '') !== (savedContents['interview-start'] ?? '') ||
+    evaluationInstructions !== savedEvaluation ||
+    categoriesKey(categories) !== savedCategoriesJson;
 
   const jobOptions = [
     { value: '', label: 'Select a job' },
@@ -723,6 +750,7 @@ export function JobPromptPage() {
                         <Button
                           onClick={handleSave}
                           isLoading={saving}
+                          disabled={!promptChanged}
                           leftIcon={!saving ? <Save size={16} /> : undefined}
                         >
                           {existingPromptKeys.has(activeTab) ? 'Update' : 'Save'} {currentTab.label} Prompt
@@ -897,7 +925,7 @@ export function JobPromptPage() {
                     onClick={handleSaveInterview}
                     isLoading={savingInterview}
                     leftIcon={!savingInterview ? <Save size={16} /> : undefined}
-                    disabled={totalWeight !== 100}
+                    disabled={totalWeight !== 100 || !interviewChanged}
                   >
                     {existingPromptKeys.has('interview-start') ? 'Update' : 'Save'} Interview Prompt
                   </Button>
