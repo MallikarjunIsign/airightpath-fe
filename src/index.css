@@ -22,6 +22,10 @@
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
     scroll-behavior: smooth;
+    /* Always leave room for the page scrollbar. The top bar is fixed to the right edge of the window, so on a
+       page short enough to need no scrollbar it sat 15px further right than on a long one, and the bar's icons
+       and the page jumped sideways whenever the candidate or admin moved between the two. */
+    scrollbar-gutter: stable;
   }
 
   body {
