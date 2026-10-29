@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Smartphone, Loader2, ImageOff, ScanLine } from 'lucide-react';
+import { Smartphone, Loader2, ImageOff, ScanLine, ChevronLeft, ChevronRight, Download } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Modal } from '@/components/ui/Modal';
 import { interviewService } from '@/services/interview.service';
@@ -22,7 +22,8 @@ const ALERTS_SHOWN = 4;
 export function MobileCaptures({ scheduleId }: Readonly<{ scheduleId: number }>) {
   const [captures, setCaptures] = useState<MobileCapture[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState<{ capture: MobileCapture; url: string } | null>(null);
+  const [gallery, setGallery] = useState<{ items: MobileCapture[]; index: number } | null>(null);
+  const images = useImageCache();
   const [showAllAlerts, setShowAllAlerts] = useState(false);
 
   useEffect(() => {
@@ -96,7 +97,7 @@ export function MobileCaptures({ scheduleId }: Readonly<{ scheduleId: number }>)
                 {shownAlerts.map((capture) => (
                   <li key={capture.id} className="flex items-center gap-3 rounded-lg border border-[var(--border)] p-2">
                     <div className="w-32 flex-shrink-0">
-                      <Thumb capture={capture} onOpen={(url) => setOpen({ capture, url })} />
+                      <Thumb capture={capture} images={images} onOpen={() => setGallery({ items: alerts, index: alerts.indexOf(capture) })} />
                     </div>
                     <div className="min-w-0">
                       <p className="text-sm font-semibold text-[var(--text)]">
@@ -130,8 +131,8 @@ export function MobileCaptures({ scheduleId }: Readonly<{ scheduleId: number }>)
               Room scan ({room.length} {room.length === 1 ? 'frame' : 'frames'})
             </p>
             <div className="flex gap-2.5 overflow-x-auto pb-1">
-              {room.map((capture) => (
-                <Thumb key={capture.id} capture={capture} compact onOpen={(url) => setOpen({ capture, url })} />
+              {room.map((capture, index) => (
+                <Thumb key={capture.id} capture={capture} images={images} compact onOpen={() => setGallery({ items: room, index })} />
               ))}
             </div>
           </div>
@@ -143,22 +144,20 @@ export function MobileCaptures({ scheduleId }: Readonly<{ scheduleId: number }>)
               Earlier periodic photos ({periodic.length}) — no longer taken
             </summary>
             <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
-              {periodic.map((capture) => (
-                <Thumb key={capture.id} capture={capture} onOpen={(url) => setOpen({ capture, url })} />
+              {periodic.map((capture, index) => (
+                <Thumb key={capture.id} capture={capture} images={images} onOpen={() => setGallery({ items: periodic, index })} />
               ))}
             </div>
           </details>
         )}
       </CardContent>
 
-      <Modal
-        isOpen={open !== null}
-        onClose={() => setOpen(null)}
-        title={open ? captureTitle(open.capture) : ''}
-        size="xl"
-      >
-        {open && <img src={open.url} alt={captureTitle(open.capture)} className="w-full rounded-lg" />}
-      </Modal>
+      <CaptureGallery
+        state={gallery}
+        images={images}
+        onNavigate={(index) => setGallery((prev) => (prev ? { ...prev, index } : prev))}
+        onClose={() => setGallery(null)}
+      />
     </Card>
   );
 }
@@ -179,9 +178,10 @@ function captureTitle(capture: MobileCapture): string {
 /** One still, fetched when it first scrolls into view. */
 function Thumb({
   capture,
+  images,
   onOpen,
   compact = false,
-}: Readonly<{ capture: MobileCapture; onOpen: (url: string) => void; compact?: boolean }>) {
+}: Readonly<{ capture: MobileCapture; images: ImageCache; onOpen: () => void; compact?: boolean }>) {
   const holder = useRef<HTMLButtonElement>(null);
   const [url, setUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -206,29 +206,25 @@ function Thumb({
   useEffect(() => {
     if (!wanted) return;
     let cancelled = false;
-    let created: string | null = null;
-    interviewService
-      .getMobileCaptureImage(capture.id)
-      .then((res) => {
-        if (cancelled) return;
-        created = URL.createObjectURL(res.data);
-        setUrl(created);
+    images
+      .load(capture.id)
+      .then((loaded) => {
+        if (!cancelled) setUrl(loaded);
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
       });
     return () => {
       cancelled = true;
-      if (created) URL.revokeObjectURL(created);
     };
-  }, [wanted, capture.id]);
+  }, [wanted, capture.id, images]);
 
   const time = capture.capturedAt ? new Date(capture.capturedAt).toLocaleTimeString() : '';
   return (
     <button
       ref={holder}
       type="button"
-      onClick={() => url && onOpen(url)}
+      onClick={() => url && onOpen()}
       disabled={!url}
       className={`group relative overflow-hidden bg-[var(--surface1)] ring-1 ring-[var(--border)] disabled:cursor-default ${compact ? 'h-20 w-24 flex-shrink-0 rounded-xl' : 'aspect-video rounded-lg'}`}
       title={time}
@@ -247,6 +243,194 @@ function Thumb({
       {time && (
         <span className="absolute bottom-0.5 right-1 rounded bg-black/60 px-1 text-[9px] text-white">{time}</span>
       )}
+    </button>
+  );
+}
+
+/** The images fetched so far, kept while the card is on screen so the viewer and the thumbnails share them. */
+interface ImageCache {
+  load: (id: number) => Promise<string>;
+}
+
+function useImageCache(): ImageCache {
+  const cache = useRef(new Map<number, Promise<string>>());
+  const [images] = useState<ImageCache>(() => ({
+    load: (id: number) => {
+      let pending = cache.current.get(id);
+      if (!pending) {
+        pending = interviewService.getMobileCaptureImage(id).then((res) => URL.createObjectURL(res.data));
+        // A failed fetch is forgotten, so opening it again tries again.
+        pending.catch(() => cache.current.delete(id));
+        cache.current.set(id, pending);
+      }
+      return pending;
+    },
+  }));
+  useEffect(() => {
+    const held = cache.current;
+    return () => {
+      held.forEach((pending) => void pending.then((url) => URL.revokeObjectURL(url)).catch(() => {}));
+      held.clear();
+    };
+  }, []);
+  return images;
+}
+
+/** Full-size viewer for a set of phone photos: previous and next, a strip to jump along, and a download. */
+function CaptureGallery({
+  state,
+  images,
+  onNavigate,
+  onClose,
+}: Readonly<{
+  state: { items: MobileCapture[]; index: number } | null;
+  images: ImageCache;
+  onNavigate: (index: number) => void;
+  onClose: () => void;
+}>) {
+  const items = state?.items ?? [];
+  const index = state?.index ?? 0;
+  const capture = items[index];
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (!capture) return;
+    let cancelled = false;
+    setUrl(null);
+    setFailed(false);
+    images
+      .load(capture.id)
+      .then((loaded) => {
+        if (!cancelled) setUrl(loaded);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [capture, images]);
+
+  useEffect(() => {
+    if (!state) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowLeft' && index > 0) onNavigate(index - 1);
+      if (event.key === 'ArrowRight' && index < items.length - 1) onNavigate(index + 1);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [state, index, items.length, onNavigate]);
+
+  if (!state || !capture) return null;
+
+  const sequence = items.length > 1;
+  const title = captureTitle(capture);
+
+  const download = () => {
+    if (!url) return;
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `phone-${capture.kind.toLowerCase().replace(/_/g, '-')}-${index + 1}.jpg`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  };
+
+  return (
+    <Modal isOpen onClose={onClose} title={sequence ? `${title}  ·  ${index + 1} of ${items.length}` : title} size="lg">
+      <div className="space-y-3">
+        <div className="relative flex min-h-48 items-center justify-center overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface1)]">
+          {url ? (
+            <img src={url} alt={title} className="max-h-[65vh] w-full object-contain" />
+          ) : failed ? (
+            <span className="flex flex-col items-center gap-1 py-12 text-sm text-[var(--textTertiary)]">
+              <ImageOff size={20} /> The image could not be loaded.
+            </span>
+          ) : (
+            <Loader2 size={20} className="my-12 animate-spin text-[var(--textTertiary)]" />
+          )}
+          {sequence && (
+            <>
+              <GalleryArrow side="left" disabled={index === 0} onClick={() => onNavigate(index - 1)} />
+              <GalleryArrow side="right" disabled={index === items.length - 1} onClick={() => onNavigate(index + 1)} />
+            </>
+          )}
+        </div>
+
+        {sequence && (
+          <div className="flex gap-1.5 overflow-x-auto pb-1">
+            {items.map((item, i) => (
+              <StripThumb key={item.id} capture={item} images={images} active={i === index} onClick={() => onNavigate(i)} />
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between gap-3 text-xs text-[var(--textSecondary)]">
+          <span>{capture.capturedAt ? `Captured ${new Date(capture.capturedAt).toLocaleString()}` : 'Capture time not recorded'}</span>
+          <button
+            type="button"
+            onClick={download}
+            disabled={!url}
+            className="inline-flex items-center gap-1.5 font-medium text-[var(--primary)] hover:underline disabled:opacity-50"
+          >
+            <Download size={13} />
+            Download image
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function StripThumb({
+  capture,
+  images,
+  active,
+  onClick,
+}: Readonly<{ capture: MobileCapture; images: ImageCache; active: boolean; onClick: () => void }>) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    images
+      .load(capture.id)
+      .then((loaded) => {
+        if (!cancelled) setUrl(loaded);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [capture.id, images]);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`h-12 w-16 flex-shrink-0 overflow-hidden rounded-lg border-2 transition-opacity ${
+        active ? 'border-[var(--primary)]' : 'border-transparent opacity-60 hover:opacity-100'
+      }`}
+    >
+      {url ? (
+        <img src={url} alt="" className="h-full w-full object-cover" />
+      ) : (
+        <span className="flex h-full w-full items-center justify-center bg-[var(--surface2)]">
+          <Loader2 size={12} className="animate-spin text-[var(--textTertiary)]" />
+        </span>
+      )}
+    </button>
+  );
+}
+
+function GalleryArrow({ side, disabled, onClick }: Readonly<{ side: 'left' | 'right'; disabled: boolean; onClick: () => void }>) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={side === 'left' ? 'Previous photo' : 'Next photo'}
+      className={`absolute top-1/2 -translate-y-1/2 ${side === 'left' ? 'left-2' : 'right-2'} rounded-full bg-black/55 p-2 text-white transition-opacity hover:bg-black/75 disabled:pointer-events-none disabled:opacity-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-white`}
+    >
+      {side === 'left' ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
     </button>
   );
 }

@@ -281,10 +281,10 @@ export function RecordingPlayerButton({
                 nothing was recorded, and that is exactly what they are
                 looking for. */}
             {parts > 1 && (
-              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-2 dark:border-amber-700/60 dark:bg-amber-900/20">
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-2.5">
                 <AlertTriangle size={14} className="shrink-0 text-amber-500" />
-                <span className="text-xs text-amber-800 dark:text-amber-200">
-                  Recorded in {parts} parts — sharing stopped and restarted during the interview.
+                <span className="min-w-0 flex-1 text-xs font-medium text-amber-900">
+                  Recorded in {parts} parts — the recording stopped and restarted during the interview.
                   Nothing was captured between them.
                 </span>
                 <div className="ml-auto flex flex-wrap gap-1">
@@ -297,7 +297,7 @@ export function RecordingPlayerButton({
                       className={`rounded px-2 py-1 text-xs font-semibold transition-colors disabled:opacity-60 ${
                         i === part
                           ? 'bg-amber-500 text-white'
-                          : 'bg-white text-amber-700 hover:bg-amber-100 dark:bg-amber-900/40 dark:text-amber-200 dark:hover:bg-amber-900/70'
+                          : 'bg-white text-amber-800 ring-1 ring-amber-300 hover:bg-amber-100'
                       }`}
                     >
                       Part {i + 1}

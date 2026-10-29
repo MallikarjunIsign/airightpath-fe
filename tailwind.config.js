@@ -1,5 +1,9 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  // The app puts a `dark` class on <html> (ThemeContext). Without this, every `dark:` utility followed the
+  // computer's own dark setting instead, so a light page on a dark-mode PC got dark-mode colours: pale text on a
+  // pale box, as in the recording banner.
+  darkMode: 'class',
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {

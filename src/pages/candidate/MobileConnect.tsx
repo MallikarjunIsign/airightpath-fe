@@ -36,6 +36,8 @@ export default function MobileConnect() {
      * its indicator lit, until the candidate thought to close the tab.
      */
     const streamRef = useRef<MediaStream | null>(null);
+    /** Bumped to open the camera again after the candidate exited and came back. */
+    const [cameraRestart, setCameraRestart] = useState(0);
 
     /**
      * Whether the candidate has read the recording notice and agreed to share
@@ -147,7 +149,7 @@ export default function MobileConnect() {
             setCaptureStream((current) => (current === stream ? null : current));
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [facingMode, consented]);
+    }, [facingMode, consented, cameraRestart]);
 
     // Keep the screen on while recording. A phone that dims and locks stops the
     // camera, and an interview's recording ended there.
@@ -336,7 +338,15 @@ export default function MobileConnect() {
         }
         shutDown();
         setFinished(reason);
-    }, [shutDown]);
+        if (reason === 'exited' && token) void mobileUploadService.sendEvent(token, 'mobile_exited', 'Candidate left phone proctoring');
+    }, [shutDown, token]);
+
+    /** Back in after an exit, without scanning the QR code or the room again. */
+    const reconnect = () => {
+        if (token) void mobileUploadService.sendEvent(token, 'mobile_reconnected', 'Candidate reconnected the phone');
+        setFinished(null);
+        setCameraRestart((n) => n + 1);
+    };
 
     useEffect(() => {
         return () => {
@@ -385,8 +395,16 @@ export default function MobileConnect() {
                                 : uploadStatus === 'none'
                                 ? 'Your camera is switched off. You can close this page.'
                                 : 'Your camera is switched off and your recording has been saved. You can close this page.'
-                            : 'Your camera has been switched off. Reopen the QR code on your computer if you need to pair again.'}
+                            : 'Your camera has been switched off. If this was a mistake, tap Reconnect: there is no need to scan the QR code again.'}
                     </p>
+                    {finished === 'exited' && (
+                        <button
+                            onClick={reconnect}
+                            className="mt-5 w-full rounded-xl bg-indigo-600 py-3 font-bold text-white shadow-lg active:scale-95"
+                        >
+                            Reconnect camera
+                        </button>
+                    )}
                     <p className="mt-4 text-xs text-gray-400">
                         {ended && (uploadStatus === 'uploading' || uploadStatus === 'not-sent')
                             ? 'Please do not close this tab yet.'

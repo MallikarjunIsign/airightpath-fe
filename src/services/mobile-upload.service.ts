@@ -108,7 +108,12 @@ export const mobileUploadService = {
   /** Say that the phone's recording started, could not start, or hit a problem. Never throws. */
   async sendEvent(
     token: string,
-    type: 'mobile_recording_started' | 'mobile_recording_not_started' | 'mobile_recording_issue',
+    type:
+      | 'mobile_recording_started'
+      | 'mobile_recording_not_started'
+      | 'mobile_recording_issue'
+      | 'mobile_exited'
+      | 'mobile_reconnected',
     details: string,
   ): Promise<void> {
     try {
