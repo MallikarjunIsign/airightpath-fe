@@ -116,7 +116,7 @@ export function InterviewListPage() {
                     </div>
                     <div className="flex items-center gap-2 text-sm text-[var(--textSecondary)]">
                       <Calendar size={14} />
-                      <span>Deadline: {formatDate(interview.deadlineTime)}</span>
+                      <span>Deadline: {interview.deadlineTime ? formatDate(interview.deadlineTime) : 'No deadline'}</span>
                     </div>
                     {interview.interviewResult !== 'PENDING' && (
                       <div className="flex items-center gap-2">

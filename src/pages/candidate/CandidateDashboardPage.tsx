@@ -274,7 +274,7 @@ export function CandidateDashboardPage() {
                   <div>
                     <p className="font-medium text-[var(--text)]">{interview.jobPrefix}</p>
                     <p className="text-sm text-[var(--textSecondary)]">
-                      Deadline: {formatDate(interview.deadlineTime)}
+                      Deadline: {interview.deadlineTime ? formatDate(interview.deadlineTime) : 'No deadline'}
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
