@@ -162,6 +162,7 @@ const memoryChunks = new Map<string, { key: number; blob: Blob }[]>();
 let memoryKey = 0;
 
 async function storeChunk(id: string, blob: Blob, meta: SessionMeta | undefined): Promise<void> {
+  if (discarded.has(id)) return;
   await openDb();
   if (dbUnavailable) {
     const rows = memoryChunks.get(id) ?? [];
@@ -196,6 +197,8 @@ async function readChunks(id: string): Promise<{ key: number; blob: Blob }[]> {
 // ── In-memory view of this page's work ────────────────────────────────────
 
 const metas = new Map<string, SessionMeta>();
+/** Sessions thrown away on purpose; nothing may be stored for them afterwards. */
+const discarded = new Set<string>();
 
 interface Stats {
   ok: number;
@@ -235,6 +238,16 @@ async function writeMeta(meta: SessionMeta) {
 }
 
 async function removeSession(id: string) {
+  // Forgotten in memory first, before the database delete is even queued. The last chunk of a recorder that has just
+  // been stopped arrives a moment later, finds the session still known, and writes the session record back into the
+  // store — an abandoned start (a share taken for an interview that never began) then sat there until a later page
+  // load found it, called it an orphan and uploaded it against the interview as a stray extra part.
+  metas.delete(id);
+  queuedIds.delete(id);
+  pumpChains.delete(id);
+  pumpQueued.delete(id);
+  backoffUntil.delete(id);
+  discarded.add(id);
   memoryChunks.delete(id);
   await io(
     (db) =>
@@ -252,11 +265,6 @@ async function removeSession(id: string) {
         };
       }),
   );
-  metas.delete(id);
-  queuedIds.delete(id);
-  pumpChains.delete(id);
-  pumpQueued.delete(id);
-  backoffUntil.delete(id);
 }
 
 // ── Sending ───────────────────────────────────────────────────────────────
