@@ -578,23 +578,26 @@ export function InterviewResultsPage() {
       {/* Job Selector */}
       <Card>
         <CardContent>
-          <div className="grid gap-4 sm:grid-cols-2 max-w-2xl">
-            <Select
-              label="Select Job"
-              options={jobOptions}
-              value={selectedPrefix}
-              onChange={(e) => setSelectedPrefix(e.target.value)}
-            />
-            <Select
-              label="Round"
-              options={ROUND_FILTER_OPTIONS}
-              value={roundFilter}
-              onChange={(e) => setRoundFilter(e.target.value as RoundFilter)}
-              disabled={!selectedPrefix}
-            />
-          </div>
-          {/* Submitted between. Each end is optional, so "everything since the 10th" needs only the one field. */}
-          <div className="mt-4 flex flex-wrap items-end gap-4">
+          {/* One row, like the assessment results: job, round and the submitted-between dates side by side, wrapping
+              only when the window is too narrow. Each date end is optional. */}
+          <div className="flex flex-wrap items-end gap-4">
+            <div className="w-full sm:w-72">
+              <Select
+                label="Select Job"
+                options={jobOptions}
+                value={selectedPrefix}
+                onChange={(e) => setSelectedPrefix(e.target.value)}
+              />
+            </div>
+            <div className="w-full sm:w-48">
+              <Select
+                label="Round"
+                options={ROUND_FILTER_OPTIONS}
+                value={roundFilter}
+                onChange={(e) => setRoundFilter(e.target.value as RoundFilter)}
+                disabled={!selectedPrefix}
+              />
+            </div>
             <div className="w-full sm:w-44">
               <Input
                 type="date"
