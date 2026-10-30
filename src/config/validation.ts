@@ -11,6 +11,12 @@ export const passwordSchema = z
   .regex(/^[A-Z]/, 'Password must start with an uppercase letter')
   .regex(/[!@#$%^&*(),.?":{}|<>]/, 'Password must contain at least one special character');
 
+/** A first or last name: letters, spaces, apostrophes, hyphens and full stops, starting with a letter. */
+const nameRule = /^\p{L}[\p{L}\p{M}\s'.-]*$/u;
+const NAME_MESSAGE = 'Use letters only (no numbers or symbols)';
+export const firstNameSchema = z.string().trim().min(1, 'First name is required').regex(nameRule, NAME_MESSAGE);
+export const lastNameSchema = z.string().trim().min(1, 'Last name is required').regex(nameRule, NAME_MESSAGE);
+
 export const mobileSchema = z
   .string()
   .min(1, 'Mobile number is required')
@@ -33,8 +39,8 @@ export const loginSchema = z.object({
 
 export const registerSchema = z
   .object({
-    firstName: z.string().min(1, 'First name is required'),
-    lastName: z.string().min(1, 'Last name is required'),
+    firstName: firstNameSchema,
+    lastName: lastNameSchema,
     email: emailSchema,
     mobileNumber: mobileSchema,
     password: passwordSchema,
@@ -144,8 +150,8 @@ export function jobEditSchema(originalDeadline?: string) {
 }
 
 export const jobApplicationSchema = z.object({
-  firstName: z.string().min(1, 'First name is required'),
-  lastName: z.string().min(1, 'Last name is required'),
+  firstName: firstNameSchema,
+  lastName: lastNameSchema,
   email: emailSchema,
   mobileNumber: mobileSchema,
   experience: z.string().min(1, 'Experience is required'),

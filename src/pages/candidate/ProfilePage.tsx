@@ -17,12 +17,13 @@ import { Modal } from '@/components/ui/Modal';
 import { mobileSchema } from '@/config/validation';
 import { ROUTES } from '@/config/routes';
 import { MESSAGES } from '@/config/messages';
-import { digitsOnly } from '@/utils/input.utils';
+import { digitsOnly, namesOnly } from '@/utils/input.utils';
+import { firstNameSchema, lastNameSchema } from '@/config/validation';
 import type { UsersDto } from '@/types/user.types';
 
 const profileSchema = z.object({
-  firstName: z.string().min(1, 'First name is required'),
-  lastName: z.string().min(1, 'Last name is required'),
+  firstName: firstNameSchema,
+  lastName: lastNameSchema,
   email: z.string().email(),
   mobileNumber: mobileSchema,
   alternativeMobileNumber: z
@@ -202,11 +203,14 @@ export function ProfilePage() {
               <Input
                 label="First Name"
                 {...register('firstName')}
+                // Letters only: a digit is dropped as it is typed, not reported after the form is sent.
+                onChange={(e) => setValue('firstName', namesOnly(e.target.value), { shouldValidate: true, shouldDirty: true })}
                 error={errors.firstName?.message}
               />
               <Input
                 label="Last Name"
                 {...register('lastName')}
+                onChange={(e) => setValue('lastName', namesOnly(e.target.value), { shouldValidate: true, shouldDirty: true })}
                 error={errors.lastName?.message}
               />
             </div>

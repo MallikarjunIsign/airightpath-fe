@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Video, Play, Calendar, Loader2 } from 'lucide-react';
+import { Video, Play, Calendar, CheckCircle2, Loader2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { interviewService } from '@/services/interview.service';
 import { Card, CardContent } from '@/components/ui/Card';
@@ -89,41 +89,45 @@ export function InterviewListPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {interviews.map((interview) => (
-            <Card key={interview.id} hover>
-              <CardContent>
-                <div className="space-y-4">
+            <Card key={interview.id} hover className="h-full">
+              <CardContent className="h-full">
+                {/* Every card is the same height and laid out the same way: the title and status on top, three
+                    detail rows (the result row is always there), and the button pinned to the bottom. They used to
+                    follow their content, so a long job name or a missing result row moved everything below it. */}
+                <div className="flex h-full flex-col gap-4">
                   {/* Header */}
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-purple-100 dark:bg-purple-900/30">
                         <Video className="w-5 h-5 text-purple-600 dark:text-purple-400" />
                       </div>
-                      <div>
-                        <h3 className="font-semibold text-[var(--text)]">{interview.jobPrefix}</h3>
+                      <div className="min-w-0">
+                        <h3 className="break-words font-semibold text-[var(--text)]" title={interview.jobPrefix}>
+                          {interview.jobPrefix}
+                        </h3>
                         <p className="text-xs text-[var(--textSecondary)]">AI Interview</p>
                       </div>
                     </div>
-                    {getStatusBadge(interview.attemptStatus)}
+                    <span className="flex-shrink-0 whitespace-nowrap">{getStatusBadge(interview.attemptStatus)}</span>
                   </div>
 
                   {/* Details */}
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-2 text-sm text-[var(--textSecondary)]">
-                      <Calendar size={14} />
+                  <div className="flex-1 space-y-2">
+                    <div className="flex min-h-6 items-center gap-2 text-sm text-[var(--textSecondary)]">
+                      <Calendar size={14} className="flex-shrink-0" />
                       <span>
                         {opensLater(interview) ? 'Opens' : 'Assigned'}: {formatDate(interview.assignedAt)}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2 text-sm text-[var(--textSecondary)]">
-                      <Calendar size={14} />
+                    <div className="flex min-h-6 items-center gap-2 text-sm text-[var(--textSecondary)]">
+                      <Calendar size={14} className="flex-shrink-0" />
                       <span>Deadline: {interview.deadlineTime ? formatDate(interview.deadlineTime) : 'No deadline'}</span>
                     </div>
-                    {interview.interviewResult !== 'PENDING' && (
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-[var(--textSecondary)]">Result:</span>
-                        {getResultBadge(interview.interviewResult)}
-                      </div>
-                    )}
+                    <div className="flex min-h-6 items-center gap-2 text-sm text-[var(--textSecondary)]">
+                      <CheckCircle2 size={14} className="flex-shrink-0" />
+                      <span>Result:</span>
+                      {getResultBadge(interview.interviewResult) ?? <span>—</span>}
+                    </div>
                   </div>
 
                   {/* Action */}
