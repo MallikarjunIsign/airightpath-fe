@@ -99,7 +99,9 @@ export function InterviewPage() {
       // The time for this question has run out with no answer. Move on, as a person interviewing would: whatever is
       // in the editor is submitted as the answer, and with nothing there the question is skipped, and the AI
       // acknowledges it and asks something else. The skip is counted, so a run of them is noticed and recorded.
-      setStillThereOpen(false);
+      // Nothing more is skipped while the "still there?" prompt is waiting on the candidate: that is how the count
+      // used to run past the limit (4/3) with the interview carrying on.
+      if (stillThereOpenRef.current) return;
       if (voiceInterview.codeContent.trim()) {
         showToast(MESSAGES.interview.answerTimeLimit, 'warning');
         void voiceInterview.submitAnswer();
@@ -110,14 +112,12 @@ export function InterviewPage() {
       voiceInterview.skipQuestion();
     },
     onMaxSkips: () => {
-      // Warned, not ended. This used to close the interview after three
-      // questions went unanswered — and the commonest reason for that is a
-      // microphone that is not working, which is the one case where taking
-      // the interview away is both the harshest outcome and the least
-      // deserved. A candidate thinking hard about three coding problems hit
-      // it too. The silence is recorded for the reviewer, who can see the
-      // transcript and judge it.
+      // Asked first, ended only if there is no reply. Closing straight away was too harsh — the commonest cause is a
+      // microphone that is not working — but doing nothing let the count run past the limit with the interview still
+      // going. Now the candidate is asked whether they are still there; if they confirm, the count restarts, and if
+      // the prompt goes unanswered the interview is closed. The silence is recorded for the reviewer either way.
       showToast(MESSAGES.interview.consecutiveUnanswered, 'warning');
+      openStillThere('no_response_after_skips');
       voiceInterview.sendProctoringEvent(
         'questions_unanswered',
         'Three consecutive questions passed without an answer',
@@ -174,6 +174,15 @@ export function InterviewPage() {
   const inactivityWarningShownRef = useRef(false);
   /** "Are you still there?" — a question, never a countdown to ending. */
   const [stillThereOpen, setStillThereOpen] = useState(false);
+  const [stillThereSeconds, setStillThereSeconds] = useState<number>(APP_CONFIG.INTERVIEW_STILL_THERE_SECONDS);
+  const stillThereOpenRef = useRef(false);
+  stillThereOpenRef.current = stillThereOpen;
+  const openStillThere = (cause: string) => {
+    stillThereCauseRef.current = cause;
+    setStillThereSeconds(APP_CONFIG.INTERVIEW_STILL_THERE_SECONDS);
+    setStillThereOpen(true);
+  };
+  const stillThereCauseRef = useRef('no_response');
   const runPostCompletionFlowRef = useRef<(skip: boolean) => void>(() => { });
 
   // Global timer
@@ -588,9 +597,31 @@ export function InterviewPage() {
       // and this used to end their interview after three minutes of it. An
       // interview now finishes only on a proctoring violation, on running out
       // of time, or because the candidate said they were done.
-      setStillThereOpen(true);
+      if (!stillThereOpenRef.current) openStillThere('inactivity');
     }, Math.max(APP_CONFIG.INTERVIEW_INACTIVITY_TIMEOUT_SECONDS, given + 120) * 1000);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clearInactivityTimers, showToast]);
+
+  // The "still there?" countdown. Unanswered, the interview is closed and submitted with what was said so far.
+  useEffect(() => {
+    if (!stillThereOpen) return;
+    const id = window.setInterval(() => {
+      setStillThereSeconds((prev) => (prev <= 1 ? 0 : prev - 1));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [stillThereOpen]);
+
+  useEffect(() => {
+    if (!stillThereOpen || stillThereSeconds > 0) return;
+    setStillThereOpen(false);
+    endCauseRef.current = stillThereCauseRef.current;
+    voiceInterview.sendProctoringEvent(
+      'candidate_unresponsive',
+      'Interview closed: the candidate did not respond to the "are you still there?" prompt',
+    );
+    runPostCompletionFlowRef.current(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stillThereOpen, stillThereSeconds]);
 
   useEffect(() => {
     // Restarted on every keystroke in the editor, because the code length is a
@@ -1217,6 +1248,9 @@ export function InterviewPage() {
         return 'The time allowed for this interview is over, so it was submitted automatically with your answers so far.';
       case 'candidate_ended':
         return 'You ended the interview, so it has been submitted with your answers so far.';
+      case 'no_response_after_skips':
+      case 'inactivity':
+        return 'We did not hear from you after several unanswered questions, so the interview was closed and submitted with your answers so far.';
       case null:
       case undefined:
         return 'Your interview has been submitted with your answers so far.';
@@ -1329,17 +1363,19 @@ export function InterviewPage() {
         </div>
       )}
 
-      {/* "Still there?" — shown after a long silence, and only ever asking.
-          Dismissing it restarts the check; nothing here ends the interview. */}
+      {/* "Still there?" — shown after a long silence or a run of skipped questions. Confirming carries on;
+          if it goes unanswered the interview is closed when the countdown reaches zero. It cannot be dismissed
+          any other way, so silence is never mistaken for an answer. */}
       <Modal
         isOpen={stillThereOpen}
-        onClose={() => setStillThereOpen(false)}
+        onClose={() => undefined}
         title="Are you still there?"
         size="sm"
         footer={
           <Button
             onClick={() => {
               setStillThereOpen(false);
+              questionTimer.resetSkipCounter();
               startInactivityTimers();
             }}
           >
@@ -1348,8 +1384,11 @@ export function InterviewPage() {
         }
       >
         <p className="text-sm text-[var(--textSecondary)]">
-          We have not heard anything for a few minutes. Your interview is still running and nothing
-          has been submitted — carry on when you are ready.
+          {stillThereCauseRef.current === 'no_response_after_skips'
+            ? 'Several questions in a row have gone unanswered.'
+            : 'We have not heard anything for a few minutes.'}{' '}
+          Please confirm you are still here. If we do not hear from you in{' '}
+          <strong>{stillThereSeconds}s</strong>, the interview will be closed and submitted with your answers so far.
         </p>
       </Modal>
 
