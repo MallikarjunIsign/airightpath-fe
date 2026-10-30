@@ -16,7 +16,7 @@ function useTabsContext() {
   return context;
 }
 
-interface TabGroupProps extends HTMLAttributes<HTMLDivElement> {
+interface TabGroupProps extends Omit<HTMLAttributes<HTMLDivElement>, 'onChange'> {
   defaultTab: string;
   children: ReactNode;
   onChange?: (tab: string) => void;

@@ -1,7 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { interviewWsService } from "@/services/interview-ws.service";
 import { aiService } from "@/services/ai.service";
-import { getAccessToken } from "@/services/api.service";
 import { APP_CONFIG } from "@/config/app.config";
 import { useAudioStreaming } from "./useAudioStreaming";
 import { useAudioPlayback } from "./useAudioPlayback";
@@ -507,17 +506,9 @@ export function useVoiceInterview() {
         }
 
         interviewWsService.disconnect();
-        // Connect WebSocket with both scheduleId and JWT token
-        const token = getAccessToken();
-
-        if (!token) {
-          console.error("❌ No JWT token found. WebSocket connection blocked.");
-          return;
-        }
-
+        // The session cookie travels on the handshake; nothing is passed in.
         interviewWsService.connect({
           scheduleId: response.scheduleId,
-          token: token, // REQUIRED
           email: request.email,
           mobileToken: request.mobileToken || undefined, 
       

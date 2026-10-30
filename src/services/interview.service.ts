@@ -280,16 +280,4 @@ export const interviewService = {
       ENDPOINTS.INTERVIEW_ADMIN.CONVERSATION(scheduleId),
     );
   },
-
-  verifyRoom(token: string, photo: File) {
-    const formData = new FormData();
-    formData.append("photo", photo);
-    return api.post<{ valid: boolean }>(
-      `/api/mobile/verify-room?token=${token}`,
-      formData,
-      {
-        headers: { "Content-Type": "multipart/form-data" },
-      },
-    );
-  },
 };

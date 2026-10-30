@@ -26,9 +26,15 @@ declare module 'axios' {
   // internal config, which extends this one.
   export interface AxiosRequestConfig {
     _skipErrorToast?: boolean;
+    /**
+     * Set by the startup check of "am I signed in?". A visitor who is not gets a 401 there, which is the answer
+     * and not a session that just died, so no "session expired" notice and no forced logout.
+     */
+    _silentAuth?: boolean;
   }
   export interface InternalAxiosRequestConfig {
     _skipErrorToast?: boolean;
+    _silentAuth?: boolean;
   }
 }
 

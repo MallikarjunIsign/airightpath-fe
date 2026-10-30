@@ -316,7 +316,9 @@ export function buildBankJson(questions: BankQuestion[], context: ExportContext)
     count: questions.length,
     totalInBank: context.totalInBank,
     // `raw` repeats what the other fields already say, and the id is the server's own.
-    questions: questions.map(({ raw: _raw, ...rest }) => rest),
+    questions: questions.map((question) =>
+      Object.fromEntries(Object.entries(question).filter(([key]) => key !== 'raw')),
+    ),
   };
   return new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
 }

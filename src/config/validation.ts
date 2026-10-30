@@ -106,7 +106,7 @@ export const jobPostSchema = z.object({
   // without one shows up unidentifiable.
   role: z.string().trim().min(1, 'Job role is required'),
   numberOfOpenings: z
-    .number({ invalid_type_error: 'Number of openings is required' })
+    .number({ error: 'Number of openings is required' })
     .int('Openings must be a whole number (no decimals)')
     .min(1, 'At least 1 opening is required')
     .max(100000, 'Number of openings looks too high'),

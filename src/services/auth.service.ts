@@ -10,7 +10,6 @@ import type {
   ValidateOtpRequest,
   UpdatePasswordRequest,
   ChangePasswordRequest,
-  AccessTokenData,
 } from "@/types/auth.types";
 
 export const authService = {
@@ -22,20 +21,16 @@ export const authService = {
     return api.post<ApiResponse<unknown>>(ENDPOINTS.AUTH.REGISTER, data);
   },
 
-  refresh() {
-    return api.post<ApiResponse<AccessTokenData>>(ENDPOINTS.AUTH.REFRESH, {}, {
-      _skipErrorToast: true,
-    } as never);
-  },
-
   logout() {
     return api.post(ENDPOINTS.AUTH.LOGOUT);
   },
 
   me() {
+    // The startup probe of "is there a signed-in session?". Silent on a 401: for a visitor that is the answer.
     return api.get<ApiResponse<MeResponse>>(ENDPOINTS.AUTH.ME, {
       _skipErrorToast: true,
-    } as never);
+      _silentAuth: true,
+    });
   },
 
   generateOtp(data: GenerateOtpRequest) {

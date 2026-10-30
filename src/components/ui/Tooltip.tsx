@@ -1,6 +1,6 @@
 import { HTMLAttributes, ReactNode, useState, useRef, useEffect } from 'react';
 
-interface TooltipProps extends HTMLAttributes<HTMLDivElement> {
+interface TooltipProps extends Omit<HTMLAttributes<HTMLDivElement>, 'content'> {
   content: ReactNode;
   position?: 'top' | 'bottom' | 'left' | 'right';
   delay?: number;

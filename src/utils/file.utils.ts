@@ -1,11 +1,11 @@
 import { APP_CONFIG } from '@/config/app.config';
 
 export function isValidResumeType(file: File): boolean {
-  return APP_CONFIG.SUPPORTED_RESUME_TYPES.includes(file.type);
+  return (APP_CONFIG.SUPPORTED_RESUME_TYPES as readonly string[]).includes(file.type);
 }
 
 export function isValidImageType(file: File): boolean {
-  return APP_CONFIG.SUPPORTED_IMAGE_TYPES.includes(file.type);
+  return (APP_CONFIG.SUPPORTED_IMAGE_TYPES as readonly string[]).includes(file.type);
 }
 
 export function isValidFileSize(file: File, maxBytes = APP_CONFIG.MAX_FILE_SIZE_BYTES): boolean {

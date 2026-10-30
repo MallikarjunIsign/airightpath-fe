@@ -1,7 +1,6 @@
 import { Client } from "@stomp/stompjs";
 import SockJS from "sockjs-client";
-import { getAccessToken, refreshAccessToken } from "./api.service";
-import { isJwtExpired } from "@/utils/jwt.utils";
+import { ensureFreshSession, isAuthRejection } from "./api.service";
 
 /**
  * Where SockJS should dial for the interview socket.
@@ -65,38 +64,16 @@ class InterviewWsService {
    * healthy socket.
    */
   private currentParams: string = "";
-  /** The non-credential half of the query, kept so each attempt can re-sign. */
+  /** Who and what this connection is for: the schedule, the email and the phone's pairing token. */
   private connectionParams: URLSearchParams = new URLSearchParams();
-  /**
-   * A token handed in by the caller, used until it expires.
-   *
-   * Cleared on expiry so later attempts fall back to the app's current token
-   * rather than pinning a stale one for the life of the connection.
-   */
-  private explicitToken: string | undefined;
 
   /** Pass null on teardown, so a dead component stops receiving socket errors. */
   /**
-   * This connection's URL, signed with the token available right now.
-   *
-   * SockJS keeps the query string when it appends its transport path, so
-   * `/ws?token=…` becomes `/ws/{server}/{session}/websocket?token=…` and the
-   * credential survives to the handshake.
+   * This connection's URL. It carries no credential: the session is an HttpOnly cookie, which the browser sends
+   * on the handshake by itself. (`mobileToken` is the phone's pairing token, not a login.)
    */
   private buildUrl(): string {
-    const params = new URLSearchParams(this.connectionParams);
-
-    const jwt =
-      this.explicitToken || getAccessToken() || localStorage.getItem("accessToken");
-    if (jwt) {
-      // Four spellings because the server has read different ones over time;
-      // the interceptor looks for `token`.
-      for (const key of ["token", "accessToken", "jwt", "access_token"]) {
-        params.append(key, jwt);
-      }
-    }
-
-    const query = params.toString();
+    const query = this.connectionParams.toString();
     return `${WS_BASE_URL}/ws${query ? `?${query}` : ""}`;
   }
 
@@ -106,7 +83,6 @@ class InterviewWsService {
 
   connect(options: {
     scheduleId?: number;
-    token?: string;
     email?: string;
     mobileToken?: string;
     onConnect?: () => void;
@@ -114,8 +90,7 @@ class InterviewWsService {
     /** Called on each drop, so the UI can hold the count in state. */
     onReconnectAttempt?: (attempt: number) => void;
   }) {
-    const { scheduleId, token, email, mobileToken, onConnect, onDisconnect, onReconnectAttempt } =
-      options;
+    const { scheduleId, email, mobileToken, onConnect, onDisconnect, onReconnectAttempt } = options;
 
     const params = new URLSearchParams();
     if (scheduleId) params.append("scheduleId", scheduleId.toString());
@@ -140,20 +115,27 @@ class InterviewWsService {
     this.currentParams = paramsStr;
     this.connectionParams = params;
     this.currentReconnectAttempts = 0;
-    this.explicitToken = token;
     console.log("Connecting to WebSocket. ScheduleId:", scheduleId);
 
     this.client = new Client({
-      // Built per attempt, not once. The handshake is authenticated by a JWT in
-      // the query string, and access tokens live 10 minutes while an interview
-      // runs for an hour — so a URL captured at connect time carries a
-      // credential that expires mid-session. Every stompjs retry then replayed
-      // the same dead token, the handshake answered 401, and the candidate sat
-      // under "Connection lost. Reconnecting..." that could never succeed.
       webSocketFactory: () => new SockJS(this.buildUrl()),
-      // Left empty on purpose: the browser cannot set headers on a WebSocket
-      // upgrade, so these never reached the server. The query string above is
-      // what the handshake interceptor actually reads.
+      // Runs before the first connect and before every retry. The socket is
+      // authenticated once, by the cookie on the handshake, and the access token
+      // lasts minutes while an interview runs for an hour. A retry that reused
+      // an expired cookie was turned away, and the candidate sat under
+      // "Connection lost. Reconnecting..." that could never succeed. So each
+      // attempt starts by making sure the session is fresh. A session the
+      // server has rejected sends the user to login, and stops the retries.
+      beforeConnect: async () => {
+        try {
+          await ensureFreshSession();
+        } catch (error) {
+          console.error("Could not refresh the session before connecting the socket", error);
+          if (isAuthRejection(error)) {
+            await this.client?.deactivate();
+          }
+        }
+      },
       connectHeaders: {},
       reconnectDelay: this.reconnectDelay,
       heartbeatIncoming: 4000,
@@ -173,19 +155,6 @@ class InterviewWsService {
         this.currentReconnectAttempts += 1;
         console.warn("WebSocket closed; retry", this.currentReconnectAttempts);
         if (onReconnectAttempt) onReconnectAttempt(this.currentReconnectAttempts);
-
-        // An expired access token is the one cause retrying cannot fix on its
-        // own, so spend the refresh cookie now and let the next attempt — two
-        // seconds later — sign itself with the new token. refreshAccessToken
-        // de-duplicates concurrent callers and no-ops while the token is still
-        // valid, so this is safe to call on every drop.
-        const current = this.explicitToken || getAccessToken();
-        if (!current || isJwtExpired(current)) {
-          this.explicitToken = undefined;
-          refreshAccessToken().catch((err) => {
-            console.error("Could not refresh the access token for the socket", err);
-          });
-        }
 
         if (onDisconnect) onDisconnect();
       },

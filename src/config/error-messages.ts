@@ -6,6 +6,11 @@ const ERROR_MESSAGES: Record<string, string> = {
   AUTH_INVALID_REFRESH: 'Your session has expired. Please sign in again.',
   AUTH_REFRESH_REUSE_DETECTED: 'For your security, this session has been terminated. Please sign in again.',
   AUTH_FORBIDDEN: "You don't have permission to do that.",
+  // Login and one-time codes are rate limited. The only remedy is to wait.
+  RATE_LIMITED: 'Too many attempts. Please wait a few minutes and try again.',
+  // Running code is its own permission, separate from being signed in.
+  COMPILER_FORBIDDEN:
+    "Your account doesn't have permission to run code. Please contact your administrator.",
   INTERNAL_ERROR: 'Something went wrong on our end. Please try again in a moment.',
   AI_SERVICE_ERROR: 'The AI service is temporarily unavailable. Please try again in a moment.',
   // Compiler host problems, not candidate mistakes — worded so nobody reads

@@ -14,7 +14,7 @@ interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
   label?: string;
   error?: string;
   helperText?: string;
-  options: { value: string; label: string }[];
+  options: readonly { value: string; label: string }[];
   /** Shown on the trigger when nothing is selected yet. */
   placeholder?: string;
   /**

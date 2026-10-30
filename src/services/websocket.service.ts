@@ -1,5 +1,5 @@
 import { ENV } from '@/config/env';
-import { getAccessToken } from './api.service';
+import { ensureFreshSession } from './api.service';
 
 type MessageHandler = (data: unknown) => void;
 
@@ -14,11 +14,18 @@ class WebSocketService {
   connect(): void {
     if (this.ws?.readyState === WebSocket.OPEN || this.isConnecting) return;
 
-    const token = getAccessToken();
-    if (!token) return;
-
     this.isConnecting = true;
-    const url = `${ENV.WS_URL}/ws?token=${encodeURIComponent(token)}`;
+    // The session cookie goes with the handshake; no credential is put in the URL. The session is made fresh
+    // first, because the socket authenticates only once, when it connects.
+    void ensureFreshSession()
+      .then(() => this.open())
+      .catch(() => {
+        this.isConnecting = false;
+      });
+  }
+
+  private open(): void {
+    const url = `${ENV.WS_URL}/ws`;
 
     try {
       this.ws = new WebSocket(url);

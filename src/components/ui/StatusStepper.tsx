@@ -14,12 +14,14 @@ interface StepConfig {
 
 const WORKFLOW_STEPS: StepConfig[] = [
   { key: 'APPLIED', label: 'Applied' },
+  { key: 'SHORTLISTED', label: 'Shortlisted' },
   { key: 'ACKNOWLEDGED', label: 'Acknowledged' },
-  { key: 'SCREENING', label: 'Screening' },
+  { key: 'ACKNOWLEDGED_BACK', label: 'Ack Back' },
   { key: 'RECONFIRMED', label: 'Reconfirmed' },
   { key: 'EXAM_SENT', label: 'Exam Sent' },
   { key: 'EXAM_COMPLETED', label: 'Exam Done' },
-  { key: 'INTERVIEW_SCHEDULED', label: 'Interview' },
+  { key: 'INTERVIEW_SCHEDULED', label: 'Interview Sent' },
+  { key: 'INTERVIEW_COMPLETED', label: 'Interview Done' },
 ];
 
 const TERMINAL_STEP_INDEX = WORKFLOW_STEPS.length;

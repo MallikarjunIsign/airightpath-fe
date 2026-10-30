@@ -14,8 +14,15 @@ export interface UserInfo {
   alternativeMobileNumber: string | null;
 }
 
+/**
+ * What login and refresh answer with.
+ *
+ * `accessToken` is only here because the server still sends it (its `returnTokenInBody` flag, to be turned off).
+ * Nothing reads it: the session is the cookie, and only `expiresIn` is used, to refresh ahead of expiry.
+ */
 export interface AccessTokenData {
-  accessToken: string;
+  /** @deprecated Do not read. The session is carried by an HttpOnly cookie. */
+  accessToken?: string;
   tokenType: string;
   expiresIn: number;
 }
