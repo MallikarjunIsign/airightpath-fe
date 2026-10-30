@@ -28,6 +28,8 @@ export interface InterviewExportInput {
   filters: {
     round: string;
     search?: string;
+    /** The submitted-between filter, already worded, when one is applied. */
+    submitted?: string;
   };
   generatedAt: Date;
   /**
@@ -84,6 +86,9 @@ function addSummarySheet(workbook: Workbook, input: InterviewExportInput): void 
   if (input.filters.search) {
     rows.splice(3, 0, ['Search filter', input.filters.search]);
   }
+  if (input.filters.submitted) {
+    rows.splice(3, 0, ['Submitted between', input.filters.submitted]);
+  }
   if (input.rows.length !== input.totalCandidates) {
     rows.push(['Note', 'This is a filtered view, not every candidate on the job.']);
   }
@@ -109,7 +114,7 @@ const RESULT_COLUMNS = [
   { header: 'Warnings', width: 10 },
   { header: 'Duration (min)', width: 14 },
   { header: 'Started', width: 18 },
-  { header: 'Ended', width: 18 },
+  { header: 'Submitted', width: 18 },
   { header: 'Deadline', width: 18 },
 ];
 
