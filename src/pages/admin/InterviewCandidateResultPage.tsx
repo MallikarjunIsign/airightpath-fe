@@ -32,6 +32,8 @@ import { InterviewReviewPanel } from '@/components/admin/InterviewReviewPanel';
 import { InterviewSubmissionInfo } from '@/components/admin/result/InterviewSubmissionInfo';
 import { interviewCompletionLabel } from '@/utils/interview-submission.utils';
 import { useToast } from '@/components/ui/Toast';
+import { jobApplicationService } from '@/services/job-application.service';
+import { getAppEmail } from '@/utils/application.utils';
 import { downloadBlob } from '@/utils/question-paper.utils';
 import {
   buildInterviewWorkbook,
@@ -238,12 +240,22 @@ export function InterviewCandidateResultPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
+  // The address as the candidate entered it. The one in the link is whatever the page that opened it passed, and
+  // several of those compare in lower case, so showing it as given printed "jane@x.com" for "Jane@X.com".
+  const [registeredEmail, setRegisteredEmail] = useState<string | null>(null);
+  const shownEmail = registeredEmail ?? email;
 
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const res = await interviewService.getResults(jobPrefix);
+      const [res, appsRes] = await Promise.all([
+        interviewService.getResults(jobPrefix),
+        jobApplicationService.getByPrefix(jobPrefix).catch(() => null),
+      ]);
+      const application = (appsRes?.data ?? []).find(
+        (app) => getAppEmail(app).toLowerCase() === email.toLowerCase(),
+      );
       const mine = (res.data ?? [])
         .filter((row) => row.email?.toLowerCase() === email.toLowerCase())
         .sort(
@@ -270,6 +282,8 @@ export function InterviewCandidateResultPage() {
         }),
       );
       setRounds(detailed);
+      // The application holds the address as it was entered; the interview row is the next best, and the link last.
+      setRegisteredEmail((application && getAppEmail(application)) || mine[0]?.email || null);
     } catch {
       setLoadError('This candidate\'s interview results could not be loaded.');
     } finally {
@@ -337,7 +351,7 @@ export function InterviewCandidateResultPage() {
           icon={<Users size={48} />}
           title={loadError ? 'Could not load results' : 'No interview rounds'}
           description={
-            loadError ?? `${email} has no interview rounds on ${jobPrefix}.`
+            loadError ?? `${shownEmail} has no interview rounds on ${jobPrefix}.`
           }
         />
       </div>
@@ -356,10 +370,10 @@ export function InterviewCandidateResultPage() {
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex min-w-0 items-center gap-4">
               <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-full bg-[var(--primary)] text-xl font-bold text-white">
-                {email.charAt(0).toUpperCase()}
+                {shownEmail.charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0">
-                <h1 className="break-all text-2xl font-bold text-[var(--text)]">{email}</h1>
+                <h1 className="break-all text-2xl font-bold text-[var(--text)]">{shownEmail}</h1>
                 <p className="mt-0.5 text-sm text-[var(--textSecondary)]">
                   Job: {jobPrefix}
                   <span className="mx-2 text-[var(--textTertiary)]">|</span>
