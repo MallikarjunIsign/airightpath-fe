@@ -28,6 +28,8 @@ import {
 } from '@/components/admin/InterviewResultRemoval';
 import { jobService } from '@/services/job.service';
 import { interviewService } from '@/services/interview.service';
+import { jobApplicationService } from '@/services/job-application.service';
+import { getAppEmail } from '@/utils/application.utils';
 import { usePersistentState } from '@/hooks/usePersistentState';
 import { useToast } from '@/components/ui/Toast';
 import { downloadBlob } from '@/utils/question-paper.utils';
@@ -377,6 +379,13 @@ export function InterviewResultsPage() {
   // persisted, for the same reason as the round filter.
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  // Each candidate's address as they registered it, by lower-cased address. The interview record can hold a
+  // different capitalisation (it is matched and stored in more than one place), so rows are shown from this.
+  const [registeredEmails, setRegisteredEmails] = useState<Map<string, string>>(new Map());
+  const emailOf = useCallback(
+    (row: { email: string }) => registeredEmails.get(row.email.toLowerCase()) ?? row.email,
+    [registeredEmails],
+  );
 
   useEffect(() => {
     fetchJobs();
@@ -431,10 +440,14 @@ export function InterviewResultsPage() {
     if (!selectedPrefix) return;
     setLoadingResults(true);
     try {
-      const res = await interviewService.getResults(selectedPrefix, roundOrUndefined, {
-        includeDeleted: showRemoved,
-      });
+      const [res, appsRes] = await Promise.all([
+        interviewService.getResults(selectedPrefix, roundOrUndefined, { includeDeleted: showRemoved }),
+        jobApplicationService.getByPrefix(selectedPrefix).catch(() => null),
+      ]);
       setInterviews(res.data ?? []);
+      setRegisteredEmails(
+        new Map((appsRes?.data ?? []).map((app) => [getAppEmail(app).toLowerCase(), getAppEmail(app)])),
+      );
     } catch {
       // Error toast auto-handled by interceptor
     } finally {
@@ -499,7 +512,7 @@ export function InterviewResultsPage() {
     // otherwise tell which interview the numbers came from.
     const headers = ['Email', 'Round', 'Status', 'Result', 'Completion Reason', 'Score', 'Warnings', 'Duration', 'Submitted', 'Assigned', 'Deadline'];
     const rows = interviews.map((i) => [
-      i.email,
+      emailOf(i),
       roundLabelOf(i),
       i.attemptStatus,
       i.interviewResult,
@@ -521,7 +534,7 @@ export function InterviewResultsPage() {
     link.download = `interview-results-${selectedPrefix}${roundSlug}-${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
     URL.revokeObjectURL(url);
-  }, [interviews, selectedPrefix, roundFilter]);
+  }, [interviews, selectedPrefix, roundFilter, emailOf]);
 
   /**
    * The same rows the table is showing, as a workbook.
@@ -537,7 +550,7 @@ export function InterviewResultsPage() {
       const input = {
         jobTitle: jobs.find((j) => j.jobPrefix === selectedPrefix)?.jobTitle ?? selectedPrefix,
         jobPrefix: selectedPrefix,
-        rows: interviews,
+        rows: interviews.map((row) => ({ ...row, email: emailOf(row) })),
         totalCandidates: allInterviews.length,
         filters: {
           round: roundFilter === 'ALL' ? 'All rounds' : INTERVIEW_ROUND_LABELS[roundFilter],
@@ -551,7 +564,7 @@ export function InterviewResultsPage() {
     } finally {
       setExportingExcel(false);
     }
-  }, [exportingExcel, interviews, allInterviews.length, jobs, selectedPrefix, roundFilter, dateFilterActive, dateFrom, dateTo, showToast]);
+  }, [exportingExcel, interviews, emailOf, allInterviews.length, jobs, selectedPrefix, roundFilter, dateFilterActive, dateFrom, dateTo, showToast]);
 
   const jobOptions = [
     { value: '', label: 'Select a job' },
@@ -805,7 +818,7 @@ export function InterviewResultsPage() {
                           onClick={() => openCandidateResult(interview.email)}
                           className="min-w-0 break-all text-left font-medium text-[var(--primary)] underline-offset-2 hover:underline"
                         >
-                          {interview.email}
+                          {emailOf(interview)}
                         </button>
                         <div className="flex-shrink-0">
                           <ScoreCell interview={interview} />
@@ -905,7 +918,7 @@ export function InterviewResultsPage() {
                               }`}
                               title="See this candidate's rounds"
                             >
-                              {interview.email}
+                              {emailOf(interview)}
                             </button>
                             {interview.deletedAt && (
                               <p className="mt-1 text-[11px] leading-snug text-red-600 dark:text-red-400">

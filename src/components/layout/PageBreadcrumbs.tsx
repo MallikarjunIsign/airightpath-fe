@@ -48,11 +48,16 @@ export function PageBreadcrumbs() {
   const segments = location.pathname.split('/').filter(Boolean);
   const crumbs = segments.map((segment, i) => {
     const path = '/' + segments.slice(0, i + 1).join('/');
+    // Decode first: a path segment like an email arrives percent-encoded.
+    const decoded = safeDecode(segment);
     return {
       label:
         SEGMENT_LABELS[segment.toLowerCase()] ??
-        // Decode first: a path segment like an email arrives percent-encoded.
-        safeDecode(segment).replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+        // An email is shown as it is. Title-casing treats the "." and "@" as word breaks and printed
+        // "Rohith.Mamidala@Isigntech.Com" for "rohith.mamidala@isigntech.com".
+        (decoded.includes('@')
+          ? decoded
+          : decoded.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())),
       path,
       isLast: i === segments.length - 1,
       isNavigable: NAVIGABLE_PATHS.has(path),
