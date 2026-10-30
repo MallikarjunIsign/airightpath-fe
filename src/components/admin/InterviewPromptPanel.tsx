@@ -5,7 +5,7 @@ import { useToast } from '@/components/ui/Toast';
 import { promptService } from '@/services/prompt.service';
 import { ROUTES } from '@/config/routes';
 import { INTERVIEW_ROUND_LABELS } from '@/types/interview.types';
-import type { InterviewRound, PromptRecord } from '@/types/interview.types';
+import type { DefaultPromptRecord, InterviewRound, PromptRecord } from '@/types/interview.types';
 
 /**
  * Prompt types, spelled as the server stores them.
@@ -21,8 +21,8 @@ const ROUND_PROMPT_TYPE: Record<InterviewRound, string> = {
 const SHARED_PROMPT_TYPE = 'INTERVIEW';
 const START_STAGE = 'START';
 
-/** Where the prompt an interview would actually use comes from. */
-type Source = 'round' | 'shared' | 'none';
+/** Where the prompt an interview would actually use comes from. `default` is the built-in one. */
+type Source = 'round' | 'shared' | 'default' | 'none';
 
 /**
  * The prompt a round will interview with, shown where the round is booked.
@@ -51,6 +51,7 @@ export function InterviewPromptPanel({
   const { showToast } = useToast();
 
   const [prompts, setPrompts] = useState<PromptRecord[]>([]);
+  const [defaults, setDefaults] = useState<DefaultPromptRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [draft, setDraft] = useState('');
@@ -64,6 +65,10 @@ export function InterviewPromptPanel({
       // report, not an error to toast.
       const res = await promptService.getByJob(jobPrefix, { silent: true });
       setPrompts(res.data ?? []);
+      // The built-in prompts, for a job that has none of its own. Best effort: without them the panel reports
+      // "none", as it did before defaults existed.
+      const builtIn = await promptService.getDefaults({ silent: true }).catch(() => null);
+      setDefaults(builtIn?.data ?? []);
     } catch {
       setPrompts([]);
     } finally {
@@ -90,8 +95,16 @@ export function InterviewPromptPanel({
     const shared = find(SHARED_PROMPT_TYPE);
     if (shared) return { source: 'shared' as Source, record: shared };
 
+    const builtIn = defaults.find(
+      (d) => d.promptType === ROUND_PROMPT_TYPE[round] && d.promptStage === START_STAGE,
+    );
+    if (builtIn) return { source: 'default' as Source, record: undefined, defaultText: builtIn.prompt };
+
     return { source: 'none' as Source, record: undefined };
-  }, [prompts, round]);
+  }, [prompts, defaults, round]);
+
+  /** What is in the box before anyone edits it: the saved prompt, else the built-in one. */
+  const baseline = resolved.record?.prompt ?? ('defaultText' in resolved ? resolved.defaultText : '') ?? '';
 
   useEffect(() => {
     onConfiguredChange?.(resolved.source !== 'none');
@@ -100,9 +113,9 @@ export function InterviewPromptPanel({
   // Reset the draft whenever the effective prompt changes, so switching round
   // cannot save one round's text over another's.
   useEffect(() => {
-    setDraft(resolved.record?.prompt ?? '');
+    setDraft(baseline);
     setExpanded(false);
-  }, [resolved.record?.id, resolved.record?.prompt]);
+  }, [resolved.record?.id, baseline]);
 
   const roundLabel = INTERVIEW_ROUND_LABELS[round];
 
@@ -222,7 +235,7 @@ export function InterviewPromptPanel({
             <Button
               size="sm"
               onClick={handleSave}
-              disabled={saving || !draft.trim() || draft === (resolved.record?.prompt ?? '')}
+              disabled={saving || !draft.trim() || draft === baseline}
               leftIcon={saving ? <Loader2 size={14} className="animate-spin" /> : undefined}
             >
               {saving ? 'Saving…' : `Save ${roundLabel} prompt`}
@@ -240,6 +253,8 @@ function headline(source: Source, roundLabel: string): string {
       return `${roundLabel} prompt is configured`;
     case 'shared':
       return 'Using the shared Interview prompt';
+    case 'default':
+      return `Using the built-in ${roundLabel} prompt`;
     default:
       return 'No interview prompt is configured for this job';
   }
@@ -251,6 +266,8 @@ function detail(source: Source, roundLabel: string): string {
       return 'This round has its own prompt, which is what the interviewer will use.';
     case 'shared':
       return `${roundLabel} has no prompt of its own, so it falls back to the shared Interview prompt.`;
+    case 'default':
+      return 'This job has no prompt of its own yet, so the interview runs on the built-in one. Open it to read or change it.';
     default:
       return 'Candidates will not be able to start this interview until a prompt is added.';
   }

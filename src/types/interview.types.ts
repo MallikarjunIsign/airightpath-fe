@@ -50,6 +50,13 @@ export interface EvaluationCategory {
 }
 
 /** A stored prompt for a job (aptitude/coding/interview stages). */
+/** A built-in prompt: what a job uses until it is given one of its own. `promptStage` is null for aptitude and coding. */
+export interface DefaultPromptRecord {
+  promptType: string;
+  promptStage: string | null;
+  prompt: string;
+}
+
 export interface PromptRecord {
   id: number;
   jobPrefix: string;

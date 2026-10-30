@@ -2,6 +2,7 @@ import api from './api.service';
 import { ENDPOINTS } from '@/config/api.endpoints';
 import type { ApiResponse } from '@/types/api.types';
 import type {
+  DefaultPromptRecord,
   PromptRecord,
   EvaluationCategory,
   InterviewRound,
@@ -43,6 +44,11 @@ export const promptService = {
       ENDPOINTS.PROMPTS.COPY,
       { fromJobPrefix, toJobPrefix },
     );
+  },
+
+  /** The built-in prompts, for showing what a job uses when it has none saved. */
+  getDefaults(opts?: SilentOpts) {
+    return api.get<DefaultPromptRecord[]>(ENDPOINTS.PROMPTS.DEFAULTS, silentConfig(opts));
   },
 
   /** All stored prompts for a job. */

@@ -195,6 +195,8 @@ export const ENDPOINTS = {
     GET_BY_JOB: (prefix: string) => `/api/prompts/${seg(prefix)}`,
     SAVE: "/api/prompts",
     JOBS_WITH_PROMPTS: "/api/prompts/jobs-with-prompts",
+    /** The built-in prompts a job uses until it has one of its own. */
+    DEFAULTS: "/api/prompts/defaults",
     COPY: "/api/prompts/copy",
     GET_EVALUATION_CATEGORIES: (prefix: string) =>
       `/api/prompts/evaluation-categories/${seg(prefix)}`,
